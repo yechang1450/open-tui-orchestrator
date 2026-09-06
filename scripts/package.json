@@ -1,0 +1,8 @@
+{
+    "name":  "open-tui-orchestrator",
+    "private":  true,
+    "version":  "0.2.0",
+    "dependencies":  {
+                         "@openai/codex-sdk":  "0.149.0"
+                     }
+}
