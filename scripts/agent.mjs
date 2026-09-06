@@ -1,7 +1,7 @@
-// agent.mjs —— Agent 抽象 + 本地 cache（v0.0.1 通用化骨架）
-// 说明：Codex 专属内容完整保留在 codex 适配器（orchestrate-sdk 内）；本模块只负责
-//      识别当前 agent（默认 codex）、探测其 CLI 是否可用，并把解析到的 agent 专属
-//      配置缓存到本地 `scripts/.agent-cache.json`（越用越快，避免重复探测）。
+// agent.mjs — Agent abstraction + local cache (generic host-agent detection)
+// 说明：本模块负责识别【发起对话的宿主 agent】，检测其 CLI，需要时自动安装，并把结果缓存到
+//      稳定家目录（.agent-cache.json）。通用本体：用什么 agent 调用，就用哪个 agent 的 CLI 弹窗。
+//      没有 CLI 形态的 agent -> 明确报“不支持”，绝不静默回退 codex。
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -9,33 +9,28 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-// 通用化：agent 配置缓存放到稳定家目录（ORCH_STATE_DIR / CODEX_HOME），绝不落到插件脚本目录
-// （插件目录会被 cachebuster 升级/重装整体清掉，且多用户/多设备下插件目录可能只读）。
+// 通用化：agent 配置缓存放稳定家目录（ORCH_STATE_DIR / CODEX_HOME），绝不落插件自身目录（会被 cachebuster 清掉）。
 // 优先 ORCH_STATE_DIR，其次 CODEX_HOME/orchestrator，最后回退 ~/.codex/orchestrator。
-// 关键：按需读取（调用时读 env），与 orchestrate-sdk 的 resolveCodexHome 一致——跨用户/跨宿主下
-// 即使 env 在 import 之后才被外部注入，也能取到正确路径，绝不固化于模块加载。
 function cacheDir() {
   return process.env.ORCH_STATE_DIR
     || (process.env.CODEX_HOME ? path.join(process.env.CODEX_HOME, 'orchestrator') : path.join(os.homedir(), '.codex', 'orchestrator'));
 }
 function cacheFile() { return path.join(cacheDir(), '.agent-cache.json'); }
 
-// agent 描述表：native=true 走内置（codex 用 @openai/codex-sdk）；其余为**占位**（探测/回退级别），
-// 未安装对应 CLI 时 detect 返回 false -> 不可用，编排器自动回退 codex（不报错）。
-// 甄别后的**市面主流编码终端 agent**：codex/claude/cursor/qwen/pi/zcode/aider/opencode。
-// （已移除易混的 gemini(与 google LLM 同名、2026 有迁移 Antigravity) 与 aichat(仅终端聊天工具、非编码 agent)。
-//  workbudy/codebuddy=腾讯、openclaw=agent gateway 等非纯 CLI 编码 agent，暂不作为可检测项。）
+// agent 描述表：native=true 走内置（codex 用 @openai/codex-sdk）；其余为外部 CLI。
+// hasCliForm=true => 有 CLI 形态（未装可自动装）；false => 无 CLI 形态（如 gemini/aichat/workbudy），不支持。
+// installCmd 仅在 hasCliForm 且 bin 缺失时执行；verified=true 表示作者实测过（codex/pi/openclaw）。
 export const AGENTS = {
-  codex: { id: 'codex', label: 'Codex CLI', detectBin: ['codex'], modelEnv: 'ORCH_MODEL', effortEnv: 'ORCH_EFFORT', completionMarker: '__ORCH_DONE__', native: true, verified: true },
-  claude: { id: 'claude', label: 'Claude Code', detectBin: ['claude'], modelEnv: 'ANTHROPIC_MODEL', effortEnv: 'ORCH_CLAUD_EFFORT', completionMarker: '__ORCH_DONE__', native: false },
-  opencode: { id: 'opencode', label: 'OpenCode', detectBin: ['opencode'], modelEnv: 'OPENCODE_MODEL', effortEnv: 'ORCH_OPENCODE_EFFORT', completionMarker: '__ORCH_DONE__', native: false },
-  cursor: { id: 'cursor', label: 'Cursor CLI', detectBin: ['cursor-agent', 'cursor'], modelEnv: 'CURSOR_MODEL', effortEnv: 'ORCH_CURSOR_EFFORT', completionMarker: '__ORCH_DONE__', native: false },
-  qwen: { id: 'qwen', label: 'Qwen Code', detectBin: ['qwen'], modelEnv: 'QWEN_MODEL', effortEnv: 'ORCH_QWEN_EFFORT', completionMarker: '__ORCH_DONE__', native: false },
-  pi: { id: 'pi', label: 'Pi (pi-coding-agent)', detectBin: ['pi'], modelEnv: 'PI_MODEL', effortEnv: 'ORCH_PI_EFFORT', completionMarker: '__ORCH_DONE__', native: false, verified: true },
-  zcode: { id: 'zcode', label: 'ZCode CLI', detectBin: ['zcode-cli', 'zcode'], modelEnv: 'ZCODE_MODEL', effortEnv: 'ORCH_ZCODE_EFFORT', completionMarker: '__ORCH_DONE__', native: false },
-  aider: { id: 'aider', label: 'Aider', detectBin: ['aider'], modelEnv: 'AIDER_MODEL', effortEnv: 'ORCH_AIDER_EFFORT', completionMarker: '__ORCH_DONE__', native: false },
-  codebuddy: { id: 'codebuddy', label: 'CodeBuddy (WorkBuddy)', detectBin: ['codebuddy'], modelEnv: 'CODEBUDDY_MODEL', effortEnv: 'ORCH_CODEBUDDY_EFFORT', completionMarker: '__ORCH_DONE__', native: false },
-  openclaw: { id: 'openclaw', label: 'OpenClaw (gateway)', detectBin: ['openclaw'], modelEnv: 'OPENCLAW_MODEL', effortEnv: 'ORCH_OPENCLAW_EFFORT', completionMarker: '__ORCH_DONE__', native: false, verified: true },
+  codex:    { id: 'codex',    label: 'Codex CLI',           detectBin: ['codex'],    procName: ['codex'],    modelEnv: 'ORCH_MODEL',    effortEnv: 'ORCH_EFFORT',    completionMarker: '__ORCH_DONE__', native: true,  verified: true,  hasCliForm: true,  installCmd: ['npm', 'install', '-g', '@openai/codex'] },
+  claude:   { id: 'claude',   label: 'Claude Code',         detectBin: ['claude'],   procName: ['claude'],   modelEnv: 'ANTHROPIC_MODEL', effortEnv: 'ORCH_CLAUD_EFFORT', completionMarker: '__ORCH_DONE__', native: false, verified: false, hasCliForm: true,  installCmd: ['npm', 'install', '-g', '@anthropic-ai/claude-code'] },
+  opencode: { id: 'opencode', label: 'OpenCode',            detectBin: ['opencode'], procName: ['opencode'], modelEnv: 'OPENCODE_MODEL', effortEnv: 'ORCH_OPENCODE_EFFORT', completionMarker: '__ORCH_DONE__', native: false, verified: false, hasCliForm: true,  installCmd: ['npm', 'install', '-g', 'opencode-ai'] },
+  cursor:   { id: 'cursor',   label: 'Cursor CLI',          detectBin: ['cursor-agent', 'cursor'], procName: ['cursor-agent', 'cursor'], modelEnv: 'CURSOR_MODEL', effortEnv: 'ORCH_CURSOR_EFFORT', completionMarker: '__ORCH_DONE__', native: false, verified: false, hasCliForm: true,  installCmd: ['npm', 'install', '-g', '@cursor-ai/cursor-agent'] },
+  qwen:     { id: 'qwen',     label: 'Qwen Code',           detectBin: ['qwen'],     procName: ['qwen'],     modelEnv: 'QWEN_MODEL',    effortEnv: 'ORCH_QWEN_EFFORT',    completionMarker: '__ORCH_DONE__', native: false, verified: false, hasCliForm: true,  installCmd: ['npm', 'install', '-g', '@qwen-code/cli'] },
+  pi:       { id: 'pi',       label: 'Pi (pi-coding-agent)', detectBin: ['pi'],     procName: ['pi'],       modelEnv: 'PI_MODEL',     effortEnv: 'ORCH_PI_EFFORT',     completionMarker: '__ORCH_DONE__', native: false, verified: true,  hasCliForm: true,  installCmd: ['npm', 'install', '-g', 'pi-coding-agent'] },
+  zcode:    { id: 'zcode',    label: 'ZCode CLI',           detectBin: ['zcode-cli', 'zcode'], procName: ['zcode-cli', 'zcode'], modelEnv: 'ZCODE_MODEL', effortEnv: 'ORCH_ZCODE_EFFORT', completionMarker: '__ORCH_DONE__', native: false, verified: false, hasCliForm: true,  installCmd: ['npm', 'install', '-g', '@zcode/cli'] },
+  aider:    { id: 'aider',    label: 'Aider',               detectBin: ['aider'],    procName: ['aider'],    modelEnv: 'AIDER_MODEL',  effortEnv: 'ORCH_AIDER_EFFORT',  completionMarker: '__ORCH_DONE__', native: false, verified: false, hasCliForm: true,  installCmd: ['pip', 'install', 'aider-chat'] },
+  codebuddy:{ id: 'codebuddy',label: 'CodeBuddy (WorkBuddy)', detectBin: ['codebuddy'], procName: ['codebuddy'], modelEnv: 'CODEBUDDY_MODEL', effortEnv: 'ORCH_CODEBUDDY_EFFORT', completionMarker: '__ORCH_DONE__', native: false, verified: false, hasCliForm: true,  installCmd: ['npm', 'install', '-g', 'codebuddy'] },
+  openclaw: { id: 'openclaw', label: 'OpenClaw (gateway)', detectBin: ['openclaw'], procName: ['openclaw'], modelEnv: 'OPENCLAW_MODEL', effortEnv: 'ORCH_OPENCLAW_EFFORT', completionMarker: '__ORCH_DONE__', native: false, verified: true,  hasCliForm: true,  installCmd: ['npm', 'install', '-g', 'openclaw'] },
 };
 
 function readCache() {
@@ -47,8 +42,6 @@ function writeCache(c) {
 
 function binAvailable(bin) {
   if (!bin) return false;
-  // 探测 agent CLI 是否可用：Windows 上 .ps1/.cmd shim（如 pi、openclaw）需经 shell 才能执行。
-  // 先 shell:false（原始可执行/直调），失败后按平台回退 shell:true（仅 win32），不破坏非 Windows 通用性。
   try {
     const attempt = (shell) => spawnSync(bin, ['--version'], { shell, encoding: 'utf8', timeout: 8000, windowsHide: true });
     const r0 = attempt(false);
@@ -61,27 +54,104 @@ function binAvailable(bin) {
   } catch { return false; }
 }
 
-/** 解析生效的 agent：默认 codex；ORCH_AGENT 指定；检测 CLI 可用性并把结果缓存。 */
+function procNameAvailable(pat) {
+  try {
+    // 探测宿主进程树前先做轻量进程表快照（Windows 用 wmic/tasklist；Unix 用 ps）。仅用于识别宿主 agent。
+    let text = '';
+    if (process.platform === 'win32') {
+      const r = spawnSync('tasklist', ['/FO', 'CSV', '/NH'], { encoding: 'utf8', timeout: 8000, windowsHide: true });
+      text = (r.stdout || '') + (r.stderr || '');
+    } else {
+      const r = spawnSync('ps', ['-e', '-o', 'comm='], { encoding: 'utf8', timeout: 8000 });
+      text = (r.stdout || '') + (r.stderr || '');
+    }
+    return new RegExp(pat, 'i').test(text);
+  } catch { return false; }
+}
+
+// 自动安装 CLI（仅 hasCliForm 且 bin 缺失时）。返回是否成功。
+function autoInstall(desc) {
+  if (!desc.hasCliForm || !desc.installCmd || !desc.installCmd.length) return false;
+  try {
+    const [cmd, ...rest] = desc.installCmd;
+    const r = spawnSync(cmd, rest, { encoding: 'utf8', timeout: 300000, windowsHide: true });
+    return !r.error && r.status === 0;
+  } catch { return false; }
+}
+
+// 识别宿主 agent：ORCH_AGENT env 优先；否则遍历父进程树匹配已知 agent 的可执行名；否则缺省 codex。
+function detectHostAgent() {
+  const requested = String(process.env.ORCH_AGENT || '').trim().toLowerCase();
+  if (requested && AGENTS[requested]) return requested;
+  // 父进程树探测：向上遍历，匹配 detBin/procName
+  let pid = process.pid;
+  const seen = new Set();
+  for (let i = 0; i < 30; i++) {
+    if (seen.has(pid)) break;
+    seen.add(pid);
+    let info = null;
+    try {
+      if (process.platform === 'win32') {
+        const r = spawnSync('wmic', ['process', 'where', 'processid=' + pid, 'get', 'parentprocessid,name,commandline', '/format:csv'], { encoding: 'utf8', timeout: 8000, windowsHide: true });
+        const csv = r.stdout || '';
+        // csv: Node,ParentProcessId,Name,CommandLine,ProcessId
+        const line = csv.split(/\r?\n/).find((l) => l && !/^Node|ParentProcessId|processid|^$/i.test(l.trim()));
+        if (line) {
+          const parts = line.split(',');
+          const name = parts.length > 2 ? parts[2] : '';
+          const cmd = parts.length > 3 ? parts[3] : '';
+          const ppid = parts.length > 1 ? parts[1] : '';
+          info = { name, cmd, ppid };
+        }
+      } else {
+        const r = spawnSync('ps', ['-o', 'ppid=,comm=', '-p', String(pid)], { encoding: 'utf8', timeout: 8000 });
+        const m = (r.stdout || '').trim().split(/\s+/);
+        if (m.length) info = { ppid: m[0], name: m[1] || '', cmd: '' };
+      }
+    } catch { /* ignore */ }
+    // 匹配已知 agent
+    const hay = (info ? (info.name + ' ' + (info.cmd || info.ppid || '')) : '').toLowerCase();
+    for (const [key, desc] of Object.entries(AGENTS)) {
+      const hit = desc.procName.some((n) => hay.includes(n.toLowerCase()));
+      if (hit) return key;
+    }
+    if (info && info.ppid) pid = Number(info.ppid); else break;
+  }
+  return 'codex';
+}
+
+/** 解析生效的 agent：优先 ORCH_AGENT，否则自动探测宿主；bin 缺失且 hasCliForm 则自动装，装不上 fail-closed 明确报错；
+ *  无 CLI 形态则明确报“不支持”。绝不回退 codex。 */
 export function resolveAgent() {
-  const requested = String(process.env.ORCH_AGENT || 'codex').trim().toLowerCase();
-  let id = AGENTS[requested] ? requested : 'codex';
+  const id = detectHostAgent();
+  const desc = AGENTS[id];
   const cache = readCache();
   const key = 'agent:' + id;
   const prev = cache[key] || {};
-  const desc = AGENTS[id];
-  let bin = prev.bin && binAvailable(prev.bin) ? prev.bin : desc.detectBin.find(binAvailable) || (id === 'codex' ? 'codex' : null);
-  // 请求的 agent CLI 不可用 -> 完整回退到 codex（bin 与 args 保持一致，否则会拿 codex 跑别的 agent 的参数）。
-  if (!bin && id !== 'codex') {
-    id = 'codex';
-    const ck = 'agent:codex';
-    const cprev = cache[ck] || {};
-    const cdesc = AGENTS[ck] ? AGENTS[ck] : AGENTS.codex;
-    const cbin = cprev.bin && binAvailable(cprev.bin) ? cprev.bin : cdesc.detectBin.find(binAvailable) || 'codex';
-    const cres = { ...cdesc, bin: cbin, available: !!cbin, resolvedAt: cprev.resolvedAt || new Date().toISOString() };
-    cache[ck] = cres;
-    writeCache(cache);
-    return { agent: 'codex', config: cres };
+  let bin = prev.bin && binAvailable(prev.bin) ? prev.bin : desc.detectBin.find(binAvailable) || null;
+
+  // 无 CLI 形态：明确不支持（fail-closed）
+  if (!desc.hasCliForm && !bin) {
+    const msg = '[orchestrator] agent "' + id + '" (' + desc.label + ') 无可用 CLI 形态，不支持 open-tui-orchestrator。';
+    console.error(msg);
+    process.exitCode = 1;
+    return { agent: id, config: { ...desc, bin: null, available: false, error: 'no-cli-form' } };
   }
+
+  // 有 CLI 形态但没装：尝试自动安装
+  if (!bin && desc.hasCliForm) {
+    console.log('[orchestrator] ' + desc.label + ' CLI 未找到，尝试自动安装 ' + (desc.installCmd || []).join(' ') + ' ...');
+    const ok = autoInstall(desc);
+    bin = ok ? (desc.detectBin.find(binAvailable) || desc.detectBin[0]) : null;
+    if (!bin) {
+      // 装不上，fail-closed 明确报错，绝不回退 codex
+      const msg = '[orchestrator] ' + desc.label + ' CLI 缺失且自动安装失败，该 agent 暂不支持 open-tui-orchestrator（无回退）。';
+      console.error(msg);
+      process.exitCode = 1;
+      return { agent: id, config: { ...desc, bin: null, available: false, error: 'install-failed' } };
+    }
+  }
+
   const resolved = { ...desc, bin, available: !!bin, resolvedAt: prev.resolvedAt || new Date().toISOString() };
   cache[key] = resolved;
   writeCache(cache);
@@ -89,8 +159,8 @@ export function resolveAgent() {
 }
 
 export function agentCacheFile() { return cacheFile(); }
+
 // 主流 agent 通用启动参数（按 agent 各自 CLI 拼装；codex 保持原样）。
-// 注意：pi/codebuddy 无 --cwd，工作目录由 launcher 先行 Set-Location 控制；这里只放 agent 自身的 CLI 参数。
 export function launchArgs(agentConfig, o = {}) {
   const cwd = o.cwd || "";
   const approval = o.approval || "never";
