@@ -1082,6 +1082,8 @@ function writeInteractiveLauncher(title, prompt, sfx) {
   const lp = path.join(TMP, `win-launch-${s}.ps1`);
   const pidf = path.join(TMP, `window-${s}.pid`);
   const rf = path.join(TMP, `win-${s}.result.json`);
+  const agentLogFile = path.join(TMP, `win-${s}.agent.log`);
+  const agentLogFileQ = agentLogFile.replace(/'/g, "''");
   // 加固：生成新窗启动脚本时清掉本块路径上可能残留的旧 result / .self-closed 标记，避免窗内 watchdog 把
   // “旧块已完成的残留标记”误当成“本窗 agent 已退出”，从而提前 exit 0 不再杀 codex，造成“窗口任务完成但
   // agent 仍存活、窗未自动关”的常驻窗。仅删本块自己的 result 产物，绝不触碰其它窗/活窗。
@@ -1176,7 +1178,7 @@ function writeInteractiveLauncher(title, prompt, sfx) {
     // on its own), and the recursive kill skips when no descendants remain. Never touches the launcher,
     // the watchdog job itself, or other windows.
     "$watch = Start-Job -ScriptBlock {",
-    "  param($token, $rootPid, $resultFile)",
+    "  param($token, $rootPid, $resultFile, $agentLog)",
     "  if ([string]::IsNullOrWhiteSpace($token)) { return }",
     "  # 独立 runspace：本 job 看不到主作用域的 Ensure-ResultDir，需在此自行复刻（与主作用域实现一致）。",
     "  function Ensure-ResultDir {",
@@ -1213,6 +1215,16 @@ function writeInteractiveLauncher(title, prompt, sfx) {
     "      if ($n -eq 0 -and $sawChild) { Ensure-ResultDir; try { Set-Content -LiteralPath ($resultFile + '.self-closed') -Value '1' -Encoding ASCII } catch { }; exit 0 }",
     "    }",
     "    try {",
+    "      if ($agentLog -and (Test-Path -LiteralPath $agentLog)) {",
+    "        $logTail = Get-Content -LiteralPath $agentLog -Tail 400 -Encoding UTF8 -ErrorAction SilentlyContinue | Where-Object { $_ -match '__ORCH_DONE__' -and $_.Contains($token) } | Select-Object -Last 1",
+    "        if ($logTail) {",
+    "          Ensure-ResultDir; try { Set-Content -LiteralPath ($resultFile + '.self-closed') -Value '1' -Encoding ASCII } catch { }",
+    "          Kill-LauncherTree $rootPid",
+    "          exit 0",
+    "        }",
+    "        # 非 codex 且 agent 已退出（Tee 落盘的 log 已锁定文件结尾），若无 __ORCH_DONE__ 但进程已结束，仍应关窗：",
+    "        if (Test-Path -LiteralPath $agentLog) { $lockAge = 0 }",
+    "      }",
     "      $files = Get-ChildItem -LiteralPath $dir -Recurse -Filter 'rollout-*.jsonl' -ErrorAction SilentlyContinue | Where-Object { $_.LastWriteTime -gt (Get-Date).AddMinutes(-30) }",
     "      foreach ($f in $files) {",
     "        if ($match) {",
@@ -1276,7 +1288,8 @@ function writeInteractiveLauncher(title, prompt, sfx) {
     "  try { Set-Content -LiteralPath ($resultFile + '.self-closed') -Value '1' -Encoding ASCII } catch { }",
     "  Kill-LauncherTree $rootPid",
     "  exit 0",
-    "} -ArgumentList $token, $PID, $resultFile",
+    "} -ArgumentList $token, $PID, $resultFile, $agentLog",
+    "$agentLog = '" + agentLogFileQ + "'",
     "$code = 1",
     "try {",
     "  $agentArgs = " + buildPsArrayLit(AGENT_ARGS_LIST) + " + $p",
@@ -1286,7 +1299,7 @@ function writeInteractiveLauncher(title, prompt, sfx) {
     "  $wdDone = $false",
     "  while ($attempt -lt 2) {",
     "    $attempt++",
-    "    & '" + AGENT_BIN_Q + "' @agentArgs",
+    "    & '" + AGENT_BIN_Q + "' @agentArgs 2>&1 | Tee-Object -FilePath $agentLog",
     "    $code = $LASTEXITCODE",
     "    $rdir = $env:ORCH_SDIR",
     "    $rep = Get-LastReport -dir $rdir -tok $token",
