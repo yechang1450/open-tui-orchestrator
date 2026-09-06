@@ -1,0 +1,13 @@
+{
+  "name": "open-tui-orchestrator",
+  "version": "0.3.0",
+  "private": true,
+  "type": "module",
+  "bin": { "open-tui-orchestrator": "cli.mjs" },
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "doctor": "node cli.mjs --agent codex --doctor",
+    "setup": "npm ci --prefix scripts"
+  },
+  "engines": { "node": ">=22" }
+}
