@@ -56,11 +56,12 @@
  * ============================================================================
  */
 import {nativeArgumentLines} from "./native-argv.mjs";
-import {CORE_VERSION, levelWaves, keysOverlap, summaryComplete,requestTasks,bindClassifiedTasks} from "./contracts.mjs";
+import {CORE_VERSION, levelWaves, keysOverlap, summaryComplete,requestTasks,bindClassifiedTasks,computeMaxWindows} from "./contracts.mjs";
 import {runWindows,verifyRun} from "./runner.mjs";
 import {launcherIdentity,processSnapshot,sameProcess,coordinatorDir,reserve,bind} from "./leases.mjs";
 import {runPiPlanner,writePiLauncher,waitPiResult} from './pi-runtime.mjs';
 import {runOpenClawPlanner,writeOpenClawLauncher} from './openclaw-runtime.mjs';
+import {runOpenCodePlanner,writeOpenCodeLauncher,waitOpenCodeResult} from './opencode-runtime.mjs';
 import {spawnInactiveWindow} from './inactive-window.mjs';
 import { networkConfig } from "./network-policy.mjs";
 import { spawn, spawnSync } from "node:child_process";
@@ -562,6 +563,7 @@ function splitSentences(request) {
 async function runThreadPrompt(prompt, opts = {}) {
   if(AGENT.agent==='openclaw')return runOpenClawPlanner(AGENT.config,prompt,WORKSPACE);
   if(AGENT.agent==='pi')return runPiPlanner(AGENT.config,prompt,WORKSPACE);
+  if(AGENT.agent==='opencode')return runOpenCodePlanner(AGENT.config,prompt,WORKSPACE);
   // outputSchema 走 runStreamed 的 turn 选项（强制结构化输出 / 纯 JSON），不能混进 startThread 配置。
   const { outputSchema, ...threadOpts } = opts;
   const thread = codex.startThread({ ...threadBase(), ...threadOpts });
@@ -952,12 +954,8 @@ function psKillDescendantsLines() {
   ];
 }
 
-// 内存 → 最大并发 TUI 窗数：先由内存 GiB 换算出厂商标称内存 GB（round(GiB × 1024 ÷ 1000)），再取其 3/4（round(标称GB × 3 ÷ 4)）。
-// 例如 16G 标称 → 12 台并发，4G 标称 → 3 台；不再有固定 8 硬上限。下限由调用方以 <4G 判定为不支持。为可测试而独立成函数。
-function computeMaxWindows(memGb) {
-  const nominalGb = Math.round((memGb * 1024) / 1000);
-  return Math.round((nominalGb * 3) / 4);
-}
+// computeMaxWindows 已下沉至 contracts.mjs（fresh 规划与 resume 校验共用），此处经 import 复用。
+
 // Capacity is a planning constraint, not a queue of extra windows.
 export function capPlanBlocks(input, capacity) {
   if (!Number.isInteger(capacity) || capacity < 1) throw new RangeError('capacity must be a positive integer');
@@ -1047,6 +1045,7 @@ function isOrchestratorSelfMod(text) {
 function writeInteractiveLauncher(title, prompt, sfx) {
   if(AGENT.agent==='pi')return writePiLauncher(AGENT.config,{key:title,prompt,suffix:sfx,workspace:WORKSPACE,temp:TMP});
   if(AGENT.agent==='openclaw')return writeOpenClawLauncher(AGENT.config,{key:title,prompt,suffix:sfx,workspace:WORKSPACE,temp:TMP});
+  if(AGENT.agent==='opencode')return writeOpenCodeLauncher(AGENT.config,{key:title,prompt,suffix:sfx,workspace:WORKSPACE,temp:TMP});
   const s = safe(title) + (sfx ? "-" + sfx : "");
   mkdirSync(TMP, { recursive: true });
   const pf = path.join(TMP, `agent-win-${s}.md`);
@@ -1825,10 +1824,14 @@ function inferTargetKeys(text) {
     const p = m[0].replace(/[\\/]+$/, "");
     if (isFileLike(p)) keys.add("file:" + p);
   }
-  // Unix 风格绝对路径
-  for (const m of s.matchAll(/(?<![A-Za-z:])\/[^\s"'`,;)]+/g)) {
+  // Unix 风格绝对路径：仅接受带目录成分的多段路径（≥2 个斜杠），且排除前导字符为字母/数字/冒号的情况——
+  // 否则 “project-91/probe.mjs” 这类数字结尾目录会把 “/probe.mjs” 抽成碎片 key：多个任务写同名文件即互相撞 key，
+  // normalizePlan 会把彼此独立的块静默合并成单块（并行计划坍缩为 inline）。
+  for (const m of s.matchAll(/(?<![A-Za-z0-9:])\/[^\s"'`,;)]+/g)) {
     const p = m[0].replace(/[\\/]+$/, "");
-    if (isFileLike(p)) keys.add("file:" + p);
+    if (!isFileLike(p)) continue;
+    if ((p.match(/\//g) || []).length < 2) continue; // 单段 “/file.ext” 视为碎片，不生成冲突 key
+    keys.add("file:" + p);
   }
   return [...keys];
 }
@@ -1844,6 +1847,11 @@ function normalizePlan(plan) {
   const groups=[];
   for(const r of ordered) {
     const hits=groups.filter(g=>g.some(x=>keysOverlap(x.keys,r.keys)));
+    if(hits.length){
+      // 合并诊断：块因共享冲突 key 被并组。若 key 是“/单段文件名”碎片形式，提示可能为误合并来源。
+      const shared=[...new Set(hits.flat().flatMap(x=>x.keys).filter(k=>r.keys.includes(k)))];
+      console.warn("[orchestrator] plan merge: blocks [" + [...new Set(hits.flat().map(x=>x.key)),r.key].join(",") + "] share conflict key(s): " + shared.join(", ") + (shared.some(k=>/^file:(\/|\\)[^/\\]+$/.test(k)) ? "（含单段文件名碎片 key，警惕同名文件导致的非预期合并）" : ""));
+    }
     const group=[...hits.flat(),r];for(const hit of hits)groups.splice(groups.indexOf(hit),1);groups.push(group);
   }
   const owner=new Map();groups.forEach((g,i)=>g.forEach(r=>owner.set(r.key,i)));
@@ -1982,7 +1990,7 @@ async function classifyExecutionMode(request) {
   return "execute"; // fail-safe
 }
 export async function main() {
-  for(const [flag,key] of [["--run-id","ORCH_RUN_ID"],["--acceptance-file","ORCH_ACCEPTANCE_FILE"]]){const index=process.argv.indexOf(flag);if(index>=0){if(!process.argv[index+1])throw new Error(flag+" needs a value");process.env[key]=process.argv[index+1];process.argv.splice(index,2);}}
+  for(const [flag,key] of [["--run-id","ORCH_RUN_ID"],["--acceptance-file","ORCH_ACCEPTANCE_FILE"],["--acceptance","ORCH_ACCEPTANCE_FILE"]]){const index=process.argv.indexOf(flag);if(index>=0){if(!process.argv[index+1])throw new Error(flag+" needs a value");process.env[key]=process.argv[index+1];process.argv.splice(index,2);}}
   const mode = process.argv[2];
   if (mode === "--doctor") {
     console.log(JSON.stringify({ agent: AGENT.agent, cli: CODEX, workspace: WORKSPACE,
@@ -2037,7 +2045,9 @@ export async function main() {
     const sessionFile = AGENT.agent!=='codex'?rf:await waitForSessionFile(matchToken, 120000, rf);
     let res = { done: false, text: "" };
     if (sessionFile) {
-      res = AGENT.agent!=='codex'?await waitPiResult(rf,POLL_TIMEOUT_MS,pidf):await waitTaskComplete(sessionFile, POLL_TIMEOUT_MS, rf, matchToken, pidf);
+      res = AGENT.agent!=='codex'
+        ? (AGENT.agent==='opencode'?await waitOpenCodeResult(rf,POLL_TIMEOUT_MS,pidf):await waitPiResult(rf,POLL_TIMEOUT_MS,pidf))
+        : await waitTaskComplete(sessionFile, POLL_TIMEOUT_MS, rf, matchToken, pidf);
     } else if (existsSync(rf)) {
       res = { done: true, text: "(launcher exit marker seen; no rollout matched)", exitCode: readExitCode(rf) };
     }
@@ -2170,7 +2180,7 @@ export async function main() {
       plan:decomposeSafely,compact:capPlanBlocks,infer:inferTargetKeys,launcher:writeInteractiveLauncher,prompt:buildBlockPrompt,
       spawn:(...args)=>spawnWindowWithRetry(...args,true),readPid:readPidFile,
       session:AGENT.agent!=='codex'?async(_token,_timeout,rf)=>rf:waitForSessionFile,
-      wait:AGENT.agent!=='codex'?async(_session,timeout,rf,_token,pidf)=>waitPiResult(rf,timeout,pidf):waitTaskComplete,exitCode:readExitCode,
+      wait:AGENT.agent!=='codex'?(AGENT.agent==='opencode'?async(_session,timeout,rf,_token,pidf)=>waitOpenCodeResult(rf,timeout,pidf):async(_session,timeout,rf,_token,pidf)=>waitPiResult(rf,timeout,pidf)):waitTaskComplete,exitCode:readExitCode,
       register:r=>updateWindows(ws=>[...ws,r]),commit:commitReservation,unregister:cancelReservation,close:closeWindowByPid,
       cleanup:la=>{for(const f of [la.lp,la.pf,la.pidf,la.rf,la.pidf+'.self-closed',la.rf+'.self-closed'])try{rmSync(f,{force:true});}catch{}}
     },{workspace:WORKSPACE,capacity,resume,agent:AGENT.agent,runId:process.env.ORCH_RUN_ID,acceptanceFile:process.env.ORCH_ACCEPTANCE_FILE,timeoutMs:POLL_TIMEOUT_MS,auth:readAuthPrompt(),plan:preflightPlan});

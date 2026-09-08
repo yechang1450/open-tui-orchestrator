@@ -7,6 +7,14 @@ export const CORE_VERSION = '1.3.1';
 export const SUCCESS = new Set(['verified']);
 export const TERMINAL = new Set(['verified','failed','blocked','cancelled','awaiting-verification','preflight-failed','popup-failed','timeout','needs-reconciliation']);
 
+// 内存 → 最大并发 TUI 窗数：先由内存 GiB 换算出厂商标称内存 GB（round(GiB × 1024 ÷ 1000)），再取其 3/4（round(标称GB × 3 ÷ 4)）。
+// 例如 16G 标称 → 12 台并发，4G 标称 → 3 台；不再有固定 8 硬上限。下限由调用方以 <4G 判定为不支持。为可测试而独立成函数。
+// fresh 规划与 --resume-run 的恢复校验共用同一容量（contracts 放置以避免 recovery↔sdk 循环依赖）。
+export function computeMaxWindows(memGb) {
+  const nominalGb = Math.round((memGb * 1024) / 1000);
+  return Math.round((nominalGb * 3) / 4);
+}
+
 export function summaryComplete(sum, strict = true) {
   if (!sum?.runId || !Array.isArray(sum.blocks) || !Array.isArray(sum.tasks) || !sum.blocks.length || !sum.tasks.length) return false;
   const exact = (ids, obj) => ids.length === new Set(ids).size && Object.keys(obj || {}).length === ids.length && ids.every(id => Object.hasOwn(obj || {}, id));
@@ -103,6 +111,14 @@ export function verifyTask(receipt, task, checks, context) {
   if(!receipt || receipt.runId!==context.runId || receipt.token!==context.token || receipt.id!==task.id || receipt.status!=='completed')return {status:'failed',reason:'Missing or mismatched task receipt'};
   return verifyChecks(checks,context.workspace);
 }
+// 校验 acceptance 契约 key 与 task id 的一致性：unknown key（拼错/多余）= 直接报错；task 无 check = 告警（将停在 awaiting-verification）。
+export function acceptanceKeyDiff(checks,tasks) {
+  if(!checks||typeof checks!=='object'||Array.isArray(checks)||!Object.keys(checks).length)return null;
+  const ids=[...(new Set((tasks||[]).map(t=>t?.id).filter(Boolean)))],keys=Object.keys(checks);
+  const unknown=keys.filter(k=>!ids.includes(k)),missing=ids.filter(k=>!keys.includes(k));
+  return (unknown.length||missing.length)?{unknown,missing}:null;
+}
+
 export function verifyChecks(checks,workspace) {
   if(!Array.isArray(checks)||!checks.length)return {status:'awaiting-verification',reason:'No parent-defined acceptance checks; window report is not proof of success'};
   const evidence=[];
@@ -116,8 +132,15 @@ export function verifyChecks(checks,workspace) {
         evidence.push({type:'command',command:check.command,args:check.args,exitCode:result.status});continue;
       }
       const file=path.resolve(workspace,check.path);
-      if(check.type==='file') {if(!fs.statSync(file).isFile())throw new Error('Not a file: '+file);if(check.sha256&&sha256(file)!==check.sha256)throw new Error('Hash mismatch: '+file);}
-      else if(check.type==='json') {const value=JSON.parse(fs.readFileSync(file,'utf8'));for(const [key,expected] of Object.entries(check.equals||{})){if(JSON.stringify(value[key])!==JSON.stringify(expected))throw new Error('JSON mismatch: '+file+' '+key);}}
+      if(check.type==='file') {
+        if(!fs.existsSync(file))throw new Error('Acceptance file missing: '+file+(String(check.path)!==file?' (check.path="'+check.path+'")':''));
+        if(!fs.statSync(file).isFile())throw new Error('Not a file: '+file);if(check.sha256&&sha256(file)!==check.sha256)throw new Error('Hash mismatch: '+file);}
+      else if(check.type==='json') {
+        if(!fs.existsSync(file))throw new Error('Acceptance file missing: '+file+(String(check.path)!==file?' (check.path="'+check.path+'")':''));
+        let value;try{value=JSON.parse(fs.readFileSync(file,'utf8'));}catch(e){throw new Error('Acceptance JSON parse failed: '+file+': '+e.message);}
+        for(const [key,expected] of Object.entries(check.equals||{})){
+          if(!(key in value))throw new Error('JSON field missing: '+file+' key="'+key+'" expected='+JSON.stringify(expected));
+          if(JSON.stringify(value[key])!==JSON.stringify(expected))throw new Error('JSON mismatch: '+file+' key="'+key+'" expected='+JSON.stringify(expected)+' actual='+JSON.stringify(value[key]));}}
       else if(check.type==='absent') {if(fs.existsSync(file))throw new Error('Unexpected path: '+file);}
       else throw new Error('Unsupported acceptance check: '+check.type);
       evidence.push({type:check.type,path:file,sha256:check.type==='absent'?undefined:sha256(file)});

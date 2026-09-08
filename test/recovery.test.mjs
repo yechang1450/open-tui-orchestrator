@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {spawnSync} from 'node:child_process';
+import {CODEX_CLI_SKIP} from './helpers/external.mjs';
 const runner=await import('../scripts/core/runner.mjs');
 const family=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../temp');
 const pause=ms=>new Promise(r=>setTimeout(r,ms));
@@ -26,7 +27,7 @@ test('recovery rechecks partial work and never repeats verified or uncertain sid
   assert.deepEqual(result.verified,['T1']);assert.deepEqual(result.pending,['T3','T4']);assert.deepEqual(result.uncertain,['T2']);
  }finally{fs.rmSync(dir,{recursive:true,force:true});}
 });
-test('new launcher preserves a failed CLI exit and never blindly repeats the prompt',async()=>{
+test('new launcher preserves a failed CLI exit and never blindly repeats the prompt',{skip:CODEX_CLI_SKIP},async()=>{
  process.env.ORCH_AGENT='codex';const sdk=await import('../scripts/orchestrate-sdk.mjs');
  const la=sdk.writeInteractiveLauncher('recovery-contract','read-only probe','test-'+process.pid);
  const dir=fs.mkdtempSync(path.join(family,'failed-cli-')),counter=path.join(dir,'count'),fake=path.join(dir,'fake.ps1');
