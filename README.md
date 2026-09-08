@@ -91,7 +91,7 @@ The plan is converted into dependency waves and passed through an explicit windo
 
 - One block returns `mode: inline` and creates no run window.
 - Multiple blocks with only one ready block in every wave return `mode: inline`; a serial dependency chain does not get a decorative window.
-- A wave with at least two ready blocks returns `mode: windows` and starts at least two visible TUI windows. The active count still cannot exceed memory capacity or the hard ceiling of 8.
+- A wave with at least two ready blocks returns `mode: windows` and starts at least two visible TUI windows. The active count still cannot exceed the memory-derived window capacity (nominal GB × 3 ÷ 4).
 
 An inline response contains the original request, complete task ledger, block titles, dependencies and the next-step hint. Inline execution therefore keeps the work visible to the initiating Agent instead of turning “no window” into “no task.”
 
@@ -147,6 +147,6 @@ node cli.mjs --agent pi --doctor
 node cli.mjs --agent openclaw --doctor
 ```
 
-The current generic core is 1.3.1, with 149/149 offline tests passing. Coverage includes lossless task accounting, the eight-block ceiling, dependency waves, global capacity leases, Windows Terminal launch (synchronous and reliable), unfocused-start regressions, process identity, checkpoint recovery, weak-network configuration, SDK diagnostics and clean package publication. The unfocused-window field probe belongs to the preceding core and is retained as historical evidence; current-core field retesting remains a release-policy gate. Real model quotas, installation under a different Windows user, prolonged offline recovery and field compatibility for future Agents also require separate acceptance.
+The current generic core is 1.3.1, with 149/149 offline tests passing. Coverage includes lossless task accounting, the memory-derived block-capacity ceiling, dependency waves, global capacity leases, Windows Terminal launch (synchronous and reliable), unfocused-start regressions, process identity, checkpoint recovery, weak-network configuration, SDK diagnostics and clean package publication. Test-env requirement: the offline suite assumes the initiating agent CLI (default `codex`) is resolvable on PATH — on Windows prepend the codex vendor bin (the documented regression convention). Without it, agent-resolution-dependent test files fail fast by design (fail-closed); the two runtime-CLI-dependent cases are annotated `{skip}`. Real model quotas, installation under a different Windows user, prolonged offline recovery and field compatibility for future Agents also require separate acceptance.
 
 An unknown host, missing CLI or invalid explicit path fails with a diagnostic. The tool does not install software, guess a replacement path or switch to another Agent.

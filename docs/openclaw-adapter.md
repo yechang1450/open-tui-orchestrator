@@ -10,7 +10,7 @@ open-tui-orchestrator --agent openclaw --plan "Your tasks"
 open-tui-orchestrator --agent openclaw --run-id <id> --acceptance-file <absolute-json> --run-windows "Your tasks"
 ```
 
-The ordinary shared planner, global capacity coordinator, task ledger, independent acceptance and recovery controller remain authoritative. OpenClaw's own concurrency setting cannot increase the eight-block limit.
+The ordinary shared planner, global capacity coordinator, task ledger, independent acceptance and recovery controller remain authoritative. OpenClaw's own concurrency setting cannot increase the memory-derived window capacity.
 
 ## Isolation and lifecycle
 

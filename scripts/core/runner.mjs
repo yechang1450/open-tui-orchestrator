@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import {fileURLToPath} from 'node:url';
-import {CORE_VERSION,ledgerPlan,levelWaves,verifyChecks,summaryComplete,TERMINAL,canonicalKey,requestTasks} from './contracts.mjs';
+import {CORE_VERSION,ledgerPlan,levelWaves,verifyChecks,summaryComplete,TERMINAL,canonicalKey,requestTasks,acceptanceKeyDiff} from './contracts.mjs';
 import {coordinatorDir,reserve,bind,release,prepare,atomicJson,launcherIdentity,processSnapshot,sameProcess,claimRun,releaseRun} from './leases.mjs';
 import {scheduleReady,recoveryTasks,taskPolicy,validateRecoverySummary} from './recovery.mjs';
 import {readCheckpoints} from './checkpoint.mjs';
@@ -72,8 +72,15 @@ export function verifyRun(workspace,runId,acceptanceFile) {
   if(sum.runId!==runId||!sum.finishedAt)throw new Error('Run is not finalized');
   if(sum.protocol===2)validateRecoverySummary(sum);
   const claim=claimRun(sum.coordinator||coordinatorDir(workspace),'run:'+path.resolve(dir).toLowerCase());
-  try{collectVerification(sum,loadChecks(acceptanceFile||path.join(dir,'acceptance.json')),workspace);sum.success=summaryComplete(sum,true);atomicJson(file,sum);return sum.success;}
-  finally{releaseRun(sum.coordinator||coordinatorDir(workspace),'run:'+path.resolve(dir).toLowerCase(),claim);}
+  const checks=loadChecks(acceptanceFile||path.join(dir,'acceptance.json'));
+  try{
+    if(sum.tasks?.length){
+      const keyDiff=acceptanceKeyDiff(checks,sum.tasks);
+      if(keyDiff?.unknown.length)throw new Error('Acceptance keys do not match any task id: '+keyDiff.unknown.join(', ')+'（task ids: '+sum.tasks.map(t=>t.id).join(', ')+'）');
+      if(keyDiff?.missing.length)console.warn('[orchestrator] acceptance has no checks for task(s): '+keyDiff.missing.join(', ')+'；这些任务将停在 awaiting-verification');
+    }
+    collectVerification(sum,checks,workspace);sum.success=summaryComplete(sum,true);atomicJson(file,sum);return sum.success;
+  }  finally{releaseRun(sum.coordinator||coordinatorDir(workspace),'run:'+path.resolve(dir).toLowerCase(),claim);}
 }
 
 export async function runWindows(request,hooks,options={}) {
@@ -111,6 +118,11 @@ export async function runWindows(request,hooks,options={}) {
       for(const r of recs){sum.results[r.key]={status:'pending',attempts:[]};for(const id of sum.blocks.find(b=>b.key===r.key).taskIds)sum.taskResults[id]={status:'pending'};}
     }
     sum.owner=claim.owner;sum.coordinator=coordinator;
+    {
+      const keyDiff=acceptanceKeyDiff(checks,sum.tasks);
+      if(keyDiff?.unknown.length)throw new Error('Acceptance keys do not match any task id: '+keyDiff.unknown.join(', ')+'（task ids: '+sum.tasks.map(t=>t.id).join(', ')+'）');
+      if(keyDiff?.missing.length)console.warn('[orchestrator] acceptance has no checks for task(s): '+keyDiff.missing.join(', ')+'；这些任务将停在 awaiting-verification');
+    }
     atomicJson(path.join(dir,'acceptance.json'),checks);
     const persist=()=>atomicJson(summaryFile,sum);
     const mark=(r,status,reason)=>{sum.results[r.key]={...sum.results[r.key],status,reason};for(const id of sum.blocks.find(b=>b.key===r.key).taskIds)if(sum.taskResults[id]?.status!=='verified')sum.taskResults[id]={...sum.taskResults[id],status,reason};persist();};
