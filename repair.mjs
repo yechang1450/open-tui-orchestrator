@@ -2,14 +2,12 @@
 /**
  * repair.mjs - per-skill publish / integrity entry.
  *
- * A skill folder is self-contained & publishable when it carries:
- *   SKILL.md + README.md + LICENSE                (must exist)
- *   plus optional docs (README-zh.md, CHANGELOG.md)
- *   plus source dirs (scripts/, automations/, references/, data/)
- *   - all free of runtime debris.
+ * The CLI package is self-contained and publishable when it carries its
+ * executable entrypoint, package metadata, release seal, README and license.
+ * Runtime state and developer metadata never enter a published copy.
  *
  * Runtime debris (use-and-discard, never bundled, safe to remove):
- *   node_modules/  __pycache__/
+ *   node_modules/  temp/  __pycache__/
  *   .pytest_cache/  .cache/
  *   *.part  *.tmp  *.pyc  *.pyo  *.crdownload  *.partial  *.swp
  *   .enforce-state.json  .DS_Store  Thumbs.db
@@ -24,25 +22,29 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { verifyRelease } from './scripts/release-integrity.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SKILL = path.basename(__dirname);
 
-const REQUIRED_FILES = ['README.md', 'LICENSE'];
+const REQUIRED_FILES = ['cli.mjs', 'package.json', 'release.json', 'README.md', 'LICENSE'];
 const OPTIONAL_FILES = ['README-zh.md', 'CHANGELOG.md'];
 
 const DEBRIS_DIRS = new Set([
   'node_modules',
+  'temp',
   '__pycache__',
   '.pytest_cache',
   '.cache',
 ]);
 
-const DEBRIS_EXACT = new Set(['.enforce-state.json', '.DS_Store', 'Thumbs.db']);
+const DEBRIS_EXACT = new Set(['.agent-cache.json', '.enforce-state.json', '.DS_Store', 'Thumbs.db']);
 const DEBRIS_RE = /\.(part|tmp|pyc|pyo|crdownload|partial|swp)$/i;
+const PROTECTED_DIRS = new Set(['.git', '.plugin-eval', 'coverage', 'node_modules', 'temp']);
 
 function listFiles(dir, base = '', out = []) {
   for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+    if (e.isDirectory() && PROTECTED_DIRS.has(e.name)) continue;
     if (e.isSymbolicLink()) continue; // 跳过符号链接：不跟随内容复制/删除（防越权/防逃逸）
     const abs = path.join(dir, e.name);
     const rel = path.join(base, e.name);
@@ -54,18 +56,6 @@ function listFiles(dir, base = '', out = []) {
 
 // republish 只复制常规文件，不跟随符号链接；校验也保持一致（lstat，不 follow symlink）。
 function isRegularFile(p) { try { return fs.lstatSync(p).isFile(); } catch { return false; } }
-
-// 可发布 skill 标志：优先 skills/*/SKILL.md（插件规范），兼容旧式根目录 SKILL.md。
-function findSkillFile() {
-  const sk = path.join(__dirname, 'skills');
-  if (fs.existsSync(sk)) {
-    for (const e of fs.readdirSync(sk, { withFileTypes: true })) {
-      if (e.isDirectory() && isRegularFile(path.join(sk, e.name, 'SKILL.md'))) return path.join(sk, e.name, 'SKILL.md');
-    }
-  }
-  if (isRegularFile(path.join(__dirname, 'SKILL.md'))) return path.join(__dirname, 'SKILL.md');
-  return null;
-}
 
 function isDebrisRel(rel) {
   const parts = rel.split(path.sep);
@@ -86,14 +76,8 @@ function check() {
 
   console.log(`[${SKILL}] repair.mjs - self-contained publish / integrity check`);
   console.log(`[${SKILL}] skill root = ${__dirname}`);
-
-  const skillFile = findSkillFile();
-  if (skillFile) {
-    console.log(`  OK  skill  ${path.relative(__dirname, skillFile)}`);
-  } else {
-    console.log('  MISSING skill  SKILL.md (expected under skills/<name>/SKILL.md)');
-    problems++;
-  }
+  try { const seal = verifyRelease(__dirname); console.log(`  OK  release seal  schema=${seal.schema} core=${seal.coreVersion} files=${seal.files} runtime=${seal.runtimeFiles}`); }
+  catch (error) { console.log(`  INVALID release seal  ${error.message}`); problems++; }
   for (const name of REQUIRED_FILES) {
     const full = path.join(__dirname, name);
     const ok = isRegularFile(full);
@@ -106,7 +90,7 @@ function check() {
       console.log(`  OK  optional  ${name}`);
     }
   }
-  for (const dir of ['scripts', 'automations', 'references', 'data']) {
+  for (const dir of ['scripts', 'docs', 'test']) {
     const full = path.join(__dirname, dir);
     if (fs.existsSync(full) && fs.statSync(full).isDirectory() && hasAny(dir)) {
       console.log(`  OK  source dir  ${dir}/`);
@@ -151,6 +135,7 @@ function clean() {
     }
     // Also drop now-empty debris dirs (e.g. empty state/, temp/, __pycache__/).
     for (const dir of DEBRIS_DIRS) {
+      if (PROTECTED_DIRS.has(dir)) continue;
       const full = path.join(__dirname, dir);
       if (fs.existsSync(full) && !fs.lstatSync(full).isSymbolicLink()) {
         let real = null;
@@ -174,6 +159,7 @@ function clean() {
 }
 
 function publish(targetRoot) {
+  let staging;
   try {
     if (!path.isAbsolute(targetRoot)) {
       console.error(`[${SKILL}] --target expects an absolute root, got: ${targetRoot}`);
@@ -181,22 +167,40 @@ function publish(targetRoot) {
     }
     // publish 前必须验证必需文件
     const missing = REQUIRED_FILES.filter((nf) => !isRegularFile(path.join(__dirname, nf)));
-    if (missing.length || !findSkillFile()) { console.error("[" + SKILL + "] publish aborted: missing " + (missing.length ? missing.join(", ") : "skill SKILL.md (under skills/<name>/)")); process.exit(2); }
+    if (missing.length) { console.error("[" + SKILL + "] publish aborted: missing " + missing.join(", ")); process.exit(2); }
+    verifyRelease(__dirname);
     const dest = path.join(path.resolve(targetRoot), SKILL);
-    console.log(`[${SKILL}] --target: publishing skill folder to ${dest}`);
+    if (fs.existsSync(dest)) throw new Error('Publish target already exists; choose a fresh version directory');
+    const relative = path.relative(__dirname, dest);
+    if (relative !== '..' && !relative.startsWith('..' + path.sep) && !path.isAbsolute(relative)) throw new Error('Publish target must be outside the source tree');
+    let ancestor = path.dirname(dest), tail = [path.basename(dest)];
+    while (!fs.existsSync(ancestor)) { tail.unshift(path.basename(ancestor)); ancestor = path.dirname(ancestor); }
+    const physical = path.join(fs.realpathSync(ancestor), ...tail);
+    const physicalRelative = path.relative(fs.realpathSync(__dirname), physical);
+    if (physicalRelative !== '..' && !physicalRelative.startsWith('..' + path.sep) && !path.isAbsolute(physicalRelative)) throw new Error('Publish target must be outside the source tree');
+    fs.mkdirSync(path.dirname(dest), { recursive: true });
+    staging = fs.mkdtempSync(path.join(path.dirname(dest), '.' + SKILL + '-staging-'));
+    console.log(`[${SKILL}] --target: publishing CLI package to ${dest}`);
     let copied = 0;
     for (const rel of listFiles(__dirname)) {
       if (isDebrisRel(rel)) continue;
       const srcAbs = path.join(__dirname, rel);
-      const dstAbs = path.join(dest, rel);
+      const dstAbs = path.join(staging, rel);
       fs.mkdirSync(path.dirname(dstAbs), { recursive: true });
       // Byte-copy: preserves UTF-8 no-BOM text and any binary data byte-exact.
       fs.copyFileSync(srcAbs, dstAbs);
       copied++;
     }
+    verifyRelease(staging);
+    const stagedMissing = REQUIRED_FILES.filter(name => !isRegularFile(path.join(staging, name)));
+    if (stagedMissing.length) throw new Error('Staged package missing required: ' + stagedMissing.join(', '));
+    if (fs.existsSync(dest)) throw new Error('Publish target appeared during publication');
+    fs.renameSync(staging, dest);
+    staging = undefined;
     console.log(`[${SKILL}] published ${copied} file(s) to ${dest}.`);
     process.exit(0);
   } catch (e) {
+    if (staging) { try { fs.rmSync(staging, {recursive: true, force: true}); } catch { /* preserve the original error */ } }
     console.error(`[${SKILL}] publish failed: ${e.message}`);
     process.exit(2);
   }
