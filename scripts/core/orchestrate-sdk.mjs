@@ -61,7 +61,7 @@ import {runWindows,verifyRun} from "./runner.mjs";
 import {launcherIdentity,processSnapshot,sameProcess,coordinatorDir,reserve,bind} from "./leases.mjs";
 import {runPiPlanner,writePiLauncher,waitPiResult} from './pi-runtime.mjs';
 import {runOpenClawPlanner,writeOpenClawLauncher} from './openclaw-runtime.mjs';
-import {spawnInactiveWindowDetached} from './inactive-window.mjs';
+import {spawnInactiveWindow} from './inactive-window.mjs';
 import { networkConfig } from "./network-policy.mjs";
 import { spawn, spawnSync } from "node:child_process";
 import { resolveAgent, launchArgs } from "./agent.mjs";
@@ -776,14 +776,17 @@ function spawnVisibleWindow(lp, title) {
     const bn = path.basename(String(lp || ""));
     const winS = bn.replace(/^win-launch-/, "").replace(/\.ps1$/, "");
     const windowName = "win-" + (winS || "x");
-    spawnInactiveWindowDetached(WT_EXE, ["-w", windowName, "powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", lp], WORKSPACE);
+    // 同步拉起（no-activate helper 经 spawnSync 执行完 CreateProcessW 再返回）：实测异步 detached 路径
+    // 弹窗经常不出现（"popup NOT confirmed" 直至超时），sync 路径稳定 1~2 秒内确认；阻塞 ~2.5s 换可靠性。
+    spawnInactiveWindow(WT_EXE, ["-w", windowName, "powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", lp], WORKSPACE);
     console.log("spawned visible " + AGENT.agent + " TUI (Windows Terminal): " + title + " (window=" + windowName + ")");
     return;
   }
   // conhost fallback uses the same no-activate helper rather than cmd /c start,
   // so a missing Windows Terminal does not reintroduce a focusing window.
   const powershell=path.join(process.env.SystemRoot||process.env.WINDIR||'C:\\Windows','System32','WindowsPowerShell','v1.0','powershell.exe');
-  spawnInactiveWindowDetached(powershell,['-NoProfile','-ExecutionPolicy','Bypass','-File',lp],WORKSPACE);
+  // 与 WT 路径一致：sync 拉起保证窗口真正弹出（见上）。
+  spawnInactiveWindow(powershell,['-NoProfile','-ExecutionPolicy','Bypass','-File',lp],WORKSPACE);
   console.log("spawned visible " + AGENT.agent + " TUI: " + title);
 }
 // 弹窗后精准检测：pid 文件存在 + launcher(WT pane 宿主)进程存活 => 窗口真弹出（见 windowGenuinelyPopped）。
@@ -832,7 +835,7 @@ async function warmupWindow(pidf, token) {
 async function spawnWindowWithRetry(lp, title, pidf, maxRetry = 3, token, reservedByRunner = false) {
   const auxiliaryId="aux-"+path.basename(lp); let coordinator;
   if(!reservedByRunner){coordinator=coordinatorDir(WORKSPACE);const claim=reserve(coordinator,{id:auxiliaryId,keys:["aux:"+token]},computeMaxWindows(os.totalmem()/1024**3));if(!claim.ok)throw new Error("Window admission waiting: "+claim.reason);}
-  maxRetry=1;
+  // 恢复调用方传入的重试上限（默认 3）：sync 拉起后每次尝试 ~2.5s，重试成本可控，兜底 WT 偶发不弹窗。
   for (let attempt = 1; attempt <= maxRetry; attempt++) {
     spawnVisibleWindow(lp, title);
     const deadline = Date.now() + 35000;

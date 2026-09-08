@@ -25,7 +25,7 @@ test('detached inactive launch starts the focus-restoring helper without blockin
  let called=0,unref=0;
  const child={unref(){unref++;}};
  const result=spawnInactiveWindowDetached('C:\\Windows\\wt.exe',['-w','win-x'],'D:\\',{invoke:(file,args,options)=>{
-  called++;assert.equal(file,'powershell.exe');assert.equal(options.detached,true);assert.equal(options.windowsHide,true);assert.equal(options.stdio,'ignore');
+  called++;assert.equal(file,'powershell.exe');assert.equal(options.detached,undefined);assert.equal(options.windowsHide,true);assert.equal(options.stdio,'ignore');
   const payload=JSON.parse(Buffer.from(args.at(-1),'base64').toString('utf8'));
   assert.equal(payload.file,'C:\\Windows\\wt.exe');assert.equal(payload.cwd,'D:\\');assert.equal(payload.parameters,'"-w" "win-x"');
   return child;

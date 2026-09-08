@@ -20,7 +20,7 @@ export function spawnInactiveWindowDetached(file,args,cwd,{invoke=spawn}={}){
  const payload=Buffer.from(JSON.stringify({file,parameters:args.map(quoteWindowsArgument).join(' '),cwd}),'utf8').toString('base64');
  let child;
  try{
-  child=invoke('powershell.exe',['-NoProfile','-NonInteractive','-File',fileURLToPath(new URL('./inactive-window.ps1',import.meta.url)),'-Payload',payload],{cwd,windowsHide:true,shell:false,detached:true,stdio:'ignore'});
+  child=invoke('powershell.exe',['-NoProfile','-NonInteractive','-File',fileURLToPath(new URL('./inactive-window.ps1',import.meta.url)),'-Payload',payload],{cwd,windowsHide:true,shell:false,stdio:'ignore'});
  }catch(error){throw new Error('INACTIVE_WINDOW_LAUNCH_FAILED: '+(error?.message||String(error)));}
  if(!child||typeof child.unref!=='function')throw new Error('INACTIVE_WINDOW_LAUNCH_FAILED: helper did not return a detached process');
  child.unref();

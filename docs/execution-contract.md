@@ -1,4 +1,4 @@
-# Shared execution contract (core 1.3.0, run protocol 2)
+# Shared execution contract (core 1.3.1, run protocol 2)
 
 Generic development uses scripts/core. The dedicated Codex plugin now owns a separately verified physical release snapshot; changes are promoted explicitly, not through directory junctions. The generic entry implements Codex, pi and version-pinned OpenClaw adapters; the dedicated plugin accepts Codex only. See pi-adapter.md for Pi-specific CLI, planning, session and shutdown behavior.
 
