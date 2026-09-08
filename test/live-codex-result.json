@@ -1,0 +1,257 @@
+{
+  "testedAt": "2026-09-06T09:27:14.455Z",
+  "passed": true,
+  "equivalentToCurrentCodexPlugin": true,
+  "entry": "C:\\Users\\yecha\\.tools\\open-tui-orchestrator\\cli.mjs",
+  "workspace": "D:\\",
+  "stateDirectory": "D:\\temp\\orchestrator",
+  "terminal": "wt",
+  "capacity": 8,
+  "peak": 8,
+  "totalWindows": 8,
+  "distinctLaunchers": 8,
+  "blocks": 8,
+  "tasks": 9,
+  "receiptsValid": true,
+  "serialOverflowVerified": true,
+  "overlapMilliseconds": 17904,
+  "engineExitCode": 0,
+  "strictPollExitCode": 0,
+  "finalAliveWindows": 0,
+  "offlineTestsPassed": 94,
+  "policyEvidence": [
+    {
+      "session": "rollout-2026-09-06T17-22-31-01a07606-c8e0-7b90-9175-43682e6fab39.jsonl",
+      "cwd": "D:\\",
+      "approval": "never",
+      "sandbox": "danger-full-access",
+      "approvalRequests": 0
+    },
+    {
+      "session": "rollout-2026-09-06T17-22-33-01a07606-d0cd-7890-98f8-e5de73ffc881.jsonl",
+      "cwd": "D:\\",
+      "approval": "never",
+      "sandbox": "danger-full-access",
+      "approvalRequests": 0
+    },
+    {
+      "session": "rollout-2026-09-06T17-22-36-01a07606-dbd6-71f3-b030-3c515061e66e.jsonl",
+      "cwd": "D:\\",
+      "approval": "never",
+      "sandbox": "danger-full-access",
+      "approvalRequests": 0
+    },
+    {
+      "session": "rollout-2026-09-06T17-22-39-01a07606-e90e-7173-ba21-a1b98a0623b2.jsonl",
+      "cwd": "D:\\",
+      "approval": "never",
+      "sandbox": "danger-full-access",
+      "approvalRequests": 0
+    },
+    {
+      "session": "rollout-2026-09-06T17-22-43-01a07606-f8de-7241-b2f4-71f26d1074ee.jsonl",
+      "cwd": "D:\\",
+      "approval": "never",
+      "sandbox": "danger-full-access",
+      "approvalRequests": 0
+    },
+    {
+      "session": "rollout-2026-09-06T17-22-48-01a07607-0b02-76b0-a2dd-c557c04dab59.jsonl",
+      "cwd": "D:\\",
+      "approval": "never",
+      "sandbox": "danger-full-access",
+      "approvalRequests": 0
+    },
+    {
+      "session": "rollout-2026-09-06T17-22-53-01a07607-20c3-7942-84c2-f6a01d117898.jsonl",
+      "cwd": "D:\\",
+      "approval": "never",
+      "sandbox": "danger-full-access",
+      "approvalRequests": 0
+    },
+    {
+      "session": "rollout-2026-09-06T17-22-59-01a07607-37e4-7a01-a890-db8d2602e32e.jsonl",
+      "cwd": "D:\\",
+      "approval": "never",
+      "sandbox": "danger-full-access",
+      "approvalRequests": 0
+    }
+  ],
+  "results": [
+    {
+      "id": "91",
+      "cwd": "D:\\",
+      "nonce": "dc926563-d07a-4a95-b56a-70e21e315b6f",
+      "pid": 31192,
+      "started": 1788686669831,
+      "finished": 1788686719559,
+      "sum": 50005000
+    },
+    {
+      "id": "92",
+      "cwd": "D:\\",
+      "nonce": "dc926563-d07a-4a95-b56a-70e21e315b6f",
+      "pid": 11276,
+      "started": 1788686672720,
+      "finished": 1788686719357,
+      "sum": 50005000
+    },
+    {
+      "id": "93",
+      "cwd": "D:\\",
+      "nonce": "dc926563-d07a-4a95-b56a-70e21e315b6f",
+      "pid": 4176,
+      "started": 1788686677271,
+      "finished": 1788686719341,
+      "sum": 50005000
+    },
+    {
+      "id": "94",
+      "cwd": "D:\\",
+      "nonce": "dc926563-d07a-4a95-b56a-70e21e315b6f",
+      "pid": 28988,
+      "started": 1788686679537,
+      "finished": 1788686719559,
+      "sum": 50005000
+    },
+    {
+      "id": "95",
+      "cwd": "D:\\",
+      "nonce": "dc926563-d07a-4a95-b56a-70e21e315b6f",
+      "pid": 29116,
+      "started": 1788686682509,
+      "finished": 1788686719481,
+      "sum": 50005000
+    },
+    {
+      "id": "96",
+      "cwd": "D:\\",
+      "nonce": "dc926563-d07a-4a95-b56a-70e21e315b6f",
+      "pid": 34808,
+      "started": 1788686687302,
+      "finished": 1788686719169,
+      "sum": 50005000
+    },
+    {
+      "id": "97",
+      "cwd": "D:\\",
+      "nonce": "dc926563-d07a-4a95-b56a-70e21e315b6f",
+      "pid": 31676,
+      "started": 1788686693461,
+      "finished": 1788686719185,
+      "sum": 50005000
+    },
+    {
+      "id": "98",
+      "cwd": "D:\\",
+      "nonce": "dc926563-d07a-4a95-b56a-70e21e315b6f",
+      "pid": 31432,
+      "started": 1788686701265,
+      "finished": 1788686719341,
+      "sum": 50005000
+    },
+    {
+      "id": "99",
+      "cwd": "D:\\",
+      "nonce": "dc926563-d07a-4a95-b56a-70e21e315b6f",
+      "pid": 31008,
+      "started": 1788686735685,
+      "finished": 1788686750700,
+      "sum": 50005000
+    }
+  ],
+  "overlapEvidence": {
+    "at": 1788686704149,
+    "live": [
+      {
+        "title": "B1:capacity-1",
+        "launcherPid": 28772,
+        "launcherParentPid": 30444,
+        "codexPids": [
+          24384
+        ]
+      },
+      {
+        "title": "B2:capacity-2",
+        "launcherPid": 30612,
+        "launcherParentPid": 30444,
+        "codexPids": [
+          30996
+        ]
+      },
+      {
+        "title": "B3:capacity-3",
+        "launcherPid": 12160,
+        "launcherParentPid": 30444,
+        "codexPids": [
+          12500
+        ]
+      },
+      {
+        "title": "B4:capacity-4",
+        "launcherPid": 30400,
+        "launcherParentPid": 30444,
+        "codexPids": [
+          34476
+        ]
+      },
+      {
+        "title": "B5:capacity-5",
+        "launcherPid": 26532,
+        "launcherParentPid": 30444,
+        "codexPids": [
+          7716
+        ]
+      },
+      {
+        "title": "B6:capacity-6",
+        "launcherPid": 26852,
+        "launcherParentPid": 30444,
+        "codexPids": [
+          10408
+        ]
+      },
+      {
+        "title": "B7:capacity-7",
+        "launcherPid": 33996,
+        "launcherParentPid": 30444,
+        "codexPids": [
+          30128
+        ]
+      },
+      {
+        "title": "B8:capacity-8",
+        "launcherPid": 31648,
+        "launcherParentPid": 30444,
+        "codexPids": [
+          26092
+        ]
+      }
+    ],
+    "ready": [
+      "91",
+      "92",
+      "93",
+      "94",
+      "95",
+      "96",
+      "97",
+      "98"
+    ]
+  },
+  "engineSha256": "9da4c8d23e057c5494bb81bc69399b6b0f38c0bb170e6c5aa847d2f3f42ccb08",
+  "baseline": {
+    "totalWindows": 9,
+    "tasks": 9,
+    "terminal": "conhost",
+    "equivalent": false
+  },
+  "limitations": [
+    "Only the Codex adapter is implemented and tested.",
+    "Capacity is per invocation; cross-workspace shared resources need explicit shared state."
+  ],
+  "cleanup": {
+    "directory": "D:\\temp\\open-live-abdcbceebbc",
+    "status": "blocked_by_host_policy"
+  }
+}
