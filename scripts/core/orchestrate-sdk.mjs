@@ -69,6 +69,7 @@ import {runOpenCodePlanner,writeOpenCodeLauncher,waitOpenCodeResult} from './ope
 import {runKimiPlanner,writeKimiLauncher,waitKimiResult} from './kimi-runtime.mjs';
 import {spawnInactiveWindow} from './inactive-window.mjs';
 import {ensureRunGuardian} from './run-guardian.mjs';
+import {lockedForMaintenance,readMaintenanceLock,MAINTENANCE_MESSAGE} from './maintenance-lock.mjs';
 import { networkConfig } from "./network-policy.mjs";
 import { spawn, spawnSync } from "node:child_process";
 import { resolveAgent, launchArgs } from "./agent.mjs";
@@ -2010,6 +2011,13 @@ async function classifyExecutionMode(request) {
 export async function main() {
   for(const [flag,key] of [["--run-id","ORCH_RUN_ID"],["--acceptance-file","ORCH_ACCEPTANCE_FILE"],["--acceptance","ORCH_ACCEPTANCE_FILE"]]){const index=process.argv.indexOf(flag);if(index>=0){if(!process.argv[index+1])throw new Error(flag+" needs a value");process.env[key]=process.argv[index+1];process.argv.splice(index,2);}}
   const mode = process.argv[2];
+  // 维护锁：上锁期间一切动作模式（--run-windows/--spawn/--resume-run/--run/--exec/--plan/
+  // --selftest-close 等）只回固定话术，发起 agent 本轮跳过编排器直接执行；只读模式不受影响。
+  const MAINTENANCE_BYPASS = new Set([undefined, "--doctor", "--status", "--verify-run", "--clear-cache"]);
+  if (lockedForMaintenance() && !MAINTENANCE_BYPASS.has(mode)) {
+    console.log(MAINTENANCE_MESSAGE);
+    return;
+  }
   if (mode === "--doctor") {
     console.log(JSON.stringify({ agent: AGENT.agent, cli: CODEX, workspace: WORKSPACE,
       stateDir: STATE_DIR, terminal: wtAvailable() ? "wt" : "conhost",
@@ -2207,6 +2215,8 @@ export async function main() {
   }
 
   if (mode === "--status") {
+    const mlock = readMaintenanceLock();
+    if (mlock.locked) console.log("maintenance lock: LOCKED" + (mlock.reason ? " (" + mlock.reason + ")" : "") + (mlock.expiresAt ? ", expires " + new Date(mlock.expiresAt).toISOString() : "") + " - " + MAINTENANCE_MESSAGE);
     showStatus(process.argv.includes("--readonly"));
     return;
   }
