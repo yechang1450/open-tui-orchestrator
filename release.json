@@ -28,7 +28,7 @@
     "pi-shutdown.mjs": "c7d206b5d9f7560071ccec318a3d38faa27383d8531997b19ddfe572feb8f9f9",
     "poll-windows.mjs": "9d0a6b0156218bac287a226fadb554718a234f0bc8caaf964700498be3794670",
     "recovery.mjs": "a2e796c04a4eedafa2c2efc409ef92184216aa62ec70bfd63e25f51cf39df4c2",
-    "runner.mjs": "b55c5c98f38decdb3382e721c8234fb5a25047ae05aff1bc7eb17524ac1b420e",
+    "runner.mjs": "4ce2b6070de0d71ffa7e8697d0c62a1363908b6ce7a4a0cab0cbe4913aa42364",
     "runtime-context.mjs": "39ee58751764034504a6e3c5a6cb53ded725abee5a5ccd7675ade7d690bdb58b"
   },
   "runtimeFiles": {
@@ -63,7 +63,7 @@
     "scripts/core/pi-shutdown.mjs": "c7d206b5d9f7560071ccec318a3d38faa27383d8531997b19ddfe572feb8f9f9",
     "scripts/core/poll-windows.mjs": "9d0a6b0156218bac287a226fadb554718a234f0bc8caaf964700498be3794670",
     "scripts/core/recovery.mjs": "a2e796c04a4eedafa2c2efc409ef92184216aa62ec70bfd63e25f51cf39df4c2",
-    "scripts/core/runner.mjs": "b55c5c98f38decdb3382e721c8234fb5a25047ae05aff1bc7eb17524ac1b420e",
+    "scripts/core/runner.mjs": "4ce2b6070de0d71ffa7e8697d0c62a1363908b6ce7a4a0cab0cbe4913aa42364",
     "scripts/core/runtime-context.mjs": "39ee58751764034504a6e3c5a6cb53ded725abee5a5ccd7675ade7d690bdb58b",
     "scripts/host-cli.mjs": "994448626766f53883a29d17a5af547dcb67f6d2b9e7e5b6b6ff60f28582978c",
     "scripts/network-policy.mjs": "3a2b09ad0555475fa31d8e926da951aacd9a8997e33d80e1d46712432438d15a",
