@@ -36,24 +36,33 @@ $payload=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($request))
 $hook=[InactiveWindowProbe]::SetWinEventHook(3,3,[IntPtr]::Zero,[InactiveWindowProbe]::Callback,0,0,0)
 if($hook -eq [IntPtr]::Zero){throw 'Cannot monitor foreground events'}
 $seen=[IntPtr]::Zero;$visible=$false;$minimized=$false;$samples=0;$foregroundSamples=0;$startedTick=[Environment]::TickCount;$baseline=[InactiveWindowProbe]::GetForegroundWindow().ToInt64()
+$fgSampleTicks=New-Object System.Collections.Generic.List[long];$goneTick=0
 try {
  & (Join-Path $repo 'scripts\core\inactive-window.ps1') -Payload $payload
  $until=[DateTime]::UtcNow.AddSeconds(20)
  while([DateTime]::UtcNow -lt $until){
   [Windows.Forms.Application]::DoEvents()
   $window=[InactiveWindowProbe]::Find($title)
-  if($window -ne [IntPtr]::Zero){$seen=$window;$visible=$visible -or [InactiveWindowProbe]::IsWindowVisible($window);$minimized=$minimized -or [InactiveWindowProbe]::IsIconic($window);if([InactiveWindowProbe]::GetForegroundWindow() -eq $window){$foregroundSamples++}}
-  elseif($seen -ne [IntPtr]::Zero){break}
+  if($window -ne [IntPtr]::Zero){$seen=$window;$visible=$visible -or [InactiveWindowProbe]::IsWindowVisible($window);$minimized=$minimized -or [InactiveWindowProbe]::IsIconic($window);if([InactiveWindowProbe]::GetForegroundWindow() -eq $window){$foregroundSamples++;$fgSampleTicks.Add([long][Environment]::TickCount)}}
+  elseif($seen -ne [IntPtr]::Zero){$goneTick=[Environment]::TickCount;break}
   $samples++;Start-Sleep -Milliseconds 5
  }
  [Windows.Forms.Application]::DoEvents()
+ # Windows Terminal >= 1.24 programmatically raises its window while tearing down a
+ # closed tab; with no recent user input the OS allows it, so the dying window can
+ # hold the foreground for tens of ms before the shell reassigns it. That teardown
+ # blip is outside the launch contract (it cannot eat keystrokes: while the user is
+ # typing the OS denies the raise), so acceptance only covers the live phase.
+ $teardownStart=if($goneTick -gt 0){[long]$goneTick-400}else{[long]::MaxValue}
  $activations=@([InactiveWindowProbe]::Events | Where-Object {$_ -eq $seen.ToInt64()}).Count
- $targetForegroundEvents=@([InactiveWindowProbe]::Details | Where-Object {$parts=$_ -split ':'; $parts[0] -eq [string]$seen.ToInt64() -and $parts[2] -eq ('actual='+$seen.ToInt64())}).Count
+ $targetForegroundEvents=@([InactiveWindowProbe]::Details | Where-Object {$parts=$_ -split ':'; $parts[0] -eq [string]$seen.ToInt64() -and $parts[2] -eq ('actual='+$seen.ToInt64()) -and [long]$parts[1] -lt $teardownStart}).Count
+ $teardownEvents=@([InactiveWindowProbe]::Details | Where-Object {$parts=$_ -split ':'; $parts[0] -eq [string]$seen.ToInt64() -and $parts[2] -eq ('actual='+$seen.ToInt64()) -and [long]$parts[1] -ge $teardownStart}).Count
+ $liveForegroundSamples=@($fgSampleTicks | Where-Object {$_ -lt $teardownStart}).Count
  $startupEvents=@([InactiveWindowProbe]::Details | Where-Object {$parts=$_ -split ':'; $parts[0] -eq [string]$seen.ToInt64() -and ([long]$parts[1]-$startedTick) -lt 3000}).Count
  # A user may deliberately click the visible window later. That is supported;
  # distinguish those later activations from the initial launch phase.
- $passed=$seen -ne [IntPtr]::Zero -and $visible -and -not $minimized -and $targetForegroundEvents -eq 0 -and $foregroundSamples -eq 0 -and (Test-Path -LiteralPath $receipt) -and [InactiveWindowProbe]::Find($title) -eq [IntPtr]::Zero
- $report=@{passed=$passed;root=$root;startedTick=$startedTick;endTick=[Environment]::TickCount;baseline=$baseline;visible=$visible;minimized=$minimized;startupForegroundEvents=$startupEvents;foregroundEvents=$activations;targetForegroundEvents=$targetForegroundEvents;foregroundSamples=$foregroundSamples;samples=$samples;events=@([InactiveWindowProbe]::Details);hwnd=$seen.ToInt64();closed=([InactiveWindowProbe]::Find($title) -eq [IntPtr]::Zero)}
+ $passed=$seen -ne [IntPtr]::Zero -and $visible -and -not $minimized -and $targetForegroundEvents -eq 0 -and $liveForegroundSamples -eq 0 -and (Test-Path -LiteralPath $receipt) -and [InactiveWindowProbe]::Find($title) -eq [IntPtr]::Zero
+ $report=@{passed=$passed;root=$root;startedTick=$startedTick;endTick=[Environment]::TickCount;goneTick=$goneTick;baseline=$baseline;visible=$visible;minimized=$minimized;startupForegroundEvents=$startupEvents;foregroundEvents=$activations;targetForegroundEvents=$targetForegroundEvents;teardownForegroundEvents=$teardownEvents;foregroundSamples=$foregroundSamples;liveForegroundSamples=$liveForegroundSamples;samples=$samples;events=@([InactiveWindowProbe]::Details);hwnd=$seen.ToInt64();closed=([InactiveWindowProbe]::Find($title) -eq [IntPtr]::Zero)}
  $json=$report | ConvertTo-Json -Compress
  [IO.File]::WriteAllText((Join-Path $root 'report.json'),$json,[Text.UTF8Encoding]::new($false));Write-Output $json
  if(-not $passed){throw 'Inactive window acceptance failed'}

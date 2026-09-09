@@ -149,6 +149,6 @@ node cli.mjs --agent pi --doctor
 node cli.mjs --agent openclaw --doctor
 ~~~
 
-当前通用核心为 1.4.0，离线回归为 160/160 通过；覆盖任务不丢失、多块并行容量调度、依赖波次、全局容量租约、Windows Terminal 启动（同步拉起，弹窗可靠）、失焦启动回归、进程身份、断点恢复、弱网配置、SDK 诊断和干净发行副本。测试环境要求：离线套件假定发起 agent 的 CLI（默认 `codex`）可在 PATH 解析（Windows 下前置 codex vendor bin，即回归环境约定）；缺失时依赖 agent 解析的测试文件按设计快速失败（fail-closed），其中两个运行期依赖 CLI 的用例已标注 `{skip}`。真实模型额度、不同 Windows 用户安装、长时间断网恢复和每个未来 Agent 的现场兼容性也仍需单独验收。
+当前通用核心为 1.4.1，离线回归为 176/176 通过；覆盖任务不丢失、多块并行容量调度、依赖波次、全局容量租约、Windows Terminal 启动（同步拉起，弹窗可靠）、失焦启动回归、进程身份、断点恢复、弱网配置、SDK 诊断和干净发行副本。测试环境要求：离线套件假定发起 agent 的 CLI（默认 `codex`）可在 PATH 解析（Windows 下前置 codex vendor bin，即回归环境约定）；缺失时依赖 agent 解析的测试文件按设计快速失败（fail-closed），其中两个运行期依赖 CLI 的用例已标注 `{skip}`。真实模型额度、不同 Windows 用户安装、长时间断网恢复和每个未来 Agent 的现场兼容性也仍需单独验收。
 
 未知宿主、无可执行 CLI 或显式路径无效时，命令会直接失败并给出原因；不会自动安装、猜测替代路径或换用其它 Agent。
