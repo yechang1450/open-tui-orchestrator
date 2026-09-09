@@ -263,10 +263,11 @@ function classifyPrompt(request, hints = {}) {
     "每个自然任务一条，字段如下：id(字符串编号)、summary(保留原意的一句话)、kind(project|tool|system)、" +
     "project(80|81|82|83，只在请求里明确写了才填，否则填 null)、" +
     "hint(该任务涉及模块/资源关键词，如 会员管理、商品、订单)、" +
-    "conflict_hints(会碰到的资源字符串数组，如 [\"db:订单\",\"dir:管理端\"]，无则 [])、" +
+    "conflict_hints(该任务会改动的具体文件/模块/资源关键词数组，越具体越好，如 [\"file:src/order.js\",\"db:订单\",\"dir:管理端\"]；同项目内资源不重叠的任务会被拆成并行窗口，所以每个 project 任务都必须尽量给出，实在不确定才 [])、" +
     "depends_on(依赖的其它任务 id 数组，无则 [])、" +
     "feasible(是否可行，布尔)、already_done(是否已达成无需做，布尔)。" +
     "规则：TODO LIST 必须覆盖全部原始任务；不遗漏、不合并；请求没写项目号时 project 必须为 null，交给模块映射校正，不许猜；" +
+    "project 任务的 conflict_hints 不许偷懒留空：留空表示资源不确定，该项目组会被整体串行；给出精确资源关键词，同项目不重叠的任务就能并行开窗；" +
     "禁止调用任何工具/读文件/搜索/联网；只输出一个 JSON 对象 {\"tasks\":[...]}，能被 JSON.parse 直接解析，不要 Markdown 代码块、不要任何前后缀文字。" +
     hintText + "\n请求：" + request + '\n以下原始任务清单是权威清单。逐条返回相同的 T001 等 id，不添加、不遗漏、不合并任务。summary 可概述，执行正文由主控按 id 恢复；depends_on 也使用原始 id。\n'+JSON.stringify(requestTasks(request))
   );
@@ -313,10 +314,24 @@ function buildBlocksFromTasks(tasks, hints = {}) {
   }
   const blocks = [];
   const blockItems = [];   // 与 blocks 平行的源 item 数组，用于依赖映射
+  const hintKeys = (it) => it.conflict_hints.map((h) => (h.includes(":") ? h : "file:" + h));
   for (const [title, arr] of Object.entries(byProj)) {
     arr.sort((a,b)=>rank.get(a.sourceTaskId||a.id)-rank.get(b.sourceTaskId||b.id));
-    blocks.push({ type: "independent", title, dependsOn: [], conflictKeys: ["dir:" + title,...arr.flatMap(it=>it.conflict_hints.map(h=>h.includes(":")?h:"file:"+h))], tasks: [{ id: "t" + (blocks.length + 1), title, prompt: "仅处理项目 " + title + "。任务：" + arr.map((a) => a.summary).join("；") + "。不要处理其它项目编号。" }] });
-    blockItems.push(arr);
+    const clusters = splitProjectGroup(arr, hintKeys);
+    for (let ci = 0; ci < clusters.length; ci++) {
+      const cluster = clusters[ci];
+      const split = clusters.length > 1;
+      const btitle = split ? title + "-" + (ci + 1) : title;
+      // 精细化拆分：可证明资源不重叠的同项目任务各自成块，只带精确 hint 键（不带 dir:proj-N，
+      // 否则兄弟块互相撞 key 又被串行）；未拆分时维持原样：单块 + dir 键兜底串行。
+      const keys = split
+        ? [...new Set(cluster.flatMap(hintKeys))]
+        : ["dir:" + title, ...cluster.flatMap(hintKeys)];
+      const prompt = "仅处理项目 " + title + "。任务：" + cluster.map((a) => a.summary).join("；") + "。不要处理其它项目编号。"
+        + (split ? "本项目任务已按资源拆分为多个并行窗口，本窗只改动本块任务涉及的文件/资源。" : "");
+      blocks.push({ type: "independent", title: btitle, dependsOn: [], conflictKeys: keys, tasks: [{ id: "t" + (blocks.length + 1), title: btitle, prompt }] });
+      blockItems.push(cluster);
+    }
   }
   for (const it of toolItems) {
     const title = "task-" + (blocks.length + 1);
@@ -353,6 +368,28 @@ function buildBlocksFromTasks(tasks, hints = {}) {
   return blocks;
 }
 function byProjKeyCount(map) { let n = 0; for (const k in map) n += (map[k] || []).length; return n; }
+// 同项目组内精细化拆分：按 conflict_hints 的资源键重叠做并查集聚类。只有【全部任务都给出
+// 精确 hints】且能分成 ≥2 个互不重叠的簇时才真拆分（同项目不同资源 → 并行窗口）；
+// 任一任务 hints 为空（资源说不清）或全部纠缠成一簇时返回 [arr]（维持单块串行，安全兜底）。
+// 依赖（depends_on）不参与聚类——拆开后由块间 dependsOn 边保住先后顺序。
+function splitProjectGroup(arr, hintKeys) {
+  if (!Array.isArray(arr) || arr.length < 2) return [arr];
+  if (arr.some((it) => !Array.isArray(it.conflict_hints) || it.conflict_hints.length === 0)) return [arr];
+  const parent = arr.map((_, i) => i);
+  const find = (i) => { while (parent[i] !== i) { parent[i] = parent[parent[i]]; i = parent[i]; } return i; };
+  const keys = arr.map((it) => hintKeys(it));
+  for (let i = 0; i < arr.length; i++)
+    for (let j = i + 1; j < arr.length; j++)
+      if (keysOverlap(keys[i], keys[j])) { const ri = find(i); if (ri !== find(j)) parent[ri] = find(j); }
+  const clusters = new Map();
+  for (let i = 0; i < arr.length; i++) {
+    const r = find(i);
+    if (!clusters.has(r)) clusters.set(r, []);
+    clusters.get(r).push(arr[i]);
+  }
+  const out = [...clusters.values()];
+  return out.length > 1 ? out : [arr];
+}
 /**
  * 【兜底】当 LLM 拆块失败/超时且重试耗尽时，把整条请求保留为【一个 linked 块】（严格串行、无并发冲突）。
  * 该完整账本随后交给开窗策略判断：单块计划返回 inline，由发起对话执行；不会因解析失败丢掉任何原始任务。
