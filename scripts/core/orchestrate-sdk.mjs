@@ -32,8 +32,10 @@
  *   ORCH_AGENT     — host identity; Codex, pi and version-pinned OpenClaw adapters are implemented. No fallback.
  *   CODEX_EXE      (default: auto-detect from PATH or a common user install).
  *   PYTHON         (default: `python`; prepended to the spawned window PATH).
- *   ORCH_MODEL     — optional explicit override; otherwise CLI configuration.
- *   ORCH_EFFORT    — optional explicit override; otherwise CLI configuration.
+ *   ORCH_MODEL     — optional explicit override. Unset: inherit the initiating window's current
+ *                      model (codex rollout / kimi wire.jsonl / pi settings.json / opencode config;
+ *                      see scripts/core/host-model.mjs); last fallback is the CLI's own config.
+ *   ORCH_EFFORT    — optional explicit thinking-effort override, same inheritance chain as above.
  *   ORCH_WINDOW_STAGGER_MS (default: 0) — 同一次 run 内逐窗错峰拉起间隔；突发首回合不再集中打在账号每分钟限流上。
  *   ORCH_MAX_WINDOWS (default: 内存换算上限) — 活窗准入上限的额外收紧（不影响规划块数）；账号/套餐并发低于本机上限时用它压到安全线。
  *
@@ -69,6 +71,7 @@ import {spawnInactiveWindow} from './inactive-window.mjs';
 import { networkConfig } from "./network-policy.mjs";
 import { spawn, spawnSync } from "node:child_process";
 import { resolveAgent, launchArgs } from "./agent.mjs";
+import { inheritHostModelEffort } from "./host-model.mjs";
 import { writeFileSync, mkdirSync, readFileSync, existsSync, rmSync, readdirSync, statSync, statfsSync, openSync, readSync, closeSync, renameSync } from "node:fs";
 import os from "node:os";
 import crypto from "node:crypto";
@@ -115,6 +118,13 @@ const CODEX = AGENT.config.bin;
 const WORKSPACE_Q = WORKSPACE.replace(/'/g, "''");
 const CODEX_Q = CODEX.replace(/'/g, "''");
 const PY = process.env.PYTHON || "python";
+// 发起窗 model/thinking 继承（同窗即同 agent，逐字透传）：显式 ORCH_MODEL/ORCH_EFFORT 优先；
+// 未显式给出时检测发起窗口当前实际值并写回 env，下游 argv 构造与 codex -m/-c 注入全部消费这两个变量。
+// node --test 下由 inheritHostModelEffort 自行豁免（NODE_TEST_CONTEXT）。
+try {
+  const inherited = inheritHostModelEffort(AGENT.agent, { cwd: WORKSPACE });
+  if (inherited) console.log(`[orchestrator] inherit host model/effort (${AGENT.agent}/${inherited.source}): model=${inherited.model || '-'} effort=${inherited.effort || '-'}`);
+} catch { /* 检测失败不阻断 */ }
 // Leave model selection to the host CLI unless explicitly overridden.
 const MODEL = process.env.ORCH_MODEL || undefined;
 const EFFORT = process.env.ORCH_EFFORT || undefined;

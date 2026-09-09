@@ -17,7 +17,7 @@ open-tui-orchestrator --agent pi --resume-run my-run
 ## CLI 与运行协议
 
 - 支持本地 pi 0.84.4 及以上所需接口。解析 npm 启动入口后，直接用 Node 和实际 cli.js 调用，避免批处理字符串拼接；也检查原生可执行候选。显式路径错误时不回退、不安装。
-- 保留 pi 自己的模型和登录设置。只有调用方显式传入 ORCH_MODEL / ORCH_EFFORT 才转为 pi 对应参数；不读取或输出密钥。
+- 保留 pi 自己的模型和登录设置。model/thinking 继承发起窗：显式 ORCH_MODEL / ORCH_EFFORT 优先，否则读 `~/.pi/agent/settings.json` 的 defaultModel / defaultThinkingLevel，转为 pi 的 `--model` / `--thinking`；不读取或输出密钥。
 - `--approve` 处理本次项目文件信任，`--offline` 关闭启动时非必要联网，不禁止正常模型请求。没有向 pi 塞入 Codex 的 `--sandbox`、`--cd` 或 `never` 参数；不支持的沙箱要求明确拒绝。
 - 窗口工作目录继承发起目录。pi 会话写入该工作区 `temp/orchestrator/pi/sessions`，启动器和检查点沿用工作区 temp；不修改用户全局配置。
 - 使用 pi 的 agent_settled 事件（自动重试、压缩及排队消息均处理完毕后发出的结束事件），仅在空闲时检查最后一条 assistant 输出，再调用 pi 的正常退出接口。用户提示里的结束标记不能触发成功。

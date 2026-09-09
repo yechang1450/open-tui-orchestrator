@@ -26,6 +26,19 @@ test('kimi PowerShell launcher preserves prompt argv, captures the token line an
   assert.deepEqual(JSON.parse(fs.readFileSync(capture,'utf8')),['-p',prompt.trim()]);
  }finally{fs.rmSync(dir,{recursive:true,force:true});}
 });
+test('kimi launcher with ORCH_MODEL emits -m before -p through real PowerShell argv',()=>{
+ const pm=process.env.ORCH_MODEL;process.env.ORCH_MODEL='kimi-k3';
+ const dir=fs.mkdtempSync(path.join(family,'kimi-launch-model-'));
+ try{
+  const worker=path.join(dir,'fake kimi.mjs'),capture=path.join(dir,'argv.json');
+  fs.writeFileSync(worker,'import fs from "node:fs";\nconst p=process.argv.at(-1);\nconst m=/^capture:(.+)$/m.exec(p);\nfs.writeFileSync(m[1].trim(),JSON.stringify(process.argv.slice(2)));\nconsole.log("done 【本块唯一标识】 kimitest2");\n');
+  const prompt='带 model 的窗口任务\n【本块唯一标识】kimitest2\ncapture:'+capture;
+  const la=writeKimiLauncher({bin:process.execPath,prefixArgs:[worker]},{key:'B1',suffix:'test2',prompt,workspace:dir,temp:path.join(dir,'temp')});
+  const result=spawnSync('powershell.exe',['-NoProfile','-File',la.lp],{windowsHide:true,encoding:'utf8',timeout:20000});
+  assert.equal(result.status,0,result.stderr);
+  assert.deepEqual(JSON.parse(fs.readFileSync(capture,'utf8')),['-m','kimi-k3','-p',prompt.trim()]);
+ }finally{if(pm===undefined)delete process.env.ORCH_MODEL;else process.env.ORCH_MODEL=pm;fs.rmSync(dir,{recursive:true,force:true});}
+});
 test('kimi result wait returns the launcher-written outcome immediately',async()=>{
  const dir=fs.mkdtempSync(path.join(family,'kimi-wait-'));
  try{

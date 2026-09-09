@@ -15,7 +15,7 @@ open-tui-orchestrator --run-id my-run --acceptance-file D:/work/temp/acceptance.
 - 窗口 argv 为 `run -i --auto --dir <工作区>`：`-i` 让 opencode 在本回合结束后自行退出，`--auto` 等价于 pi 的 `--approve`（编排器已完成授权归一）。提示词从文件读出、并入数组后再做 Windows PowerShell 5.1 原生命令行修正，引号、中文与多行内容不丢失。
 - 窗口输出 tee 到日志，启动器按【本块唯一标识】token 行写结果文件（首行 JSON + `__EXIT__=N` 尾行）；等待方只解析首行 JSON。
 - 规划走 `run --format json` 的 headless 事件流，取最后一条 assistant 文本事件；`type=error` 事件即拒绝该次规划。
-- 只有调用方显式传入 ORCH_MODEL 才转为 `--model`；不支持的沙箱要求明确拒绝（OPENCODE_SANDBOX_UNSUPPORTED）。
+- model 继承发起窗：显式 ORCH_MODEL 优先，否则读 opencode.json(c) 顶层 `model` 转为 `--model`；opencode 无 thinking effort 旗标，不传递；不支持的沙箱要求明确拒绝（OPENCODE_SANDBOX_UNSUPPORTED）。
 
 ## 验证入口
 
