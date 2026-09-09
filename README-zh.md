@@ -23,7 +23,7 @@ open-tui-orchestrator 面向复杂、较长、包含多个可独立推进部分�
 
 Windows Terminal 是默认承载。窗口沿用发起对话的工作目录，并以失焦、脱离父进程的方式启动，尽量不抢占正在使用的窗口。启动脚本、结果、锁、拆解缓存和恢复账本统一放在发起工作区的 `temp/orchestrator`；宿主 Agent 自己的配置、会话和凭据仍由宿主管理。PowerShell 只承担 Windows 生命周期、编码和进程树管理辅助，窗口承载和 Agent 适配优先走 Node.js 与 Windows Terminal。
 
-Codex、pi 和固定版本 OpenClaw 适配器（把不同宿主 CLI 的参数、输出和关闭方式转换成统一协议）已经接通。未知 Agent、未验证的 CLI 或缺失的可执行文件会直接给出诊断，不会自动安装，也不会回退到另一个 Agent。已经授权的执行上下文在 TUI 窗启动后直接执行，不插入额外人工确认；编排器只继承调用方已有权限，不扩大权限范围。
+Codex、pi、opencode、Kimi Code 和固定版本 OpenClaw 适配器（把不同宿主 CLI 的参数、输出和关闭方式转换成统一协议）已经接通。宿主由 `--agent`/`ORCH_AGENT`、宿主环境标记或 Windows 祖先进程链自动识别——哪个 agent 发起，窗口就用哪个 agent 的 CLI。未知 Agent、未验证的 CLI 或缺失的可执行文件会直接给出诊断，不会自动安装，也不会回退到另一个 Agent。已经授权的执行上下文在 TUI 窗启动后直接执行，不插入额外人工确认；编排器只继承调用方已有权限，不扩大权限范围。
 
 ## 什么时候适合使用
 
@@ -119,7 +119,7 @@ node cli.mjs --agent codex --workspace 'D:\your-project' --run-windows '修复�
 
 ### 10. 以适配器隔离不同 Agent
 
-通用入口通过 `--agent` 或 `ORCH_AGENT` 选择宿主。Codex、pi 和固定版本 OpenClaw 各自实现参数拼接、会话/结果读取、完成判定和关闭流程；通用调度器只依赖统一协议。新 Agent 必须同时通过 CLI 发现、规划、交互启动、输出解析、完成和清理验证，不能只添加一个命令名。
+通用入口通过 `--agent` 或 `ORCH_AGENT` 选择宿主；两者都缺省时，先按宿主环境标记（`CODEX_THREAD_ID`/`CODEX_SESSION_ID`），再按 Windows 祖先进程链（kimi.exe / codex.exe / pi-coding-agent / opencode / openclaw，就近命中）自动识别发起方。Codex、pi、opencode、Kimi Code 和固定版本 OpenClaw 各自实现参数拼接、会话/结果读取、完成判定和关闭流程；通用调度器只依赖统一协议。新 Agent 必须同时通过 CLI 发现、规划、交互启动、输出解析、完成和清理验证，不能只添加一个命令名。
 
 ### 11. 弱网和无二次确认执行
 
@@ -135,11 +135,13 @@ Codex 规划和窗口沿用现有 HTTPS Responses 配置，避免先等待 WebSo
 - [发行策略](docs/release-policy.md)
 - [Pi 适配说明](docs/pi-adapter.md)
 - [OpenClaw 执行与隔离说明](docs/openclaw-adapter.md)
+- [Kimi Code 适配器](docs/kimi-adapter.md)
+- [opencode 适配器](docs/opencode-adapter.md)
 - [失焦窗口验证](docs/inactive-windows.md)
 
 ## 当前支持与验证边界
 
-Codex CLI、pi CLI 和 OpenClaw 2026.9.2 CLI 已完成适配。运行诊断：
+Codex CLI、pi CLI、opencode CLI、Kimi Code CLI 和 OpenClaw 2026.9.2 CLI 已完成适配。运行诊断：
 
 ~~~powershell
 node cli.mjs --agent codex --doctor
@@ -147,6 +149,6 @@ node cli.mjs --agent pi --doctor
 node cli.mjs --agent openclaw --doctor
 ~~~
 
-当前通用核心为 1.3.1，离线回归为 149/149 通过；覆盖任务不丢失、多块并行容量调度、依赖波次、全局容量租约、Windows Terminal 启动（同步拉起，弹窗可靠）、失焦启动回归、进程身份、断点恢复、弱网配置、SDK 诊断和干净发行副本。测试环境要求：离线套件假定发起 agent 的 CLI（默认 `codex`）可在 PATH 解析（Windows 下前置 codex vendor bin，即回归环境约定）；缺失时依赖 agent 解析的测试文件按设计快速失败（fail-closed），其中两个运行期依赖 CLI 的用例已标注 `{skip}`。真实模型额度、不同 Windows 用户安装、长时间断网恢复和每个未来 Agent 的现场兼容性也仍需单独验收。
+当前通用核心为 1.4.0，离线回归为 160/160 通过；覆盖任务不丢失、多块并行容量调度、依赖波次、全局容量租约、Windows Terminal 启动（同步拉起，弹窗可靠）、失焦启动回归、进程身份、断点恢复、弱网配置、SDK 诊断和干净发行副本。测试环境要求：离线套件假定发起 agent 的 CLI（默认 `codex`）可在 PATH 解析（Windows 下前置 codex vendor bin，即回归环境约定）；缺失时依赖 agent 解析的测试文件按设计快速失败（fail-closed），其中两个运行期依赖 CLI 的用例已标注 `{skip}`。真实模型额度、不同 Windows 用户安装、长时间断网恢复和每个未来 Agent 的现场兼容性也仍需单独验收。
 
 未知宿主、无可执行 CLI 或显式路径无效时，命令会直接失败并给出原因；不会自动安装、猜测替代路径或换用其它 Agent。

@@ -10,7 +10,7 @@ const source = fileURLToPath(new URL('..', import.meta.url));
 test('generic release seal covers the current core and runtime entrypoints', () => {
   const result = verifyRelease(source);
   assert.equal(result.schema, 2);
-  assert.equal(result.coreVersion, '1.3.1');
+  assert.equal(result.coreVersion, '1.4.0');
   assert.ok(result.files >= 20, `expected a sealed execution core, got ${result.files}`);
   assert.ok(result.runtimeFiles >= 10, `expected sealed runtime entrypoints, got ${result.runtimeFiles}`);
 });

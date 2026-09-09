@@ -62,6 +62,7 @@ import {launcherIdentity,processSnapshot,sameProcess,coordinatorDir,reserve,bind
 import {runPiPlanner,writePiLauncher,waitPiResult} from './pi-runtime.mjs';
 import {runOpenClawPlanner,writeOpenClawLauncher} from './openclaw-runtime.mjs';
 import {runOpenCodePlanner,writeOpenCodeLauncher,waitOpenCodeResult} from './opencode-runtime.mjs';
+import {runKimiPlanner,writeKimiLauncher,waitKimiResult} from './kimi-runtime.mjs';
 import {spawnInactiveWindow} from './inactive-window.mjs';
 import { networkConfig } from "./network-policy.mjs";
 import { spawn, spawnSync } from "node:child_process";
@@ -105,6 +106,8 @@ const { workspace: WORKSPACE, temp: TMP, state: STATE_DIR } = resolveRuntimeCont
 process.env.WORKSPACE_DIR = WORKSPACE;
 process.env.ORCH_STATE_DIR = STATE_DIR;
 const AGENT = resolveAgent();
+// Non-codex window completion is a launcher-written result file; each adapter owns its wait.
+const waitAdapterResult=(rf,timeout,pidf)=>AGENT.agent==='opencode'?waitOpenCodeResult(rf,timeout,pidf):AGENT.agent==='kimi'?waitKimiResult(rf,timeout,pidf):waitPiResult(rf,timeout,pidf);
 const CODEX = AGENT.config.bin;
 // PowerShell 单引号字符串内嵌路径：把 ' 转义成 ''，避免路径含引号时破坏脚本/注入。
 const WORKSPACE_Q = WORKSPACE.replace(/'/g, "''");
@@ -564,6 +567,7 @@ async function runThreadPrompt(prompt, opts = {}) {
   if(AGENT.agent==='openclaw')return runOpenClawPlanner(AGENT.config,prompt,WORKSPACE);
   if(AGENT.agent==='pi')return runPiPlanner(AGENT.config,prompt,WORKSPACE);
   if(AGENT.agent==='opencode')return runOpenCodePlanner(AGENT.config,prompt,WORKSPACE);
+  if(AGENT.agent==='kimi')return runKimiPlanner(AGENT.config,prompt,WORKSPACE);
   // outputSchema 走 runStreamed 的 turn 选项（强制结构化输出 / 纯 JSON），不能混进 startThread 配置。
   const { outputSchema, ...threadOpts } = opts;
   const thread = codex.startThread({ ...threadBase(), ...threadOpts });
@@ -1046,6 +1050,7 @@ function writeInteractiveLauncher(title, prompt, sfx) {
   if(AGENT.agent==='pi')return writePiLauncher(AGENT.config,{key:title,prompt,suffix:sfx,workspace:WORKSPACE,temp:TMP});
   if(AGENT.agent==='openclaw')return writeOpenClawLauncher(AGENT.config,{key:title,prompt,suffix:sfx,workspace:WORKSPACE,temp:TMP});
   if(AGENT.agent==='opencode')return writeOpenCodeLauncher(AGENT.config,{key:title,prompt,suffix:sfx,workspace:WORKSPACE,temp:TMP});
+  if(AGENT.agent==='kimi')return writeKimiLauncher(AGENT.config,{key:title,prompt,suffix:sfx,workspace:WORKSPACE,temp:TMP});
   const s = safe(title) + (sfx ? "-" + sfx : "");
   mkdirSync(TMP, { recursive: true });
   const pf = path.join(TMP, `agent-win-${s}.md`);
@@ -2046,7 +2051,7 @@ export async function main() {
     let res = { done: false, text: "" };
     if (sessionFile) {
       res = AGENT.agent!=='codex'
-        ? (AGENT.agent==='opencode'?await waitOpenCodeResult(rf,POLL_TIMEOUT_MS,pidf):await waitPiResult(rf,POLL_TIMEOUT_MS,pidf))
+        ? await waitAdapterResult(rf,POLL_TIMEOUT_MS,pidf)
         : await waitTaskComplete(sessionFile, POLL_TIMEOUT_MS, rf, matchToken, pidf);
     } else if (existsSync(rf)) {
       res = { done: true, text: "(launcher exit marker seen; no rollout matched)", exitCode: readExitCode(rf) };
@@ -2180,7 +2185,7 @@ export async function main() {
       plan:decomposeSafely,compact:capPlanBlocks,infer:inferTargetKeys,launcher:writeInteractiveLauncher,prompt:buildBlockPrompt,
       spawn:(...args)=>spawnWindowWithRetry(...args,true),readPid:readPidFile,
       session:AGENT.agent!=='codex'?async(_token,_timeout,rf)=>rf:waitForSessionFile,
-      wait:AGENT.agent!=='codex'?(AGENT.agent==='opencode'?async(_session,timeout,rf,_token,pidf)=>waitOpenCodeResult(rf,timeout,pidf):async(_session,timeout,rf,_token,pidf)=>waitPiResult(rf,timeout,pidf)):waitTaskComplete,exitCode:readExitCode,
+      wait:AGENT.agent!=='codex'?(async(_session,timeout,rf,_token,pidf)=>waitAdapterResult(rf,timeout,pidf)):waitTaskComplete,exitCode:readExitCode,
       register:r=>updateWindows(ws=>[...ws,r]),commit:commitReservation,unregister:cancelReservation,close:closeWindowByPid,
       cleanup:la=>{for(const f of [la.lp,la.pf,la.pidf,la.rf,la.pidf+'.self-closed',la.rf+'.self-closed'])try{rmSync(f,{force:true});}catch{}}
     },{workspace:WORKSPACE,capacity,resume,agent:AGENT.agent,runId:process.env.ORCH_RUN_ID,acceptanceFile:process.env.ORCH_ACCEPTANCE_FILE,timeoutMs:POLL_TIMEOUT_MS,auth:readAuthPrompt(),plan:preflightPlan});

@@ -23,7 +23,7 @@ For example, a nominal 16 GB machine gives a capacity of 12. Nine independent ta
 
 Windows Terminal is the default host. Windows inherit the initiating conversation's working directory and start visibly without deliberately taking focus, so the current window is less likely to be interrupted. Launchers, results, locks, decomposition state and recovery ledgers live under `temp/orchestrator` in that workspace. The host Agent keeps its own configuration, sessions and credentials in its normal location. PowerShell is used only for Windows lifecycle, encoding and process-tree helpers; Agent adapters and visible hosting prefer Node.js and Windows Terminal.
 
-Codex, pi and a version-pinned OpenClaw adapter (a translation layer for each host CLI's arguments, output and shutdown behavior) are connected. An unknown Agent, an unvalidated CLI or a missing executable produces a diagnostic; the tool does not install software or silently fall back to another Agent. An already-authorized execution context starts work as soon as its TUI window launches. The orchestrator carries the caller's existing permissions and does not widen them.
+Codex, pi, opencode, Kimi Code and a version-pinned OpenClaw adapter (a translation layer for each host CLI's arguments, output and shutdown behavior) are connected. The host is selected with `--agent`/`ORCH_AGENT`, host environment markers, or auto-detection of the initiating agent from the Windows ancestor process chain — whichever agent starts a run drives its own CLI in the windows. An unknown Agent, an unvalidated CLI or a missing executable produces a diagnostic; the tool does not install software or silently fall back to another Agent. An already-authorized execution context starts work as soon as its TUI window launches. The orchestrator carries the caller's existing permissions and does not widen them.
 
 ## When to use it
 
@@ -119,7 +119,7 @@ Each attempt records remaining task IDs, workspace, token, PID (process identifi
 
 ### 10. Isolate host-specific behavior behind adapters
 
-The generic entry point selects a host with `--agent` or `ORCH_AGENT`. Codex, pi and version-pinned OpenClaw each implement argument construction, session/result reading, completion detection and shutdown. The scheduler depends only on the shared contract. A new Agent must pass CLI discovery, planning, interactive launch, output parsing, completion and cleanup checks; adding only a command name is insufficient.
+The generic entry point selects a host with `--agent` or `ORCH_AGENT`; absent both, it detects the initiating agent from host env markers (`CODEX_THREAD_ID`/`CODEX_SESSION_ID`) and then the Windows ancestor process chain (kimi.exe / codex.exe / pi-coding-agent / opencode / openclaw, nearest match wins). Codex, pi, opencode, Kimi Code and version-pinned OpenClaw each implement argument construction, session/result reading, completion detection and shutdown. The scheduler depends only on the shared contract. A new Agent must pass CLI discovery, planning, interactive launch, output parsing, completion and cleanup checks; adding only a command name is insufficient.
 
 ### 11. Keep weak-network behavior and authorization explicit
 
@@ -135,11 +135,13 @@ After a run, the controller removes only launchers, logs, results and temporary 
 - [Release policy](docs/release-policy.md)
 - [Pi adapter](docs/pi-adapter.md)
 - [OpenClaw execution and isolation](docs/openclaw-adapter.md)
+- [Kimi Code adapter](docs/kimi-adapter.md)
+- [opencode adapter](docs/opencode-adapter.md)
 - [Unfocused window validation](docs/inactive-windows.md)
 
 ## Supported hosts and validation boundary
 
-Codex CLI, pi CLI and OpenClaw 2026.9.2 CLI have adapters. Run diagnostics with:
+Codex CLI, pi CLI, opencode CLI, Kimi Code CLI and OpenClaw 2026.9.2 CLI have adapters. Run diagnostics with:
 
 ```powershell
 node cli.mjs --agent codex --doctor
@@ -147,6 +149,6 @@ node cli.mjs --agent pi --doctor
 node cli.mjs --agent openclaw --doctor
 ```
 
-The current generic core is 1.3.1, with 149/149 offline tests passing. Coverage includes lossless task accounting, the memory-derived block-capacity ceiling, dependency waves, global capacity leases, Windows Terminal launch (synchronous and reliable), unfocused-start regressions, process identity, checkpoint recovery, weak-network configuration, SDK diagnostics and clean package publication. Test-env requirement: the offline suite assumes the initiating agent CLI (default `codex`) is resolvable on PATH — on Windows prepend the codex vendor bin (the documented regression convention). Without it, agent-resolution-dependent test files fail fast by design (fail-closed); the two runtime-CLI-dependent cases are annotated `{skip}`. Real model quotas, installation under a different Windows user, prolonged offline recovery and field compatibility for future Agents also require separate acceptance.
+The current generic core is 1.4.0, with 160/160 offline tests passing. Coverage includes lossless task accounting, the memory-derived block-capacity ceiling, dependency waves, global capacity leases, Windows Terminal launch (synchronous and reliable), unfocused-start regressions, process identity, checkpoint recovery, weak-network configuration, SDK diagnostics and clean package publication. Test-env requirement: the offline suite assumes the initiating agent CLI (default `codex`) is resolvable on PATH — on Windows prepend the codex vendor bin (the documented regression convention). Without it, agent-resolution-dependent test files fail fast by design (fail-closed); the two runtime-CLI-dependent cases are annotated `{skip}`. Real model quotas, installation under a different Windows user, prolonged offline recovery and field compatibility for future Agents also require separate acceptance.
 
 An unknown host, missing CLI or invalid explicit path fails with a diagnostic. The tool does not install software, guess a replacement path or switch to another Agent.

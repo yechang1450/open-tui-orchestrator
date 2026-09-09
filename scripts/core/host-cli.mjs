@@ -4,6 +4,8 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import {resolvePiHost,piArgs} from './pi-host.mjs';
 import {resolveOpenClawHost} from './openclaw-host.mjs';
+import {resolveOpenCodeHost,opencodeArgs} from './opencode-host.mjs';
+import {resolveKimiHost,kimiArgs} from './kimi-host.mjs';
 
 // Adapter contract: resolve a real CLI before any planner/window is started.
 // Additional adapters must implement planning, interactive argv and completion
@@ -11,15 +13,58 @@ import {resolveOpenClawHost} from './openclaw-host.mjs';
 export const adapters = Object.freeze({
   openclaw: Object.freeze({id:'openclaw',label:'OpenClaw CLI',native:false}),
   pi: Object.freeze({id:'pi',label:'pi agent',native:false,completionMarker:'__ORCH_DONE__',verified:false}),
+  opencode: Object.freeze({id:'opencode',label:'opencode',native:false,completionMarker:'__ORCH_DONE__',verified:false}),
+  kimi: Object.freeze({id:'kimi',label:'Kimi Code CLI',native:true,completionMarker:'__ORCH_DONE__',verified:false}),
   codex: Object.freeze({ id: 'codex', label: 'Codex CLI', native: true,
     modelEnv: 'ORCH_MODEL', effortEnv: 'ORCH_EFFORT',
     completionMarker: '__ORCH_DONE__', verified: false }),
 });
 
-export function detectHostAgent(env = process.env) {
+// Host markers on the Windows ancestor chain: the initiating agent is the
+// NEAREST ancestor process matching a known CLI (a nested window that starts
+// its own orchestration therefore binds to its own agent, not the outer one).
+const HOST_CHAIN_MATCHERS = Object.freeze([
+  ['kimi', Object.freeze({ name: /^kimi\.exe$/i })],
+  ['codex', Object.freeze({ name: /^codex\.exe$/i, cmd: /[\\/]codex\.js([\s"']|$)|[\\/]@openai[\\/]codex[\\/]/i })],
+  ['pi', Object.freeze({ cmd: /[\\/]pi-coding-agent[\\/]/i })],
+  ['opencode', Object.freeze({ name: /^opencode\.exe$/i, cmd: /[\\/]opencode-ai[\\/]/i })],
+  ['openclaw', Object.freeze({ name: /^openclaw(\.exe)?$/i, cmd: /[\\/]openclaw[\\/]openclaw\.mjs/i })],
+]);
+
+export function detectHostFromChain(chain) {
+  for (const proc of chain || []) {
+    const name = String(proc?.name || '');
+    const cmd = String(proc?.cmdline ?? proc?.commandLine ?? '');
+    for (const [id, m] of HOST_CHAIN_MATCHERS) {
+      if ((m.name && m.name.test(name)) || (m.cmd && m.cmd.test(cmd))) return id;
+    }
+  }
+  return null;
+}
+
+// One CIM snapshot walked in memory (a single PowerShell call, ~1s). Only runs
+// when no env marker identified the host; failure degrades to an empty chain.
+export function hostProcessChain({ platform = process.platform, startPid = process.ppid, env = process.env, spawn = spawnSync } = {}) {
+  if (platform !== 'win32') return [];
+  const script = '$a=@{};Get-CimInstance Win32_Process|ForEach-Object{$a[[string]$_.ProcessId]=$_};$p=$a[[string]' + (Number(startPid) || 0) + '];$g=0;while($p -and $g -lt 16){$c=if($p.CommandLine){$p.CommandLine}else{""};("{0}`t{1}`t{2}" -f $p.ProcessId,$p.Name,$c);$p=$a[[string]$p.ParentProcessId];$g++}';
+  let r;
+  try {
+    const ps = path.join(env.SystemRoot || env.WINDIR || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+    r = spawn(fs.existsSync(ps) ? ps : 'powershell.exe', ['-NoProfile', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')], { encoding: 'utf8', windowsHide: true, shell: false, timeout: 8000 });
+  } catch { return []; }
+  if (r?.status !== 0) return [];
+  return String(r.stdout || '').split(/\r?\n/).filter(Boolean).map((line) => {
+    const [pid, name, ...rest] = line.split('\t');
+    return { pid: Number(pid), name, cmdline: rest.join('\t') };
+  });
+}
+
+export function detectHostAgent(env = process.env, { chain } = {}) {
   const explicit = String(env.ORCH_AGENT || '').trim().toLowerCase();
   if (explicit) return explicit;
   if (env.CODEX_THREAD_ID || env.CODEX_SESSION_ID) return 'codex';
+  const detected = detectHostFromChain(chain ?? hostProcessChain({ env }));
+  if (detected) return detected;
   throw new Error('HOST_UNKNOWN: set ORCH_AGENT to the initiating agent; no Codex fallback.');
 }
 
@@ -67,6 +112,8 @@ export function resolveHost({ env = process.env, agent, candidates = cliCandidat
   const id = agent || detectHostAgent(env);
   if(id==='pi')return resolvePiHost(env);
   if(id==='openclaw')return resolveOpenClawHost(env);
+  if(id==='opencode')return resolveOpenCodeHost(env);
+  if(id==='kimi')return resolveKimiHost(env);
   const adapter = adapters[id];
   if (!adapter) throw new Error(`ADAPTER_UNSUPPORTED: ${id}; no CLI adapter implemented; no fallback or automatic install.`);
   const bin = candidates(env).find(probe);
@@ -82,6 +129,14 @@ export function launchArgs(config, options = {}) {
   if(config?.id==='pi'){
     if(options.sandbox&&options.sandbox!=='danger-full-access')throw new Error('PI_SANDBOX_UNSUPPORTED: pi does not implement the requested sandbox');
     return piArgs(config,{model:process.env.ORCH_MODEL,effort:process.env.ORCH_EFFORT});
+  }
+  if(config?.id==='opencode'){
+    if(options.sandbox&&options.sandbox!=='danger-full-access')throw new Error('OPENCODE_SANDBOX_UNSUPPORTED: opencode does not implement the requested sandbox');
+    return opencodeArgs(config,{model:process.env.ORCH_MODEL,effort:process.env.ORCH_EFFORT,cwd:options.cwd||process.cwd()});
+  }
+  if(config?.id==='kimi'){
+    if(options.sandbox&&options.sandbox!=='danger-full-access')throw new Error('KIMI_SANDBOX_UNSUPPORTED: kimi does not implement the requested sandbox');
+    return kimiArgs(config,{model:process.env.ORCH_MODEL});
   }
   if (!adapters[config?.id]) throw new Error('ADAPTER_UNSUPPORTED: refusing Codex argv for another agent.');
   const cwd = options.cwd || process.cwd();
