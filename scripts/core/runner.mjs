@@ -85,6 +85,9 @@ export function verifyRun(workspace,runId,acceptanceFile) {
 
 export async function runWindows(request,hooks,options={}) {
   const workspace=path.resolve(options.workspace),capacity=options.capacity;
+  // options.windowCap (ORCH_MAX_WINDOWS) throttles live-window admission only;
+  // planning keeps the full memory-derived capacity so block shape is unchanged.
+  const windowCap=Math.max(1,Math.min(capacity,Number(options.windowCap)||capacity));
   const runId=options.runId||crypto.randomUUID(),dir=runDirectory(workspace,runId),summaryFile=path.join(dir,'summary.json');
   const deadline=Date.now()+(options.timeoutMs||21600000),coordinator=options.coordinator||coordinatorDir(workspace);
   const runKey='run:'+dir.toLowerCase(),claim=await coordinate(()=>claimRun(coordinator,runKey),deadline);
@@ -155,7 +158,7 @@ export async function runWindows(request,hooks,options={}) {
           if(attemptsThisController)await pause(Math.min(2000*attemptsThisController,Math.max(0,deadline-Date.now())));
           let reserved=false;
           while(Date.now()<deadline) {
-            const result=await coordinate(()=>reserve(coordinator,{id:leaseId,runId,keys:r.keys},capacity),deadline);
+            const result=await coordinate(()=>reserve(coordinator,{id:leaseId,runId,keys:r.keys},windowCap),deadline);
             if(result.ok){reserved=true;break;}
             mark(r,'waiting','Waiting for '+result.reason);await pause(1000);
           }
