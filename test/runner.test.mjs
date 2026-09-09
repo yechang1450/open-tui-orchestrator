@@ -46,3 +46,22 @@ test('spawnStaggerMs serializes window births within a run',async()=>{
   assert.equal(sum.success,false);assert.ok(sum.finishedAt);
  }finally{await new Promise(r=>setTimeout(r,500));fs.rmSync(workspace,{recursive:true,force:true});}
 });
+
+// windowCap (ORCH_MAX_WINDOWS) throttles admission only; planning capacity is untouched.
+test('windowCap throttles live-window admission below planning capacity',async()=>{
+ fs.mkdirSync(family,{recursive:true});const workspace=fs.mkdtempSync(path.join(family,'runner-cap-'));
+ let live=0,maxLive=0,spawns=0;
+ const hooks={
+  plan:async()=>[{title:'A',tasks:[{prompt:'执行甲'}]},{title:'B',tasks:[{prompt:'执行乙'}]},{title:'C',tasks:[{prompt:'执行丙'}]}],
+  compact:p=>p,infer:()=>[],prompt:p=>p,
+  launcher:key=>({pidf:path.join(workspace,'window-'+key+'.pid')}),
+  register:()=>{live++;if(live>maxLive)maxLive=live;},unregister:()=>{live--;},cleanup:()=>{},readPid:()=>0,
+  spawn:async()=>{spawns++;return false;},
+ };
+ try{
+  const sum=await runWindows('执行甲；执行乙；执行丙',hooks,{workspace,capacity:8,runId:'cap',auth:'test',coordinator:path.join(workspace,'temp','coordinator'),windowCap:1});
+  assert.equal(spawns,3);
+  assert.equal(maxLive,1,'windows exceeded the admission cap');
+  assert.equal(sum.blocks.length,3,'planning must keep all blocks');
+ }finally{await new Promise(r=>setTimeout(r,500));fs.rmSync(workspace,{recursive:true,force:true});}
+});

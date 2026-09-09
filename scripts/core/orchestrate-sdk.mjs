@@ -35,6 +35,7 @@
  *   ORCH_MODEL     — optional explicit override; otherwise CLI configuration.
  *   ORCH_EFFORT    — optional explicit override; otherwise CLI configuration.
  *   ORCH_WINDOW_STAGGER_MS (default: 0) — 同一次 run 内逐窗错峰拉起间隔；突发首回合不再集中打在账号每分钟限流上。
+ *   ORCH_MAX_WINDOWS (default: 内存换算上限) — 活窗准入上限的额外收紧（不影响规划块数）；账号/套餐并发低于本机上限时用它压到安全线。
  *
  * 通用化设计：本插件对【不同 Windows 设备 / 不同用户名 / 不同 agent】自适应——
  *   ① 所有敏感路径都走 CODEX_HOME|ORCH_STATE_DIR|ORCH_SESSION_DIR（可用环境变量覆盖），绝不硬编码 "C:\Users\<user>\.codex"；ORCH_STATE_DIR 仅允许位于 workspace/temp；
@@ -841,7 +842,7 @@ async function warmupWindow(pidf, token) {
 }
 async function spawnWindowWithRetry(lp, title, pidf, maxRetry = 3, token, reservedByRunner = false) {
   const auxiliaryId="aux-"+path.basename(lp); let coordinator;
-  if(!reservedByRunner){coordinator=coordinatorDir(WORKSPACE);const claim=reserve(coordinator,{id:auxiliaryId,keys:["aux:"+token]},computeMaxWindows(os.totalmem()/1024**3));if(!claim.ok)throw new Error("Window admission waiting: "+claim.reason);}
+  if(!reservedByRunner){coordinator=coordinatorDir(WORKSPACE);const auxCap=Math.max(0,Number(process.env.ORCH_MAX_WINDOWS||0)||0);const claim=reserve(coordinator,{id:auxiliaryId,keys:["aux:"+token]},auxCap?Math.min(computeMaxWindows(os.totalmem()/1024**3),auxCap):computeMaxWindows(os.totalmem()/1024**3));if(!claim.ok)throw new Error("Window admission waiting: "+claim.reason);}
   // 恢复调用方传入的重试上限（默认 3）：sync 拉起后每次尝试 ~2.5s，重试成本可控，兜底 WT 偶发不弹窗。
   for (let attempt = 1; attempt <= maxRetry; attempt++) {
     spawnVisibleWindow(lp, title);
@@ -2189,7 +2190,7 @@ export async function main() {
       wait:AGENT.agent!=='codex'?(async(_session,timeout,rf,_token,pidf)=>waitAdapterResult(rf,timeout,pidf)):waitTaskComplete,exitCode:readExitCode,
       register:r=>updateWindows(ws=>[...ws,r]),commit:commitReservation,unregister:cancelReservation,close:closeWindowByPid,
       cleanup:la=>{for(const f of [la.lp,la.pf,la.pidf,la.rf,la.pidf+'.self-closed',la.rf+'.self-closed'])try{rmSync(f,{force:true});}catch{}}
-    },{workspace:WORKSPACE,capacity,resume,agent:AGENT.agent,runId:process.env.ORCH_RUN_ID,acceptanceFile:process.env.ORCH_ACCEPTANCE_FILE,timeoutMs:POLL_TIMEOUT_MS,auth:readAuthPrompt(),plan:preflightPlan,spawnStaggerMs:Math.max(0,Number(process.env.ORCH_WINDOW_STAGGER_MS||0)||0)});
+    },{workspace:WORKSPACE,capacity,resume,agent:AGENT.agent,runId:process.env.ORCH_RUN_ID,acceptanceFile:process.env.ORCH_ACCEPTANCE_FILE,timeoutMs:POLL_TIMEOUT_MS,auth:readAuthPrompt(),plan:preflightPlan,spawnStaggerMs:Math.max(0,Number(process.env.ORCH_WINDOW_STAGGER_MS||0)||0),windowCap:Math.max(0,Number(process.env.ORCH_MAX_WINDOWS||0)||0)||undefined});
     process.exitCode=result.success?0:1;return;
   }
 
