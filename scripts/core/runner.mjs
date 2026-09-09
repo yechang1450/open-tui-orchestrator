@@ -169,6 +169,7 @@ export async function runWindows(request,hooks,options={}) {
           const command=(id,state)=>`node "${helper}" "${attemptFile}" ${id} ${state}`;
           const body=options.auth+'\n本窗目录为 '+workspace+'；所有工具 workdir 保持此目录，除非原始任务明确另指定。\n'+
             '仅按顺序执行下列待办任务。每项开始前必须成功执行 started 命令，失败则停止该项，禁止重复执行。完成并自验后立即执行 completed 命令。每项都立即写检查点，不能等整块完成。任何项失败则停止后续任务，说明情况并退出本轮，不自行重跑整块。\n'+
+            '执行含引号的命令行时按当前 shell 的引号语义原样保留参数：Windows 上 PowerShell 不把 \\ 当转义符，与 cmd 不同；在 PowerShell 里执行 cmd 风格命令时用单引号包裹含引号参数（或 --% 停止解析），确保程序收到的参数逐字一致。\n'+
             '已独立验收的任务禁止重做：'+recovery.verified.join(', ')+'\n'+
             recovery.pending.map(id=>`任务 ${id}\n开始前：${command(id,'started')}\n原始任务：${tasks.find(t=>t.id===id).prompt}\n完成自验后：${command(id,'completed')}`).join('\n\n')+
             '\n全部待办完成后，最后仅输出 __ORCH_DONE__ '+token;

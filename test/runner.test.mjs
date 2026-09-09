@@ -39,10 +39,10 @@ test('spawnStaggerMs serializes window births within a run',async()=>{
   spawn:async()=>{times.push(Date.now());return false;},
  };
  try{
-  const sum=await runWindows('执行甲；执行乙；执行丙',hooks,{workspace,capacity:8,runId:'stagger',auth:'test',coordinator:path.join(workspace,'temp','coordinator'),spawnStaggerMs:150});
+  const sum=await runWindows('执行甲；执行乙；执行丙',hooks,{workspace,capacity:8,runId:'stagger',auth:'test',coordinator:path.join(workspace,'temp','coordinator'),spawnStaggerMs:200});
   assert.deepEqual(times.length,3);
   const gaps=times.slice(1).map((t,i)=>t-times[i]);
-  for(const gap of gaps)assert.ok(gap>=120,'spawn gap below stagger: '+JSON.stringify({times,gaps}));
+  for(const gap of gaps)assert.ok(gap>=150,'spawn gap below stagger: '+JSON.stringify({times,gaps}));
   assert.equal(sum.success,false);assert.ok(sum.finishedAt);
  }finally{await new Promise(r=>setTimeout(r,500));fs.rmSync(workspace,{recursive:true,force:true});}
 });
