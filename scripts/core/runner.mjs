@@ -130,6 +130,10 @@ export async function runWindows(request,hooks,options={}) {
     const persist=()=>atomicJson(summaryFile,sum);
     const mark=(r,status,reason)=>{sum.results[r.key]={...sum.results[r.key],status,reason};for(const id of sum.blocks.find(b=>b.key===r.key).taskIds)if(sum.taskResults[id]?.status!=='verified')sum.taskResults[id]={...sum.taskResults[id],status,reason};persist();};
     persist();console.log(`[run] runId=${runId} blocks=${sum.blocks.length} capacity=${capacity} generation=${sum.generation} summary=${summaryFile}`);
+    // Auto-recovery: a detached guardian watches this controller and relaunches
+    // --resume-run if it dies before finalizing. Fresh runs only — a resumed run
+    // is already watched by the original guardian. Never let the guard fail a run.
+    if(!options.resume&&hooks.guardian)try{hooks.guardian({runId,workspace,coordinator,timeoutMs:options.timeoutMs||21600000,owner:claim.owner,dir});}catch(e){console.warn('[guardian] unavailable: '+e.message);}
     // Optional spawn pacing (options.spawnStaggerMs, from ORCH_WINDOW_STAGGER_MS):
     // serializes window births within this run so a burst of first turns cannot
     // trip the agent account's per-minute rate limiter. 0 keeps the burst as-is.

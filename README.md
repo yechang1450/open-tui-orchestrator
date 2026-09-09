@@ -138,6 +138,7 @@ After a run, the controller removes only launchers, logs, results and temporary 
 - [Kimi Code adapter](docs/kimi-adapter.md)
 - [opencode adapter](docs/opencode-adapter.md)
 - [Unfocused window validation](docs/inactive-windows.md)
+- [Automatic recovery after an abnormal interruption](docs/auto-recovery.md)
 
 ## Supported hosts and validation boundary
 
@@ -149,6 +150,6 @@ node cli.mjs --agent pi --doctor
 node cli.mjs --agent openclaw --doctor
 ```
 
-The current generic core is 1.4.1, with 176/176 offline tests passing. Coverage includes lossless task accounting, the memory-derived block-capacity ceiling, dependency waves, global capacity leases, Windows Terminal launch (synchronous and reliable), unfocused-start regressions, process identity, checkpoint recovery, weak-network configuration, SDK diagnostics and clean package publication. Test-env requirement: the offline suite assumes the initiating agent CLI (default `codex`) is resolvable on PATH — on Windows prepend the codex vendor bin (the documented regression convention). Without it, agent-resolution-dependent test files fail fast by design (fail-closed); the two runtime-CLI-dependent cases are annotated `{skip}`. Real model quotas, installation under a different Windows user, prolonged offline recovery and field compatibility for future Agents also require separate acceptance.
+The current generic core is 1.5.0, with 188/188 offline tests passing. Coverage includes lossless task accounting, the memory-derived block-capacity ceiling, dependency waves, global capacity leases, Windows Terminal launch (synchronous and reliable), unfocused-start regressions, process identity, checkpoint recovery, guardian-driven automatic resume after controller loss, weak-network configuration, SDK diagnostics and clean package publication. Test-env requirement: the offline suite assumes the initiating agent CLI (default `codex`) is resolvable on PATH — on Windows prepend the codex vendor bin (the documented regression convention). Without it, agent-resolution-dependent test files fail fast by design (fail-closed); the two runtime-CLI-dependent cases are annotated `{skip}`. Real model quotas, installation under a different Windows user, prolonged offline recovery and field compatibility for future Agents also require separate acceptance.
 
 An unknown host, missing CLI or invalid explicit path fails with a diagnostic. The tool does not install software, guess a replacement path or switch to another Agent.

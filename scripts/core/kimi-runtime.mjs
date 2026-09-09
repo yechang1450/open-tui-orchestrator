@@ -26,7 +26,9 @@ export function kimiAssistantText(raw) {
 }
 
 export async function runKimiPlanner(config,prompt,cwd) {
-  const args=[...kimiArgs(config,{model:process.env.ORCH_MODEL}),'--output-format','stream-json',prompt];
+  // kimi's parser binds -p's value greedily: the prompt must immediately follow
+  // -p, before any further flags (same rule as the window argv; b3d3600).
+  const args=[...kimiArgs(config,{model:process.env.ORCH_MODEL}),prompt,'--output-format','stream-json'];
   return new Promise((resolve,reject)=>{
     const child=spawn(config.bin,args,{cwd,env:process.env,windowsHide:true,shell:false,stdio:['ignore','pipe','pipe']});
     let raw='',errorText='',timedOut=false;

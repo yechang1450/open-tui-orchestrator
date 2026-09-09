@@ -68,6 +68,7 @@ import {runOpenClawPlanner,writeOpenClawLauncher} from './openclaw-runtime.mjs';
 import {runOpenCodePlanner,writeOpenCodeLauncher,waitOpenCodeResult} from './opencode-runtime.mjs';
 import {runKimiPlanner,writeKimiLauncher,waitKimiResult} from './kimi-runtime.mjs';
 import {spawnInactiveWindow} from './inactive-window.mjs';
+import {ensureRunGuardian} from './run-guardian.mjs';
 import { networkConfig } from "./network-policy.mjs";
 import { spawn, spawnSync } from "node:child_process";
 import { resolveAgent, launchArgs } from "./agent.mjs";
@@ -2199,6 +2200,7 @@ export async function main() {
       session:AGENT.agent!=='codex'?async(_token,_timeout,rf)=>rf:waitForSessionFile,
       wait:AGENT.agent!=='codex'?(async(_session,timeout,rf,_token,pidf)=>waitAdapterResult(rf,timeout,pidf)):waitTaskComplete,exitCode:readExitCode,
       register:r=>updateWindows(ws=>[...ws,r]),commit:commitReservation,unregister:cancelReservation,close:closeWindowByPid,
+      guardian:g=>ensureRunGuardian({...g,agent:AGENT.agent,env:process.env}),
       cleanup:la=>{for(const f of [la.lp,la.pf,la.pidf,la.rf,la.pidf+'.self-closed',la.rf+'.self-closed'])try{rmSync(f,{force:true});}catch{}}
     },{workspace:WORKSPACE,capacity,resume,agent:AGENT.agent,runId:process.env.ORCH_RUN_ID,acceptanceFile:process.env.ORCH_ACCEPTANCE_FILE,timeoutMs:POLL_TIMEOUT_MS,auth:readAuthPrompt(),plan:preflightPlan,spawnStaggerMs:Math.max(0,Number(process.env.ORCH_WINDOW_STAGGER_MS||0)||0),windowCap:Math.max(0,Number(process.env.ORCH_MAX_WINDOWS||0)||0)||undefined});
     process.exitCode=result.success?0:1;return;

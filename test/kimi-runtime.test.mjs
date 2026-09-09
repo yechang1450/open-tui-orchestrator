@@ -4,8 +4,20 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {spawnSync} from 'node:child_process';
-import {kimiAssistantText,writeKimiLauncher,waitKimiResult} from '../scripts/core/kimi-runtime.mjs';
+import {kimiAssistantText,writeKimiLauncher,waitKimiResult,runKimiPlanner} from '../scripts/core/kimi-runtime.mjs';
 const family=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../temp');fs.mkdirSync(family,{recursive:true});
+test('kimi planner binds the prompt immediately after -p (kimi CLI parses flag values greedily)',async()=>{
+ const dir=fs.mkdtempSync(path.join(family,'kimi-planner-argv-'));
+ try{
+  const worker=path.join(dir,'fake kimi planner.mjs'),capture=path.join(dir,'argv.json');
+  fs.writeFileSync(worker,'import fs from "node:fs";\nfs.writeFileSync('+JSON.stringify(capture)+',JSON.stringify(process.argv.slice(2)));\nconsole.log(JSON.stringify({role:"assistant",content:"plan-ok"}));\n');
+  const r=await runKimiPlanner({bin:process.execPath,prefixArgs:[worker]},'规划 "带引号" 与中文',dir);
+  assert.equal(r.final,'plan-ok');
+  const argv=JSON.parse(fs.readFileSync(capture,'utf8')),p=argv.indexOf('-p');
+  assert.equal(argv[p+1],'规划 "带引号" 与中文');
+  assert.deepEqual(argv.slice(p+2),['--output-format','stream-json']);
+ }finally{fs.rmSync(dir,{recursive:true,force:true});}
+});
 test('kimi planner consumes assistant stream-json content only and rejects failed responses',()=>{
  const ok=['{"role":"meta","type":"system.version","version":"0.41.0"}','{"role":"assistant","content":"first"}','{"role":"assistant","content":"final answer"}','{"role":"meta","type":"session.resume_hint","session_id":"s"}'].join('\n');
  assert.equal(kimiAssistantText(ok),'final answer');
