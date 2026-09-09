@@ -76,6 +76,7 @@ The controller assigns stable IDs such as `T001` and `T002` at the request bound
 The model classifies a flat inventory: what each task is, which project owns it, which resources it touches and which tasks it depends on. Code performs the actual grouping:
 
 - Tasks for the same project or resource directory share a block to avoid overwriting one another.
+- Same-project tasks are then split fine-grained: when the classifier gives precise resource keywords (conflict_hints) for every task, they are clustered by resource-key overlap — disjoint tasks become separate blocks that open parallel windows (carrying only their precise resource keys, not the shared project directory key); only when any task's resources are unclear or all are entangled does the group stay one serial block (project directory key as the fallback).
 - Tasks with no known conflict or dependency remain independent blocks.
 - Unknown ownership goes to a conservative serial block instead of an unsafe parallel wave.
 - Unknown, self-referential and cyclic dependencies are rejected before launch, then valid edges are mapped to block dependencies.
