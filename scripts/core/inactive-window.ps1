@@ -16,17 +16,13 @@ public static class OrchestratorInactiveShell {
  [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr handle);
  [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
  [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr handle);
- [StructLayout(LayoutKind.Sequential)] struct LastInput {public uint cbSize;public uint dwTime;}
- [DllImport("user32.dll")] static extern bool GetLastInputInfo(ref LastInput info);
  public static void Launch(string file,string parameters,string cwd){
-  var baseline=GetForegroundWindow();var input=new LastInput();input.cbSize=(uint)Marshal.SizeOf(input);GetLastInputInfo(ref input);var baselineInput=input.dwTime;
+  var baseline=GetForegroundWindow();
   var s=new Startup();s.cb=Marshal.SizeOf(s);s.flags=1;s.show=4;ProcessInfo p;
   if(!CreateProcessW(file,new System.Text.StringBuilder("\""+file+"\" "+parameters),IntPtr.Zero,IntPtr.Zero,false,0x10,IntPtr.Zero,cwd,ref s,out p))throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
   CloseHandle(p.thread);CloseHandle(p.process);
   var until=Environment.TickCount+2500;
   while(Environment.TickCount<until){
-   var now=new LastInput();now.cbSize=(uint)Marshal.SizeOf(now);GetLastInputInfo(ref now);
-   if(now.dwTime!=baselineInput)break;
    if(baseline!=IntPtr.Zero&&GetForegroundWindow()!=baseline)SetForegroundWindow(baseline);
    System.Threading.Thread.Sleep(20);
   }

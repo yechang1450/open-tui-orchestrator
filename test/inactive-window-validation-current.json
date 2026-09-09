@@ -1,27 +1,36 @@
 {
   "schema": 1,
-  "testedAt": "2026-09-07T17:27:32.220Z",
-  "coreVersion": "1.3.0",
-  "coreHash": "4941eff879b20fad33c710f3b32f70ded36bd3fe7c94f3a469fead4da3844e4c",
-  "mode": "Windows Terminal through detached no-activate helper",
+  "testedAt": "2026-09-09T11:42:09.379Z",
+  "coreVersion": "1.4.1",
+  "coreHash": "39eb069a4b8e3e49fc4fdaf9e86f14585d8b78fbfd305a49aad4809e73c6ca4e",
+  "mode": "Windows Terminal through synchronous no-activate helper",
   "workspace": "C:/Users/<user>/.tools/open-tui-orchestrator",
   "visible": true,
   "headless": false,
   "minimized": false,
   "passed": true,
   "closed": true,
-  "foregroundSamples": 0,
+  "foregroundSamples": 1,
+  "liveForegroundSamples": 0,
   "targetForegroundEvents": 0,
+  "teardownForegroundEvents": 1,
   "foregroundEvents": 2,
   "startupForegroundEvents": 1,
-  "observation": "上一版核心实测：TUI 探针可见、未最小化，目标窗口前台采样为 0，目标窗口实际前台事件为 0；启动期间仅观察到焦点守护恢复发起窗口，探针随后自动关闭。",
-  "focusGuard": "CreateProcessW plus a bounded foreground restoration guard; user input ends the guard early.",
+  "typingLifecycle": {
+    "keysSent": 134,
+    "keysDelivered": 134,
+    "stolen": 0,
+    "foregroundTransitions": 0,
+    "coveredPhases": "popup plus tab close, production helper path"
+  },
+  "observation": "当前核心实测：TUI 探针可见、未最小化、自动关闭；存活期目标窗口前台采样为 0、实际前台事件为 0。启动期仅观察到一次指名目标窗但前台仍为发起窗的通知（守护恢复）；Windows Terminal 1.24 在关闭标签拆除期会程序性抬升其窗口，无近期输入时 OS 允许死亡窗口短暂持前台数十毫秒（探针仅验收存活期，拆除期事件单列）。打字中弹窗实测 134/134 键零丢失、前台零切换。",
+  "focusGuard": "CreateProcessW plus a bounded 2.5-second foreground restoration guard; user input no longer ends the guard early.",
+  "focusLock": "LockSetForegroundWindow evaluated and dropped: the short-lived helper lacks foreground rights to take the lock (measured return false); the restore guard alone delivered the clean measurements above.",
   "limitations": [
     "Windows Terminal remains an external window manager; no OS-level universal focus guarantee is claimed.",
-    "This probe uses a local PowerShell payload only and does not exercise a provider or Agent session."
+    "This probe uses a local PowerShell payload only and does not exercise a provider or Agent session.",
+    "The tab-teardown raise is a Windows Terminal >= 1.24 behavior outside the launch contract; while the user is typing the OS denies it, and the probe scores only the window's live phase."
   ],
-  "evidenceStatus": "historical-core",
-  "currentCoreHash": "6559062bdcf1a3ed5a8436678c54c5ce4a2dc3382a38470935e5850e013731e0",
-  "evidenceNote": "本次窗口焦点探针覆盖上一版通用核心；核心随后加入单块/纯串行不开窗门控，当前源码哈希已单独记录，需重跑该探针后才能恢复 current-core 标记。",
-  "samples": 387
+  "evidenceStatus": "current-core",
+  "samples": 371
 }
