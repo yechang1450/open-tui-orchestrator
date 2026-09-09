@@ -33,3 +33,13 @@ test('nine independent parent processes contend for eight shared slots without l
   fs.rmSync(dir,{recursive:true,force:true});
  }
 });
+
+// Regression: a test run once pinned the machine-wide HKCU locator to a deleted
+// mkdtemp fixture, hijacking the coordinator of every later real workspace run.
+test('coordinatorDir never touches the machine-wide locator under the test runner',async()=>{
+ const {coordinatorDir}=await import('../scripts/core/leases.mjs');
+ const workspace=path.join(family,'locator-guard');
+ const fallback=path.join(workspace,'temp','orchestrator','coordinator');
+ assert.equal(coordinatorDir(workspace,{NODE_TEST_CONTEXT:process.env.NODE_TEST_CONTEXT||'child-v8'}),fallback);
+ assert.equal(coordinatorDir(workspace,{NODE_TEST_CONTEXT:'child-v8',ORCH_COORDINATOR_DIR:'custom-coordinator'}),path.join(workspace,'custom-coordinator'));
+});
