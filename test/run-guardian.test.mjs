@@ -1,0 +1,194 @@
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import {fileURLToPath} from 'node:url';
+import {main,ensureRunGuardian,parseGuardianOptions,guardianFile,readGuardianState} from '../scripts/core/run-guardian.mjs';
+import {runWindows,runDirectory} from '../scripts/core/runner.mjs';
+import {atomicJson} from '../scripts/core/leases.mjs';
+
+const family=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../temp');
+const ENGINE={ProcessId:111,Name:'node.exe',CommandLine:'node orchestrate-sdk.mjs --run-windows req',Started:'2026-09-09T00:00:00.000Z'};
+
+function mkRun(state,summary) {
+  fs.mkdirSync(family,{recursive:true});
+  const workspace=fs.mkdtempSync(path.join(family,'guardian-'));
+  const runId='guard-'+Math.random().toString(36).slice(2,10);
+  const file=guardianFile(workspace,runId);
+  if(state)atomicJson(file,{runId,guardianPid:0,restarts:0,maxRestarts:3,intervalMs:2000,timeoutMs:60000,createdAt:1_000_000,engines:[{owner:ENGINE,startedAt:1_000_000,by:'initiator'}],status:'watching',updatedAt:1_000_000,...state});
+  return {workspace,runId,file,summary};
+}
+
+function mkHooks(ws,runId,opts={}) {
+  const live=new Map((opts.alive??[ENGINE]).map(e=>[e.ProcessId,e]));
+  const spawns=[],logs=[];
+  let time=opts.startTime??1_000_000,loadCalls=0;
+  const summary=opts.summary===undefined?{runId,startedAt:1_000_000,agent:'kimi'}:opts.summary;
+  const hooks={
+    env:{WORKSPACE_DIR:ws},
+    now:()=>time,
+    sleep:async ms=>{time+=ms;},
+    snapshot:()=>{if(opts.failSnapshot)throw new Error('cim unavailable');return new Map(live);},
+    load:()=>{if(++loadCalls>2000)throw new Error('guardian loop did not terminate');return typeof summary==='function'?summary({spawns}):summary;},
+    spawn:(cmd,args,o)=>{spawns.push({cmd,args,opts:o});const pid=1000+spawns.length;const id={ProcessId:pid,Name:'node.exe',CommandLine:'node orchestrate-sdk.mjs --resume-run '+runId,Started:'s'+pid};if(opts.autoAdopt!==false)live.set(pid,id);return{pid,on(){},unref(){}};},
+    log:m=>logs.push(m),
+  };
+  return {hooks,spawns,logs,live,now:()=>time};
+}
+
+async function runMain(ws,runId,hooks) {
+  const prev=process.exitCode;
+  try{await main(['--run-id',runId],hooks);return process.exitCode??0;}
+  finally{process.exitCode=prev;}
+}
+
+test('guardian exits done without respawn when the run is already finalized',async()=>{
+ const {workspace,runId,file}=mkRun({},null);
+ try {
+  const {hooks,spawns}=mkHooks(workspace,runId,{summary:{runId,finishedAt:1_000_500}});
+  const code=await runMain(workspace,runId,hooks);
+  assert.equal(code,0);assert.equal(spawns.length,0);
+  assert.equal(readGuardianState(file).status,'done');
+ }finally{fs.rmSync(workspace,{recursive:true,force:true});}
+});
+
+test('guardian waits while the engine lives and exits on finalization',async()=>{
+ const {workspace,runId,file}=mkRun({},null);
+ try {
+  let ticks=0;const summary=()=>(++ticks>2?{runId,finishedAt:1_001_000}:{runId,startedAt:1_000_000});
+  const {hooks,spawns}=mkHooks(workspace,runId,{summary});
+  const code=await runMain(workspace,runId,hooks);
+  assert.equal(code,0);assert.equal(spawns.length,0);
+  assert.equal(readGuardianState(file).status,'done');
+ }finally{fs.rmSync(workspace,{recursive:true,force:true});}
+});
+
+test('dead engine before finalization triggers exactly one guarded resume with run identity',async()=>{
+ const {workspace,runId,file}=mkRun({},null);
+ try {
+  const summary=({spawns})=>spawns.length?{runId,finishedAt:1_020_000}:{runId,startedAt:1_000_000,agent:'kimi'};
+  const {hooks,spawns}=mkHooks(workspace,runId,{summary,alive:[]});
+  const code=await runMain(workspace,runId,hooks);
+  assert.equal(code,0);assert.equal(spawns.length,1);
+  const call=spawns[0];
+  assert.equal(call.args[1],'--resume-run');assert.equal(call.args[2],runId);
+  assert.equal(call.opts.cwd,workspace);assert.equal(call.opts.detached,true);assert.equal(call.opts.windowsHide,true);
+  assert.equal(call.opts.env.ORCH_AGENT,'kimi');assert.equal(call.opts.env.ORCH_RUN_ID,runId);assert.equal(call.opts.env.WORKSPACE_DIR,workspace);
+  const state=readGuardianState(file);
+  assert.equal(state.status,'done');assert.equal(state.restarts,1);
+  assert.equal(state.engines.length,2);assert.equal(state.engines[1].by,'guardian');assert.equal(state.engines[1].owner.ProcessId,1001);
+ }finally{fs.rmSync(workspace,{recursive:true,force:true});}
+});
+
+test('restart budget is fail-closed: exhausted guardian stops respawning',async()=>{
+ const {workspace,runId,file}=mkRun({maxRestarts:1},null);
+ try {
+  const summary=()=>({runId,startedAt:1_000_000,agent:'kimi'}); // never finalizes
+  const {hooks,spawns,live}=mkHooks(workspace,runId,{summary,alive:[]});
+  const origSpawn=hooks.spawn;
+  hooks.spawn=(...a)=>{const c=origSpawn(...a);live.delete(c.pid);return c;}; // each resumed engine dies too
+  const code=await runMain(workspace,runId,hooks);
+  assert.equal(code,1);assert.equal(spawns.length,1);
+  assert.equal(readGuardianState(file).status,'exhausted');
+ }finally{fs.rmSync(workspace,{recursive:true,force:true});}
+});
+
+test('run deadline passed: guardian does not resume a run that could only time out',async()=>{
+ const {workspace,runId,file}=mkRun({},null);
+ try {
+  const {hooks,spawns}=mkHooks(workspace,runId,{alive:[],startTime:1_070_000}); // past createdAt+timeoutMs
+  const code=await runMain(workspace,runId,hooks);
+  assert.equal(code,1);assert.equal(spawns.length,0);
+  assert.equal(readGuardianState(file).status,'deadline');
+ }finally{fs.rmSync(workspace,{recursive:true,force:true});}
+});
+
+test('snapshot failure never respawns blind',async()=>{
+ const {workspace,runId}=mkRun({},null);
+ try {
+  let ticks=0;const summary=()=>(++ticks>3?{runId,finishedAt:1_002_000}:{runId,startedAt:1_000_000});
+  const {hooks,spawns}=mkHooks(workspace,runId,{summary,alive:[],failSnapshot:true});
+  const code=await runMain(workspace,runId,hooks);
+  assert.equal(code,0);assert.equal(spawns.length,0);
+ }finally{fs.rmSync(workspace,{recursive:true,force:true});}
+});
+
+test('pid reuse by an unrelated process is not the engine (identity must match)',async()=>{
+ const {workspace,runId,file}=mkRun({},null);
+ try {
+  const impostor={ProcessId:111,Name:'node.exe',CommandLine:'node other.js',Started:'else'};
+  const summary=({spawns})=>spawns.length?{runId,finishedAt:1_020_000}:{runId,startedAt:1_000_000,agent:'kimi'};
+  const {hooks,spawns}=mkHooks(workspace,runId,{summary,alive:[impostor]});
+  const code=await runMain(workspace,runId,hooks);
+  assert.equal(code,0);assert.equal(spawns.length,1);
+  assert.equal(readGuardianState(file).restarts,1);
+ }finally{fs.rmSync(workspace,{recursive:true,force:true});}
+});
+
+test('missing state file or vanished summary fails closed without respawn',async()=>{
+ const noState=mkRun(null,null);
+ try {
+  const a=mkHooks(noState.workspace,noState.runId,{});
+  assert.equal(await runMain(noState.workspace,noState.runId,a.hooks),2);assert.equal(a.spawns.length,0);
+ }finally{fs.rmSync(noState.workspace,{recursive:true,force:true});}
+ const gone=mkRun({},null);
+ try {
+  const b=mkHooks(gone.workspace,gone.runId,{summary:null});
+  assert.equal(await runMain(gone.workspace,gone.runId,b.hooks),2);assert.equal(b.spawns.length,0);
+  assert.equal(readGuardianState(gone.file).status,'error');
+ }finally{fs.rmSync(gone.workspace,{recursive:true,force:true});}
+});
+
+test('parseGuardianOptions validates arguments',()=>{
+ assert.deepEqual(parseGuardianOptions(['--run-id','abc']),{runId:'abc'});
+ assert.throws(()=>parseGuardianOptions([]),/--run-id is required/);
+ assert.throws(()=>parseGuardianOptions(['--bogus']),/GUARDIAN_ARGUMENT_INVALID/);
+ assert.throws(()=>parseGuardianOptions(['--run-id','--x']),/--run-id is required/);
+});
+
+test('ensureRunGuardian is disabled by env and adopts a live guardian',()=>{
+ fs.mkdirSync(family,{recursive:true});
+ const workspace=fs.mkdtempSync(path.join(family,'guardian-ensure-'));
+ const runId='guard-ensure';
+ try {
+  assert.deepEqual(ensureRunGuardian({runId,workspace,timeoutMs:60000,owner:ENGINE,agent:'kimi',env:{ORCH_GUARDIAN:'0'}}),{disabled:true});
+  assert.deepEqual(ensureRunGuardian({runId,workspace,timeoutMs:60000,owner:ENGINE,agent:'kimi',env:{NODE_TEST_CONTEXT:'child-v8'}}),{disabled:true});
+  const spawns=[];
+  const spawnImpl=(...a)=>{spawns.push(a);return{pid:4321,on(){},unref(){}};};
+  const r=ensureRunGuardian({runId,workspace,timeoutMs:120000,owner:ENGINE,agent:'kimi',env:{},spawnImpl,log:()=>{}});
+  assert.equal(r.spawned,true);assert.equal(r.pid,4321);assert.equal(spawns.length,1);
+  assert.equal(spawns[0][1].includes('--run-id'),true);assert.equal(spawns[0][2].detached,true);assert.equal(spawns[0][2].env.ORCH_AGENT,'kimi');
+  const state=readGuardianState(guardianFile(workspace,runId));
+  assert.equal(state.guardianPid,4321);assert.equal(state.maxRestarts,3);assert.equal(state.timeoutMs,120000);
+  assert.equal(state.engines.length,1);assert.equal(state.engines[0].owner.ProcessId,111);
+  const alive=new Map([[4321,{ProcessId:4321,Name:'node.exe',CommandLine:'node run-guardian.mjs --run-id '+runId,Started:'g'}]]);
+  const again=ensureRunGuardian({runId,workspace,timeoutMs:120000,owner:ENGINE,agent:'kimi',env:{},spawnImpl,snapshotImpl:()=>alive,log:()=>{}});
+  assert.deepEqual(again,{already:true,pid:4321});assert.equal(spawns.length,1);
+  const dead=ensureRunGuardian({runId,workspace,timeoutMs:120000,owner:ENGINE,agent:'kimi',env:{},spawnImpl,snapshotImpl:()=>new Map(),log:()=>{}});
+  assert.equal(dead.spawned,true);assert.equal(spawns.length,2); // dead guardian replaced, restart budget kept
+  assert.equal(readGuardianState(guardianFile(workspace,runId)).restarts,0);
+ }finally{fs.rmSync(workspace,{recursive:true,force:true});}
+});
+
+test('runWindows arms the guardian on fresh runs only, and guardian failure never fails the run',async()=>{
+ fs.mkdirSync(family,{recursive:true});
+ const workspace=fs.mkdtempSync(path.join(family,'guardian-runner-'));
+ const calls=[];
+ const hooks={
+  plan:async()=>[{title:'A',tasks:[{prompt:'执行甲'}]}],
+  compact:p=>p,infer:()=>[],prompt:p=>p,
+  launcher:key=>({pidf:path.join(workspace,'window-'+key+'.pid')}),
+  register:()=>{},unregister:()=>{},cleanup:()=>{},spawn:async()=>false,readPid:()=>0,
+  guardian:g=>{calls.push(g);throw new Error('guardian spawn exploded');},
+ };
+ try {
+  const sum=await runWindows('执行甲',hooks,{workspace,capacity:8,runId:'guarded',auth:'test',coordinator:path.join(workspace,'temp','coordinator'),timeoutMs:90000});
+  assert.equal(sum.success,false);assert.equal(sum.taskResults.T001.status,'popup-failed');
+  assert.equal(calls.length,1);
+  assert.equal(calls[0].runId,'guarded');assert.equal(calls[0].workspace,path.resolve(workspace));
+  assert.equal(calls[0].timeoutMs,90000);assert.ok(calls[0].owner?.ProcessId>0);
+  const resumed=await runWindows('',hooks,{workspace,capacity:8,runId:'guarded',auth:'test',coordinator:path.join(workspace,'temp','coordinator'),resume:true,agent:'codex'});
+  assert.equal(resumed.generation,2);
+  assert.equal(calls.length,1); // resumed runs stay under the original guardian
+ }finally{await new Promise(r=>setTimeout(r,500));fs.rmSync(workspace,{recursive:true,force:true});}
+});
