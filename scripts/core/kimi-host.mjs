@@ -29,7 +29,9 @@ export function resolveKimiHost(env=process.env) {
 }
 // Base argv for `kimi -p` (print mode auto-approves routine tool calls per product
 // contract; --prompt cannot combine with --auto/--yolo). The prompt itself is
-// appended by the caller as the final argv element.
+// appended by the caller as the final argv element. `-m` MUST precede `-p`: kimi's
+// parser binds `-p`'s value greedily, so `-p -m <model> <prompt>` mis-parses the
+// model as a positional subcommand ("unknown command '<model>'").
 export function kimiArgs(config,{model}={}) {
-  return [...(config.prefixArgs||[]),'-p',...(model&&String(model).trim()&&!/\s/.test(String(model))?['-m',String(model).trim()]:[])];
+  return [...(config.prefixArgs||[]),...(model&&String(model).trim()&&!/\s/.test(String(model))?['-m',String(model).trim()]:[]),'-p'];
 }

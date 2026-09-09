@@ -23,7 +23,7 @@ open-tui-orchestrator 面向复杂、较长、包含多个可独立推进部分�
 
 Windows Terminal 是默认承载。窗口沿用发起对话的工作目录，并以失焦、脱离父进程的方式启动，尽量不抢占正在使用的窗口。启动脚本、结果、锁、拆解缓存和恢复账本统一放在发起工作区的 `temp/orchestrator`；宿主 Agent 自己的配置、会话和凭据仍由宿主管理。PowerShell 只承担 Windows 生命周期、编码和进程树管理辅助，窗口承载和 Agent 适配优先走 Node.js 与 Windows Terminal。
 
-Codex、pi、opencode、Kimi Code 和固定版本 OpenClaw 适配器（把不同宿主 CLI 的参数、输出和关闭方式转换成统一协议）已经接通。宿主由 `--agent`/`ORCH_AGENT`、宿主环境标记或 Windows 祖先进程链自动识别——哪个 agent 发起，窗口就用哪个 agent 的 CLI。未知 Agent、未验证的 CLI 或缺失的可执行文件会直接给出诊断，不会自动安装，也不会回退到另一个 Agent。已经授权的执行上下文在 TUI 窗启动后直接执行，不插入额外人工确认；编排器只继承调用方已有权限，不扩大权限范围。
+Codex、pi、opencode、Kimi Code 和固定版本 OpenClaw 适配器（把不同宿主 CLI 的参数、输出和关闭方式转换成统一协议）已经接通。宿主由 `--agent`/`ORCH_AGENT`、宿主环境标记或 Windows 祖先进程链自动识别——哪个 agent 发起，窗口就用哪个 agent 的 CLI，且窗口继承发起窗当前使用的 model 与 thinking effort（显式 `ORCH_MODEL`/`ORCH_EFFORT` 优先；否则按宿主检测——Codex rollout、Kimi Code 会话 wire 日志、pi settings、opencode 配置——最后回退到 CLI 自身配置）。未知 Agent、未验证的 CLI 或缺失的可执行文件会直接给出诊断，不会自动安装，也不会回退到另一个 Agent。已经授权的执行上下文在 TUI 窗启动后直接执行，不插入额外人工确认；编排器只继承调用方已有权限，不扩大权限范围。
 
 ## 什么时候适合使用
 
