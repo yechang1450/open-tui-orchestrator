@@ -129,6 +129,10 @@ Codex planning and windows use the existing HTTPS Responses configuration instea
 
 After a run, the controller removes only launchers, logs, results and temporary files owned by that completed run, while retaining the run ledger and required acceptance evidence. Active windows and other workspaces are left untouched. `release.json` protects the execution core with a SHA-256 release seal (an integrity record for the exact release inventory); every core or runtime change requires a new seal and verification.
 
+### 13. Maintenance lock: pause orchestration while maintaining itself
+
+Before upgrading/optimizing/maintaining/updating the orchestrator itself, acquire the maintenance lock: `node scripts/maintenance-lock.mjs lock --reason "why" [--ttl-minutes N]`. While locked, every action entry point (`--run-windows`/`--spawn`/`--resume-run`/`--run`/`--exec`/`--plan`, `open-tui-orchestrator-preflight.mjs`, `open-tui-orchestrator-force.mjs --assert/--verify`) returns exactly one line — `open-tui-orchestrator正在维护更新，本轮跳过orchestrator直接开始执行` — and exits 0, so the initiating conversation skips the orchestrator and executes directly for that round. Read-only entries (`--status`/`--doctor`/`--verify-run`/`--clear-cache`) are unaffected, and `--status` also reports the lock state. The lock is global per user (default `~/.open-tui-orchestrator/maintenance-lock.json`, overridable via `ORCH_MAINTENANCE_LOCK`), expires automatically after 180 minutes by default (24h cap), and fails open when expired or corrupt so the orchestrator can never be wedged by a forgotten lock; `repair.mjs --clean`/`--target` self-lock for their duration when no lock is held. Release it with `node scripts/maintenance-lock.mjs unlock` when maintenance is done.
+
 ## Related documentation
 
 - [Execution and acceptance contract](docs/execution-contract.md)
@@ -139,6 +143,7 @@ After a run, the controller removes only launchers, logs, results and temporary 
 - [opencode adapter](docs/opencode-adapter.md)
 - [Unfocused window validation](docs/inactive-windows.md)
 - [Automatic recovery after an abnormal interruption](docs/auto-recovery.md)
+- [Maintenance lock](docs/maintenance-lock.md)
 
 ## Supported hosts and validation boundary
 

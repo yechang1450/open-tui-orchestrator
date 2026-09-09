@@ -36,6 +36,7 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 import { resolveRuntimeContext } from './runtime-context.mjs';
+import { lockedForMaintenance, readMaintenanceLock, MAINTENANCE_MESSAGE } from './core/maintenance-lock.mjs';
 const { workspace: WORKSPACE, temp: TMP, state: STATE_DIR } = resolveRuntimeContext();
 const FLAG = path.join(STATE_DIR, ".orchestrator-enabled");
 const WINDOWS_REG = path.join(STATE_DIR, "orchestrator-windows.json");
@@ -105,6 +106,18 @@ function liveWindows() {
 const mode = process.argv[2];
 
 function runCli() {
+  // 维护锁：上锁期间 --assert/--verify 一律放行并回固定话术（本轮跳过 orchestrator 直接执行）；
+  // --status 显示锁状态后继续正常输出；--enable/--disable 属维护操作，不受影响。
+  if (lockedForMaintenance()) {
+    if (mode === "--assert" || mode === "--verify") {
+      console.log(MAINTENANCE_MESSAGE);
+      process.exit(0);
+    }
+    if (mode === "--status") {
+      const mlock = readMaintenanceLock();
+      console.log("maintenance lock: LOCKED" + (mlock.reason ? " (" + mlock.reason + ")" : "") + (mlock.expiresAt ? ", expires " + new Date(mlock.expiresAt).toISOString() : "") + " - " + MAINTENANCE_MESSAGE);
+    }
+  }
   if (mode === "--enable") {
     mkdirSync(STATE_DIR, { recursive: true });
     // 小标记直接用 writeFileSync 覆盖写，避免 tmp+rename→rm→rename 间隙内标记缺失的竞态。

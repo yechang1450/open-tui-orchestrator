@@ -5,6 +5,8 @@
  *   node open-tui-orchestrator-preflight.mjs <write|build|install|test|restart|run|all>
  *
  * Reuses open-tui-orchestrator-force.mjs's armed()/liveWindows() (the same enforcement state the guard uses):
+ *   - maintenance lock held            -> prints the maintenance one-liner, exits 0
+ *     (本轮跳过 orchestrator，由发起对话直接执行；任何 kind 都放行)。
  *   - orchestrator not armed and
  *     kind is read-only             -> prints ok, exits 0.
  *   - orchestrator not armed and
@@ -19,10 +21,17 @@
  * block/dependency/result-recycling logic.
  */
 import { armed, liveWindows } from "./open-tui-orchestrator-force.mjs";
+import { lockedForMaintenance, MAINTENANCE_MESSAGE } from "./core/maintenance-lock.mjs";
 
 const kind = String(process.argv[2] || "").toLowerCase();
 const realKinds = new Set(["exec", "write", "build", "install", "test", "restart", "start", "stop", "real", "all", "run"]);
 const readKinds = new Set(["read", "analyze", "plan", "view", "query", "search", "status", "list", "preview", "ls", "show", "check", "validate", "dry-run", "help"]);
+
+// 维护锁最优先：上锁期间任何调用只回固定话术并放行（exit 0），本轮直接执行。
+if (lockedForMaintenance()) {
+  console.log(MAINTENANCE_MESSAGE);
+  process.exit(0);
+}
 
 // 统一校验：空/未知 kind 一律报错退出 1（不因窗口状态放宽），决策输出统一走 stdout 供下游捕获。
 if (!kind) {

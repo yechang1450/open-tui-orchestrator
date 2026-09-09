@@ -129,6 +129,10 @@ Codex 规划和窗口沿用现有 HTTPS Responses 配置，避免先等待 WebSo
 
 运行结束后只清理本批已结束且由本批拥有的启动器、日志、结果和临时文件，保留运行账本和必要验收证据；活动窗口及其它工作区状态不会被误删。核心文件用 `release.json` 的 SHA-256 发布封印（固定发行清单的完整性校验）保护，核心或运行时变更后必须重新封印并验证。
 
+### 13. 维护锁：自身维护期间暂停编排
+
+对编排器自身做升级/优化/维护/更新等改动前，先上维护锁：`node scripts/maintenance-lock.mjs lock --reason "原因" [--ttl-minutes N]`。上锁期间任何 agent 调用编排器的动作入口（`--run-windows`/`--spawn`/`--resume-run`/`--run`/`--exec`/`--plan`、`open-tui-orchestrator-preflight.mjs`、`open-tui-orchestrator-force.mjs --assert/--verify`）都只返回一句话：`open-tui-orchestrator正在维护更新，本轮跳过orchestrator直接开始执行`，并以退出码 0 放行，由发起对话本轮直接执行。只读入口（`--status`/`--doctor`/`--verify-run`/`--clear-cache`）不受影响，`--status` 会额外显示锁状态。锁全局按用户生效（默认 `~/.open-tui-orchestrator/maintenance-lock.json`，可用 `ORCH_MAINTENANCE_LOCK` 覆盖），默认 180 分钟自动过期（上限 24 小时），过期或文件损坏一律 fail-open 视为未锁，绝不会把编排器卡死；`repair.mjs --clean`/`--target` 在未持锁时会自行上锁、结束即解。维护结束用 `node scripts/maintenance-lock.mjs unlock` 解锁。
+
 ## 相关文档
 
 - [执行与验收协议](docs/execution-contract.md)
@@ -139,6 +143,7 @@ Codex 规划和窗口沿用现有 HTTPS Responses 配置，避免先等待 WebSo
 - [opencode 适配器](docs/opencode-adapter.md)
 - [失焦窗口验证](docs/inactive-windows.md)
 - [异常中断后自动恢复](docs/auto-recovery.md)
+- [维护锁](docs/maintenance-lock.md)
 
 ## 当前支持与验证边界
 
