@@ -127,6 +127,12 @@ export async function runWindows(request,hooks,options={}) {
     const persist=()=>atomicJson(summaryFile,sum);
     const mark=(r,status,reason)=>{sum.results[r.key]={...sum.results[r.key],status,reason};for(const id of sum.blocks.find(b=>b.key===r.key).taskIds)if(sum.taskResults[id]?.status!=='verified')sum.taskResults[id]={...sum.taskResults[id],status,reason};persist();};
     persist();console.log(`[run] runId=${runId} blocks=${sum.blocks.length} capacity=${capacity} generation=${sum.generation} summary=${summaryFile}`);
+    // Optional spawn pacing (options.spawnStaggerMs, from ORCH_WINDOW_STAGGER_MS):
+    // serializes window births within this run so a burst of first turns cannot
+    // trip the agent account's per-minute rate limiter. 0 keeps the burst as-is.
+    const staggerMs=Math.max(0,Number(options.spawnStaggerMs||0));
+    let staggerChain=Promise.resolve();
+    const stagger=()=>{const turn=staggerChain;staggerChain=staggerChain.then(()=>pause(staggerMs));return turn;};
     async function execute(r) {
       const b=sum.blocks.find(b=>b.key===r.key),tasks=b.taskIds.map(id=>sum.tasks.find(t=>t.id===id));
       const leaseId=crypto.createHash('sha256').update(runKey).digest('hex').slice(0,16)+'-'+r.key;
@@ -172,6 +178,7 @@ export async function runWindows(request,hooks,options={}) {
           try {
             hooks.register({id:leaseId,runId,title:r.title,keys:r.keys,pidFile:la.pidf,pid:0,pending:true,reservedAt:Date.now()});
             await coordinate(()=>prepare(coordinator,leaseId,la.pidf),deadline);
+            await stagger();
             if(!await hooks.spawn(la.lp,r.title,la.pidf,1,token))throw new Error('Visible window did not start');
             identity=launcherIdentity(hooks.readPid(la.pidf),la.pidf);
             if(!identity)throw new Error('Launcher process identity mismatch');
