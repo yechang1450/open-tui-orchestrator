@@ -26,10 +26,12 @@ export function launcherIdentity(pid,pidFile,snapshot=processSnapshot()) {
 
 // Only a locator is kept in HKCU; all runtime files remain beneath the first
 // initiating workspace's temp. A named mutex makes first discovery atomic.
+// Under `node --test` (NODE_TEST_CONTEXT is set) the machine-wide locator is
+// never touched: test workspaces keep their coordinator in their own temp.
 export function coordinatorDir(workspace,env=process.env) {
   if(env.ORCH_COORDINATOR_DIR)return path.resolve(workspace,env.ORCH_COORDINATOR_DIR);
   const fallback=path.join(workspace,'temp','orchestrator','coordinator');
-  if(process.platform!=='win32')return fallback;
+  if(process.platform!=='win32'||env.NODE_TEST_CONTEXT)return fallback;
   const quoted=fallback.replaceAll("'","''");
   const script=`$held=$false; $m=[Threading.Mutex]::new($false,'Local\\TuiOrchestrator.Coordinator'); try {try{$held=$m.WaitOne(15000)}catch [Threading.AbandonedMutexException]{$held=$true}; if(-not $held){throw 'Coordinator locator busy'}; $key='HKCU:\\Software\\TuiOrchestrator'; $p=(Get-ItemProperty -LiteralPath $key -Name CoordinatorRoot -ErrorAction SilentlyContinue).CoordinatorRoot; if(-not $p){$p='${quoted}'; New-Item -Path $key -Force|Out-Null; New-ItemProperty -LiteralPath $key -Name CoordinatorRoot -Value $p -PropertyType String -Force|Out-Null}; Write-Output $p}finally{if($held){$m.ReleaseMutex()};$m.Dispose()}`;
   const r=spawnSync('powershell.exe',['-NoProfile','-Command',script],{encoding:'utf8',windowsHide:true,timeout:20000});
