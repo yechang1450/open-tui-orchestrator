@@ -83,14 +83,21 @@ test('corrupt or unreadable lock file is fail-open unlocked', () => {
   } finally { t.cleanup(); }
 });
 
-test('lock without expiresAt holds indefinitely until released', () => {
+test('lock without a valid expiresAt is corrupt and fails open', () => {
   const t = tempEnv();
   try {
     fs.mkdirSync(path.dirname(maintenanceLockPath(t.env)), { recursive: true });
-    fs.writeFileSync(maintenanceLockPath(t.env), JSON.stringify({ version: 1, reason: 'manual' }), 'utf8');
+    const file = maintenanceLockPath(t.env);
+    fs.writeFileSync(file, JSON.stringify({ version: 1, reason: 'manual' }), 'utf8');
     const st = readMaintenanceLock(t.env, Date.now() + 365 * 24 * 3600 * 1000);
-    assert.equal(st.locked, true);
-    assert.equal(st.expiresAt, null);
+    assert.equal(st.locked, false);
+    assert.equal(st.invalid, true);
+    assert.equal(fs.existsSync(file), false);
+    fs.writeFileSync(file, JSON.stringify({ version: 1, reason: 'bad', expiresAt: 'never' }), 'utf8');
+    const st2 = readMaintenanceLock(t.env);
+    assert.equal(st2.locked, false);
+    assert.equal(st2.invalid, true);
+    assert.equal(fs.existsSync(file), false);
   } finally { t.cleanup(); }
 });
 

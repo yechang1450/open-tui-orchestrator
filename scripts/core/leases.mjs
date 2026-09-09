@@ -3,11 +3,14 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import {fileURLToPath} from 'node:url';
 import {spawn,spawnSync} from 'node:child_process';
-import {keysOverlap} from './contracts.mjs';
+import {keysOverlap,powershellExe} from './contracts.mjs';
+
+// 锚定 SystemRoot 的 powershell.exe：裸名会先按进程 cwd（任意工作区）解析，防二进制投毒。
+const PS_EXE=powershellExe();
 
 export function processSnapshot(timeoutMs=15000) {
   if(process.platform!=='win32')throw new Error('Visible TUI runtime currently requires Windows');
-  const result=spawnSync('powershell.exe',['-NoProfile','-Command',
+  const result=spawnSync(PS_EXE,['-NoProfile','-Command',
     '$ErrorActionPreference="Stop"; Get-CimInstance Win32_Process | Select-Object ProcessId,Name,CommandLine,@{n="Started";e={$_.CreationDate.ToUniversalTime().ToString("o")}} | ConvertTo-Json -Compress'],
     {encoding:'utf8',windowsHide:true,timeout:Math.max(1,Math.min(15000,Math.ceil(timeoutMs)))});
   if(result.status!==0)throw new Error('Cannot verify process identities');
@@ -34,7 +37,7 @@ export function coordinatorDir(workspace,env=process.env) {
   if(process.platform!=='win32'||env.NODE_TEST_CONTEXT)return fallback;
   const quoted=fallback.replaceAll("'","''");
   const script=`$held=$false; $m=[Threading.Mutex]::new($false,'Local\\TuiOrchestrator.Coordinator'); try {try{$held=$m.WaitOne(15000)}catch [Threading.AbandonedMutexException]{$held=$true}; if(-not $held){throw 'Coordinator locator busy'}; $key='HKCU:\\Software\\TuiOrchestrator'; $p=(Get-ItemProperty -LiteralPath $key -Name CoordinatorRoot -ErrorAction SilentlyContinue).CoordinatorRoot; if(-not $p){$p='${quoted}'; New-Item -Path $key -Force|Out-Null; New-ItemProperty -LiteralPath $key -Name CoordinatorRoot -Value $p -PropertyType String -Force|Out-Null}; Write-Output $p}finally{if($held){$m.ReleaseMutex()};$m.Dispose()}`;
-  const r=spawnSync('powershell.exe',['-NoProfile','-Command',script],{encoding:'utf8',windowsHide:true,timeout:20000});
+  const r=spawnSync(PS_EXE,['-NoProfile','-Command',script],{encoding:'utf8',windowsHide:true,timeout:20000});
   if(r.status!==0||!r.stdout.trim())throw new Error('Unable to locate machine window coordinator');
   return path.resolve(r.stdout.trim());
 }
@@ -48,7 +51,7 @@ export function transaction(dir,fn,snapshot=processSnapshot) {
   let unlock=()=>{};
   if(snapshot===processSnapshot) {
     const ticket=path.join(dir,'lock-'+crypto.randomUUID());
-    const child=spawn('powershell.exe',['-NoProfile','-File',fileURLToPath(new URL('./lease-lock.ps1',import.meta.url)),'-Directory',dir,'-Ticket',ticket,'-Owner',String(owner.ProcessId),'-Started',owner.Started],{windowsHide:true,stdio:'ignore'});
+    const child=spawn(PS_EXE,['-NoProfile','-File',fileURLToPath(new URL('./lease-lock.ps1',import.meta.url)),'-Directory',dir,'-Ticket',ticket,'-Owner',String(owner.ProcessId),'-Started',owner.Started],{windowsHide:true,stdio:'ignore'});
     child.on('error',()=>{});child.unref();
     const deadline=Date.now()+20000;
     while(!fs.existsSync(ticket+'.ready')&&Date.now()<deadline)Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,25);

@@ -1,5 +1,6 @@
 import {levelWaves,verifyChecks,requestTasks,computeMaxWindows} from './contracts.mjs';
 import os from 'node:os';
+import path from 'node:path';
 
 // Validate persisted structure before recovery can change state or invoke tools.
 export function validateRecoverySummary(sum) {
@@ -9,18 +10,26 @@ export function validateRecoverySummary(sum) {
   const same=(a,b)=>JSON.stringify(a)===JSON.stringify(b);
   const exact=(ids,value)=>object(value)&&new Set(ids).size===ids.length&&Object.keys(value).length===ids.length&&ids.every(id=>Object.hasOwn(value,id)&&object(value[id]));
   if(!object(sum)||sum.protocol!==2||typeof sum.request!=='string'||!Number.isSafeInteger(sum.generation)||sum.generation<1||!Array.isArray(sum.history))fail('invalid header');
+  if(sum.acceptanceSha256!==undefined&&(typeof sum.acceptanceSha256!=='string'||!/^[0-9a-f]{64}$/.test(sum.acceptanceSha256)))fail('invalid acceptance hash');
   const tasks=requestTasks(sum.request);
   if(!tasks.length||!Array.isArray(sum.tasks)||!same(sum.tasks.map(t=>({id:t?.id,prompt:t?.prompt})),tasks))fail('original task inventory mismatch');
   if(!Array.isArray(sum.blocks)||!sum.blocks.length||sum.blocks.length>computeMaxWindows(os.totalmem()/1024**3)||!Array.isArray(sum.plan)||sum.plan.length!==sum.blocks.length)fail('block inventory mismatch');
   const ids=tasks.map(t=>t.id),blockIds=sum.blocks.map(b=>b?.key);
   if(!strings(blockIds)||!exact(blockIds,sum.results)||!exact(ids,sum.taskResults))fail('result inventory mismatch');
   const covered=[];
+  const workspaceRoot=path.resolve(sum.workspace)+path.sep;
   for(let i=0;i<sum.blocks.length;i++) {
     const block=sum.blocks[i],plan=sum.plan[i],entry=sum.results[block.key];
     if(!strings(block.taskIds)||!block.taskIds.length||!object(plan)||plan.key!==block.key||!strings(plan.keys)||!strings(plan.dependsOn)||!Array.isArray(plan.b?.tasks))fail('invalid block or plan');
     if(!plan.b.tasks.every(t=>strings(t?.sourceIds)&&t.sourceIds.length)||!same(plan.b.tasks.flatMap(t=>t.sourceIds),block.taskIds))fail('plan task coverage mismatch');
     covered.push(...block.taskIds);
     if(!Array.isArray(entry.attempts))fail('missing attempt inventory');
+    // launcherFiles 会被 resume 的 adopt/cleanup 直接使用（含 rmSync）：每个路径都必须
+    // 解析到本工作区之内，否则被篡改的账本能借控制器之手删工作区外的任意文件。
+    for(const f of Object.values(entry.launcherFiles||{})) {
+      const resolved=typeof f==='string'&&f?path.resolve(f):'';
+      if(!resolved||!resolved.startsWith(workspaceRoot))fail('launcher files escape the workspace');
+    }
     if(!entry.attempts.length&&(entry.launcherFiles||entry.launcher||entry.token||['launching','running','verified','awaiting-verification'].includes(entry.status)))fail('launched block has no attempt inventory');
     for(const attempt of entry.attempts) {
       if(!object(attempt)||attempt.runId!==sum.runId||typeof attempt.token!=='string'||!attempt.token||typeof attempt.file!=='string'||!attempt.file||!strings(attempt.taskIds)||!attempt.taskIds.length||new Set(attempt.taskIds).size!==attempt.taskIds.length||attempt.taskIds.some(id=>!block.taskIds.includes(id)))fail('invalid attempt identity or task coverage');

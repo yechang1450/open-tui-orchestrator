@@ -1283,3 +1283,32 @@ test('isOrchestratorSelfMod: 通用化识别自引用(编排/调度/TUI窗/源�
   assert.equal(isOrchestratorSelfMod('给数据库加索引'), false, '普通业务不误判');
   assert.equal(isOrchestratorSelfMod('优化前端构建缓存'), false, '前端优化不误判');
 });
+
+// ---------- 安全加固回归：注册表锁老化回收 + 系统工具锚定 ----------
+const { withRegistryLock, REGISTRY_LOCK_FILE } = await import(importUrl(path.join(scripts, 'orchestrate-sdk.mjs')));
+const { systemToolExe, powershellExe } = await import(importUrl(path.join(scripts, 'core', 'contracts.mjs')));
+
+test('registry lock: stale lock left by a killed controller is reclaimed and released', () => {
+  fs.mkdirSync(path.dirname(REGISTRY_LOCK_FILE), { recursive: true });
+  fs.rmSync(REGISTRY_LOCK_FILE, { force: true });
+  try {
+    fs.writeFileSync(REGISTRY_LOCK_FILE, JSON.stringify({ pid: 999999, at: Date.now() - 65000 }));
+    const stale = new Date(Date.now() - 65000);
+    fs.utimesSync(REGISTRY_LOCK_FILE, stale, stale);
+    let ran = 0;
+    withRegistryLock(() => { ran++; });
+    assert.equal(ran, 1, 'stale lock must be reclaimed, not degrade into a permanent 2s stall');
+    assert.equal(fs.existsSync(REGISTRY_LOCK_FILE), false, 'lock released after use');
+  } finally { fs.rmSync(REGISTRY_LOCK_FILE, { force: true }); }
+});
+
+test('system tools resolve to SystemRoot-anchored paths (binary-planting guard)', () => {
+  const ps = powershellExe();
+  assert.equal(path.isAbsolute(ps), true);
+  assert.match(ps, /System32[/\\]WindowsPowerShell[/\\]v1\.0[/\\]powershell\.exe$/i);
+  const where = systemToolExe('where.exe');
+  assert.equal(path.isAbsolute(where), true);
+  assert.match(where, /System32[/\\]where\.exe$/i);
+  assert.equal(systemToolExe('definitely-missing-tool-xyz.exe'), 'definitely-missing-tool-xyz.exe', 'missing anchored target falls back to the bare name');
+  assert.equal(systemToolExe('where.exe', { SystemRoot: 'C:\\DefinitelyMissingRoot' }), 'where.exe', 'missing SystemRoot anchor falls back to the bare name');
+});

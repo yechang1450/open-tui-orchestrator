@@ -107,6 +107,17 @@ export function ledgerPlan(request, candidate, capacity, compact) {
 }
 
 export function sha256(file) {return crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');}
+
+// 裸名可执行文件在 Windows 上会先按进程 cwd（编排器的 cwd = 任意工作区）解析，
+// 在不受信目录里运行时构成二进制投毒入口。一律锚定到 SystemRoot；锚定目标不存在才回退裸名。
+export function systemToolExe(name, env = process.env) {
+  const anchored = path.join(env.SystemRoot || env.WINDIR || 'C:\\Windows', 'System32', String(name));
+  return fs.existsSync(anchored) ? anchored : String(name);
+}
+export function powershellExe(env = process.env) {
+  const anchored = path.join(env.SystemRoot || env.WINDIR || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+  return fs.existsSync(anchored) ? anchored : 'powershell.exe';
+}
 export function verifyTask(receipt, task, checks, context) {
   if(!receipt || receipt.runId!==context.runId || receipt.token!==context.token || receipt.id!==task.id || receipt.status!=='completed')return {status:'failed',reason:'Missing or mismatched task receipt'};
   return verifyChecks(checks,context.workspace);

@@ -29,6 +29,9 @@ export function runDirectory(workspace,runId) {
   return path.join(workspace,'temp','orchestrator','runs',runId);
 }
 function loadChecks(file){return file?JSON.parse(fs.readFileSync(file,'utf8')):{};}
+// 验收契约（含 command 类检查，会以控制器权限执行）在创建时锚定哈希：run 目录可被窗内 agent 写入，
+// resume/verify 回读前比对，篡改即拒绝——不让被改写的 acceptance.json 借恢复流程获得执行权。
+function checksHash(checks){return crypto.createHash('sha256').update(JSON.stringify(checks||{})).digest('hex');}
 function blockCheckpoints(entry,block,sum) {
   const out={};
   for(const a of entry?.attempts||[]) {
@@ -71,8 +74,9 @@ export function verifyRun(workspace,runId,acceptanceFile) {
   const dir=runDirectory(workspace,runId),file=path.join(dir,'summary.json'),sum=JSON.parse(fs.readFileSync(file,'utf8'));
   if(sum.runId!==runId||!sum.finishedAt)throw new Error('Run is not finalized');
   if(sum.protocol===2)validateRecoverySummary(sum);
-  const claim=claimRun(sum.coordinator||coordinatorDir(workspace),'run:'+path.resolve(dir).toLowerCase());
   const checks=loadChecks(acceptanceFile||path.join(dir,'acceptance.json'));
+  if(sum.acceptanceSha256&&checksHash(checks)!==sum.acceptanceSha256)throw new Error('Acceptance contract changed since run creation; refusing to verify');
+  const claim=claimRun(sum.coordinator||coordinatorDir(workspace),'run:'+path.resolve(dir).toLowerCase());
   try{
     if(sum.tasks?.length){
       const keyDiff=acceptanceKeyDiff(checks,sum.tasks);
@@ -102,6 +106,7 @@ export async function runWindows(request,hooks,options={}) {
       validateRecoverySummary(sum);
       if(sum.blocks.length>capacity)throw new Error('Current memory capacity is below the saved block count');
       checks=loadChecks(options.acceptanceFile||path.join(dir,'acceptance.json'));
+      if(sum.acceptanceSha256&&checksHash(checks)!==sum.acceptanceSha256)throw new Error('Acceptance contract changed since run creation; refusing to resume');
       sum.history.push({generation:sum.generation,finishedAt:sum.finishedAt,success:sum.success});
       sum.generation++;delete sum.finishedAt;sum.success=false;
     }else {
@@ -119,6 +124,7 @@ export async function runWindows(request,hooks,options={}) {
       sum={protocol:2,version:CORE_VERSION,agent:options.agent||'codex',runId,workspace,request,capacity,coordinator,generation:1,history:[],startedAt:Date.now(),tasks,plan:recs,
         blocks:recs.map(r=>({key:r.key,title:r.title,taskIds:r.b.tasks.flatMap(t=>t.sourceIds)})),results:{},taskResults:{}};
       for(const r of recs){sum.results[r.key]={status:'pending',attempts:[]};for(const id of sum.blocks.find(b=>b.key===r.key).taskIds)sum.taskResults[id]={status:'pending'};}
+      sum.acceptanceSha256=checksHash(checks);
     }
     sum.owner=claim.owner;sum.coordinator=coordinator;
     {

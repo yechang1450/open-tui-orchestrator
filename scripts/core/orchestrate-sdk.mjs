@@ -60,7 +60,9 @@
  * ============================================================================
  */
 import {nativeArgumentLines} from "./native-argv.mjs";
-import {CORE_VERSION, levelWaves, keysOverlap, summaryComplete,requestTasks,bindClassifiedTasks,computeMaxWindows} from "./contracts.mjs";
+import {CORE_VERSION, levelWaves, keysOverlap, summaryComplete,requestTasks,bindClassifiedTasks,computeMaxWindows,powershellExe,systemToolExe} from "./contracts.mjs";
+// 锚定 SystemRoot 的系统工具：裸名会先按进程 cwd（=任意工作区）解析，防二进制投毒。
+const PS_EXE=powershellExe(),WHERE_EXE=systemToolExe("where.exe");
 import {runWindows,verifyRun} from "./runner.mjs";
 import {launcherIdentity,processSnapshot,sameProcess,coordinatorDir,reserve,bind} from "./leases.mjs";
 import {runPiPlanner,writePiLauncher,waitPiResult} from './pi-runtime.mjs';
@@ -119,7 +121,9 @@ const CODEX = AGENT.config.bin;
 // PowerShell 单引号字符串内嵌路径：把 ' 转义成 ''，避免路径含引号时破坏脚本/注入。
 const WORKSPACE_Q = WORKSPACE.replace(/'/g, "''");
 const CODEX_Q = CODEX.replace(/'/g, "''");
-const PY = process.env.PYTHON || "python";
+// 仅当 PYTHON 是真实存在的绝对路径时，才把它所在目录前置进窗内 PATH；
+// 裸名（如默认的 "python"）会成为按窗 cwd（=任意工作区）解析的相对 PATH 段，构成投毒面。
+const PY_DIR = (() => { try { const p = String(process.env.PYTHON || ""); return path.isAbsolute(p) && existsSync(p) ? path.dirname(p) : null; } catch { return null; } })();
 // 发起窗 model/thinking 继承（同窗即同 agent，逐字透传）：显式 ORCH_MODEL/ORCH_EFFORT 优先；
 // 未显式给出时检测发起窗口当前实际值并写回 env，下游 argv 构造与 codex -m/-c 注入全部消费这两个变量。
 // node --test 下由 inheritHostModelEffort 自行豁免（NODE_TEST_CONTEXT）。
@@ -208,7 +212,7 @@ const WT_EXE =
 function wtAvailable() {
   if (!WT_EXE) return false;
   try {
-    const r = spawnSync("where.exe", ["wt.exe"], { encoding: "utf8", windowsHide: true });
+    const r = spawnSync(WHERE_EXE, ["wt.exe"], { encoding: "utf8", windowsHide: true });
     return r.status === 0 && !/ERROR:/.test(String(r.stdout || ""));
   } catch { return false; }
 }
@@ -748,7 +752,7 @@ async function runPrototypeGate(title, prompt) {
   return true;
 }
 // Enforcement: once the orchestrator is engaged, mark that real executions are gated. The
-// sanction engine is --run-windows (a real, visible, interactive TUI window). headless --run/--exec
+// sanction engine is --run-windows (a real, visible agent TUI window). headless --run/--exec
 // is additionally hard-gated inside this file (needs ORCH_ALLOW_HEADLESS=1). open-tui-orchestrator-force.mjs reads
 // this marker: from a NON-window context it refuses real-execution kinds and tells the caller to
 // route through --run-windows. A sanctioned window sets $env:ORCH_WINDOW=1 (in its launcher)
@@ -835,15 +839,14 @@ function spawnVisibleWindow(lp, title) {
     const windowName = "win-" + (winS || "x");
     // 同步拉起（no-activate helper 经 spawnSync 执行完 CreateProcessW 再返回）：实测异步 detached 路径
     // 弹窗经常不出现（"popup NOT confirmed" 直至超时），sync 路径稳定 1~2 秒内确认；阻塞 ~2.5s 换可靠性。
-    spawnInactiveWindow(WT_EXE, ["-w", windowName, "powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", lp], WORKSPACE);
+    spawnInactiveWindow(WT_EXE, ["-w", windowName, PS_EXE, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", lp], WORKSPACE);
     console.log("spawned visible " + AGENT.agent + " TUI (Windows Terminal): " + title + " (window=" + windowName + ")");
     return;
   }
   // conhost fallback uses the same no-activate helper rather than cmd /c start,
   // so a missing Windows Terminal does not reintroduce a focusing window.
-  const powershell=path.join(process.env.SystemRoot||process.env.WINDIR||'C:\\Windows','System32','WindowsPowerShell','v1.0','powershell.exe');
-  // 与 WT 路径一致：sync 拉起保证窗口真正弹出（见上）。
-  spawnInactiveWindow(powershell,['-NoProfile','-ExecutionPolicy','Bypass','-File',lp],WORKSPACE);
+  // 与 WT 路径一致：sync 拉起保证窗口真正弹出（见上）。powershell 走 SystemRoot 锚定（防工作区二进制投毒）。
+  spawnInactiveWindow(PS_EXE,['-NoProfile','-ExecutionPolicy','Bypass','-File',lp],WORKSPACE);
   console.log("spawned visible " + AGENT.agent + " TUI: " + title);
 }
 // 弹窗后精准检测：pid 文件存在 + launcher(WT pane 宿主)进程存活 => 窗口真弹出（见 windowGenuinelyPopped）。
@@ -873,7 +876,7 @@ function agentDescendantAlive(pidf) {
   try {
     const pid = readPidFile(pidf);
     if (!pid) return false;
-    const r = spawnSync("powershell.exe", ["-NoProfile", "-Command",
+    const r = spawnSync(PS_EXE, ["-NoProfile", "-Command",
       "$ErrorActionPreference='SilentlyContinue'; $a=@{}; $p=Get-CimInstance Win32_Process; foreach($pr in $p){ if($pr.ParentProcessId -eq 0){continue}; $a[$pr.ProcessId]=$pr.ParentProcessId }; $root=" + Number(pid) + "; $s=@($root); $i=0; while($i -lt $s.Count){ $cur=$s[$i]; $i++; foreach($pr in $p){ if($pr.ParentProcessId -eq $cur){ if(($pr.Name -match 'codex|node') -or ($pr.CommandLine -like '*codex*')){ Write-Output 1; exit 0 }; $s+=$pr.ProcessId } } }; Write-Output 0"],
       { windowsHide: true, encoding: "utf8", timeout: 8000 });
     return /^1/m.test(String(r.stdout || ""));
@@ -1130,7 +1133,7 @@ function writeInteractiveLauncher(title, prompt, sfx) {
   const pidfQ = String(pidf || "").replace(/'/g, "''");
   const pfQ = String(pf || "").replace(/'/g, "''");
   const rfQ = String(rf || "").replace(/'/g, "''");
-  const PY_Q = String(PY || "").replace(/'/g, "''");
+  const PY_Q = PY_DIR ? String(PY_DIR).replace(/'/g, "''") : null;
   const body = [
     "$ErrorActionPreference = 'Continue'",
     // 根治：最外层 trap 兜底——任何未捕获的 terminating error 都恒 exit 0，绝不让 launcher 以非 0 退出，
@@ -1138,7 +1141,7 @@ function writeInteractiveLauncher(title, prompt, sfx) {
     "trap { exit 0 }",
     `$PID | Set-Content -Path '${pidfQ}' -Encoding UTF8`,
     "$env:TERM = 'xterm-256color'",
-    "$env:Path = '" + PY_Q + ";' + $env:Path",
+    ...(PY_Q ? ["$env:Path = '" + PY_Q + ";' + $env:Path"] : []),
     "$env:ORCH_WINDOW = '1'",
     "if ($env:ORCH_SDIR) { $env:ORCH_SDIR = $env:ORCH_SDIR } elseif ($env:ORCH_SESSION_DIR) { $env:ORCH_SDIR = $env:ORCH_SESSION_DIR } elseif ($env:CODEX_HOME) { $env:ORCH_SDIR = Join-Path $env:CODEX_HOME 'sessions' } else { $env:ORCH_SDIR = Join-Path $env:USERPROFILE '.codex\\sessions' }",
     "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8",
@@ -1667,7 +1670,7 @@ async function closeWindowByPid(pid, expected) {
       '$all = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue; $actual=$all | Where-Object ProcessId -eq '+p+'; if(-not $actual -or $actual.CreationDate.ToUniversalTime().ToString("o") -ne '+buildPsArrayLit([expected.Started])+'[0] -or $actual.CommandLine -ne '+buildPsArrayLit([expected.CommandLine])+'[0]) { exit 0 }');
   let killedCount = 0;
   try {
-    const r = spawnSync("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", killScript], { encoding: "utf8", windowsHide: true });
+    const r = spawnSync(PS_EXE, ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", killScript], { encoding: "utf8", windowsHide: true });
     killedCount = Number(String(r.stdout || "").trim().split(/\r?\n/).pop()) || 0;
   } catch { /* ignore */ }
   // Poll for the launcher to exit on its own; the launcher runs `exit 0` right after `& codex` returns.
@@ -1698,7 +1701,7 @@ async function closeWindowRobust(w) {
     const lp = path.join(path.dirname(pidf), path.basename(pidf).replace(/^window-/, "win-launch-").replace(/\.pid$/, ".ps1"));
     try {
       const esc = String(lp).replace(/'/g, "''");
-      const r = spawnSync("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command",
+      const r = spawnSync(PS_EXE, ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command",
         "$ErrorActionPreference='SilentlyContinue'; $q = Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'powershell.exe' -and $_.CommandLine -like '*" + esc + "*' } | Select-Object -First 1; if ($q) { $q.ProcessId }"], { encoding: "utf8", windowsHide: true });
       pid = Number(String(r.stdout || "").trim());
     } catch { /* ignore */ }
@@ -1723,12 +1726,24 @@ const LOCK_REG = path.join(STATE_DIR, "orchestrator-locks.json");
 const REG_LOCK = path.join(STATE_DIR, "orchestrator-registry.lock");
 function sleepSync(ms) { try { const sab = new Int32Array(new SharedArrayBuffer(4)); Atomics.wait(sab, 0, 0, ms); } catch { /* ignore */ } }
 // 跨进程独占锁：openSync 'wx' 原子创建；冲突则有限重试；finally 释放。用于串行化 registry 写，防并发丢失/半写。
+// 锁带 owner+时间戳：持锁进程被杀（guardian 恢复场景属正常运维）会留下 stale 锁——超龄即安全回收，
+// 否则此后每次 registry 操作都先 2s 忙等再在「无互斥」下读写（冲突门完整性被静默削弱）。
+const REG_LOCK_STALE_MS = 60000;
 function withRegistryLock(fn) {
-  let got = false;
-  for (let i = 0; i < 100; i++) {
-    let fd;
-    try { fd = openSync(REG_LOCK, 'wx'); closeSync(fd); got = true; break; } catch { sleepSync(20); }
+  const acquire = () => {
+    for (let i = 0; i < 100; i++) {
+      let fd;
+      try { fd = openSync(REG_LOCK, 'wx'); writeFileSync(fd, JSON.stringify({ pid: process.pid, at: Date.now() })); closeSync(fd); return true; } catch { sleepSync(20); }
+    }
+    return false;
+  };
+  let got = acquire();
+  if (!got) {
+    let stale = true;
+    try { stale = Date.now() - statSync(REG_LOCK).mtimeMs > REG_LOCK_STALE_MS; } catch { /* vanished between attempts: retry directly */ }
+    if (stale) { try { rmSync(REG_LOCK, { force: true }); } catch { /* ignore */ } got = acquire(); }
   }
+  if (!got) console.warn('[orchestrator] registry lock contended; proceeding without mutual exclusion');
   try { return fn(); }
   finally { if (got) { try { rmSync(REG_LOCK, { force: true }); } catch { /* ignore */ } } }
 }
@@ -1985,7 +2000,7 @@ async function cleanStaleWindows() {
         try { protectedPids.add(Number(String(readFileSync(w.pidFile, "utf8")).trim())); } catch { /* ignore */ }
       }
     }
-    const r = spawnSync("powershell.exe", ["-NoProfile","-ExecutionPolicy","Bypass","-Command",
+    const r = spawnSync(PS_EXE, ["-NoProfile","-ExecutionPolicy","Bypass","-Command",
       "$ErrorActionPreference='SilentlyContinue'; Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'powershell.exe' -and $_.CommandLine -like '*win-launch-*' } | ForEach-Object { $_.ProcessId }"], { encoding: "utf8", windowsHide: true });
     const ids = String(r.stdout || "").split(/\r?\n/).map((s) => Number(String(s).trim())).filter((n) => Number.isFinite(n) && n > 0 && !protectedPids.has(n));
     if (!ids.length) { console.log("[orchestrator] no stale orchestrator windows from previous run."); return; }
@@ -2201,7 +2216,7 @@ export async function main() {
     await new Promise((r) => setTimeout(r, 1500));
     let orphanAgent = false;
     try {
-      const spid = Number(pid); const kids = spawnSync("powershell.exe", ["-NoProfile", "-Command", "Get-CimInstance Win32_Process -Filter \"ParentProcessId=" + (Number.isFinite(spid) ? spid : -1) + "\" | Measure-Object | Select-Object -ExpandProperty Count"], { windowsHide: true, encoding: "utf8" });
+      const spid = Number(pid); const kids = spawnSync(PS_EXE, ["-NoProfile", "-Command", "Get-CimInstance Win32_Process -Filter \"ParentProcessId=" + (Number.isFinite(spid) ? spid : -1) + "\" | Measure-Object | Select-Object -ExpandProperty Count"], { windowsHide: true, encoding: "utf8" });
       orphanAgent = Number(String(kids.stdout || "0").trim()) > 0;
     } catch { /* ignore */ }
     console.log("launcherPid=" + pid + " launcherStillAlive=" + launcherAlive + " (expect false => pane auto-closed)");
@@ -2246,7 +2261,7 @@ export async function main() {
       wait:AGENT.agent!=='codex'?(async(_session,timeout,rf,_token,pidf)=>waitAdapterResult(rf,timeout,pidf)):waitTaskComplete,exitCode:readExitCode,
       register:r=>updateWindows(ws=>[...ws,r]),commit:commitReservation,unregister:cancelReservation,close:closeWindowByPid,
       guardian:g=>ensureRunGuardian({...g,agent:AGENT.agent,env:process.env}),
-      cleanup:la=>{for(const f of [la.lp,la.pf,la.pidf,la.rf,la.pidf+'.self-closed',la.rf+'.self-closed'])try{rmSync(f,{force:true});}catch{}}
+      cleanup:la=>{const wsRoot=path.resolve(WORKSPACE)+path.sep;for(const f of [la.lp,la.pf,la.pidf,la.rf,la.pidf+'.self-closed',la.rf+'.self-closed'])try{const resolved=path.resolve(String(f||''));if(resolved.startsWith(wsRoot))rmSync(resolved,{force:true});}catch{}}
     },{workspace:WORKSPACE,capacity,resume,agent:AGENT.agent,runId:process.env.ORCH_RUN_ID,acceptanceFile:process.env.ORCH_ACCEPTANCE_FILE,timeoutMs:POLL_TIMEOUT_MS,auth:readAuthPrompt(),plan:preflightPlan,spawnStaggerMs:Math.max(0,Number(process.env.ORCH_WINDOW_STAGGER_MS||0)||0),windowCap:Math.max(0,Number(process.env.ORCH_MAX_WINDOWS||0)||0)||undefined});
     process.exitCode=result.success?0:1;return;
   }
@@ -2263,7 +2278,7 @@ export async function main() {
     // REAL work is --run-windows (a real visible TUI window). Opt-in via ORCH_ALLOW_HEADLESS=1 only
     // for pure, windowless automation that the user has explicitly sanctioned.
     if (process.env.ORCH_ALLOW_HEADLESS !== "1") {
-      console.error("[orchestrator] REFUSED: headless --run/--exec is disabled by open-tui-orchestrator enforcement. Real work must go through --run-windows (a real, visible, interactive TUI window). Set ORCH_ALLOW_HEADLESS=1 only for pure automation you explicitly want windowless.");
+      console.error("[orchestrator] REFUSED: headless --run/--exec is disabled by open-tui-orchestrator enforcement. Real work must go through --run-windows (a real, visible agent TUI window). Set ORCH_ALLOW_HEADLESS=1 only for pure automation you explicitly want windowless.");
       process.exitCode = 1;
       return;
     }
@@ -2317,4 +2332,4 @@ if (isMain) main().catch((e) => {
   console.error("[orchestrator] FATAL: " + e.message);
   process.exitCode = 1;
 });
-export { classifyBlockComplexity, classifyExecutionMode, windowExecutionPolicy, appendModelEffortArgs, genericProjectSplit, trySingleBlock, conflictByKeys, loadCachedDecompose, buildBlocksFromTasks, resolveHints, extractTasks, classifyPrompt, buildBlockPrompt, levelWaves, decomposeHash, checkDiskSpace, readPidFile, pidAliveCheck, closeWindowByPid, windowGenuinelyPopped, extractResult, extractUsage, readReportFromResult, sessionDir, writeInteractiveLauncher, staleTransientFiles, pidFileOfTransient, tryReserveWindow, commitReservation, cancelReservation, computeMaxWindows, blockKeys, keysOverlap, scanTaskComplete, __setOrchHooks, isOrchestratorSelfMod, resolveCodexHome };
+export { classifyBlockComplexity, classifyExecutionMode, windowExecutionPolicy, appendModelEffortArgs, genericProjectSplit, trySingleBlock, conflictByKeys, loadCachedDecompose, buildBlocksFromTasks, resolveHints, extractTasks, classifyPrompt, buildBlockPrompt, levelWaves, decomposeHash, checkDiskSpace, readPidFile, pidAliveCheck, closeWindowByPid, windowGenuinelyPopped, extractResult, extractUsage, readReportFromResult, sessionDir, writeInteractiveLauncher, staleTransientFiles, pidFileOfTransient, tryReserveWindow, commitReservation, cancelReservation, computeMaxWindows, blockKeys, keysOverlap, scanTaskComplete, __setOrchHooks, isOrchestratorSelfMod, resolveCodexHome, withRegistryLock, REG_LOCK as REGISTRY_LOCK_FILE };

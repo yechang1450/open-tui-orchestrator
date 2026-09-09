@@ -1,5 +1,9 @@
 import {spawn,spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
+import {powershellExe} from './contracts.mjs';
+
+// 锚定 SystemRoot 的 powershell.exe：裸名会先按进程 cwd（任意工作区）解析，防二进制投毒。
+const PS_EXE=powershellExe();
 
 // Windows command-line quoting, including quotes and trailing backslashes.
 export function quoteWindowsArgument(value){
@@ -9,7 +13,7 @@ export function quoteWindowsArgument(value){
 }
 export function spawnInactiveWindow(file,args,cwd,{invoke=spawnSync}={}){
  const payload=Buffer.from(JSON.stringify({file,parameters:args.map(quoteWindowsArgument).join(' '),cwd}),'utf8').toString('base64');
- const result=invoke('powershell.exe',['-NoProfile','-NonInteractive','-File',fileURLToPath(new URL('./inactive-window.ps1',import.meta.url)),'-Payload',payload],{cwd,windowsHide:true,shell:false,encoding:'utf8',timeout:15000});
+ const result=invoke(PS_EXE,['-NoProfile','-NonInteractive','-File',fileURLToPath(new URL('./inactive-window.ps1',import.meta.url)),'-Payload',payload],{cwd,windowsHide:true,shell:false,encoding:'utf8',timeout:15000});
  if(result.error||result.status!==0)throw new Error('INACTIVE_WINDOW_LAUNCH_FAILED: '+(result.error?.message||result.stderr||result.status));
 }
 
@@ -20,7 +24,7 @@ export function spawnInactiveWindowDetached(file,args,cwd,{invoke=spawn}={}){
  const payload=Buffer.from(JSON.stringify({file,parameters:args.map(quoteWindowsArgument).join(' '),cwd}),'utf8').toString('base64');
  let child;
  try{
-  child=invoke('powershell.exe',['-NoProfile','-NonInteractive','-File',fileURLToPath(new URL('./inactive-window.ps1',import.meta.url)),'-Payload',payload],{cwd,windowsHide:true,shell:false,stdio:'ignore'});
+  child=invoke(PS_EXE,['-NoProfile','-NonInteractive','-File',fileURLToPath(new URL('./inactive-window.ps1',import.meta.url)),'-Payload',payload],{cwd,windowsHide:true,shell:false,stdio:'ignore'});
  }catch(error){throw new Error('INACTIVE_WINDOW_LAUNCH_FAILED: '+(error?.message||String(error)));}
  if(!child||typeof child.unref!=='function')throw new Error('INACTIVE_WINDOW_LAUNCH_FAILED: helper did not return a detached process');
  child.unref();

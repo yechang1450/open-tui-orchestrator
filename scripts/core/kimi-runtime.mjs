@@ -25,6 +25,15 @@ export function kimiAssistantText(raw) {
   return final;
 }
 
+// kimi 冷启动实测 ~295s（全新会话首次规划调用），远超 codex(60s)/pi(60s)/opencode(90s) 的默认拆块
+// 超时——90s 默认下 kimi 发起的全新请求规划必超时、回退单块 inline 不开窗。默认按 adapter 放宽到
+// 360s（实测值 + 余量）；ORCH_DECOMPOSE_TIMEOUT_MS 显式设置时仍优先。
+export const KIMI_DECOMPOSE_TIMEOUT_DEFAULT_MS = 360000;
+export function plannerTimeoutMs(env = process.env) {
+  const v = Number(env.ORCH_DECOMPOSE_TIMEOUT_MS);
+  return Number.isFinite(v) && v > 0 ? v : KIMI_DECOMPOSE_TIMEOUT_DEFAULT_MS;
+}
+
 export async function runKimiPlanner(config,prompt,cwd) {
   // kimi's parser binds -p's value greedily: the prompt must immediately follow
   // -p, before any further flags (same rule as the window argv; b3d3600).
@@ -32,7 +41,7 @@ export async function runKimiPlanner(config,prompt,cwd) {
   return new Promise((resolve,reject)=>{
     const child=spawn(config.bin,args,{cwd,env:process.env,windowsHide:true,shell:false,stdio:['ignore','pipe','pipe']});
     let raw='',errorText='',timedOut=false;
-    const timer=setTimeout(()=>{timedOut=true;child.kill();},Number(process.env.ORCH_DECOMPOSE_TIMEOUT_MS||90000));
+    const timer=setTimeout(()=>{timedOut=true;child.kill();},plannerTimeoutMs());
     child.stdout.on('data',(b)=>{raw+=b;if(raw.length>8000000)child.kill();});
     child.stderr.on('data',(b)=>{errorText+=b;});
     child.on('error',(e)=>{clearTimeout(timer);reject(e);});
@@ -91,7 +100,10 @@ export function writeKimiLauncher(config,{key,prompt,suffix,workspace,temp}) {
     // Windows PowerShell 5.1 native-argv fix-up so embedded quotes/newlines survive.
     "$agentArgs = @(" + args.map(quote).join(',') + ') + @($p)',
     ...nativeArgumentLines(),
-    `& ${quote(config.bin)} @agentArgs 2>&1 | Tee-Object -FilePath $log`,
+    // kimi 把 version/thinking/进度等诊断写到 stderr；2>&1 合并时 PS5.1 会把每行包成 ErrorRecord
+    // 刷出红色 NativeCommandError 块（纯外观）。过一道 ErrorRecord 还原：诊断行以普通文本进日志，
+    // 窗内不再刷红，stdout 的完成 token 不受影响。
+    `& ${quote(config.bin)} @agentArgs 2>&1 | ForEach-Object { if ($_ -is [System.Management.Automation.ErrorRecord]) { $_.TargetObject } else { $_ } } | Tee-Object -FilePath $log`,
     "$code = $LASTEXITCODE",
     // kimi -p exits on its own after the turn; capture the tail containing the token.
     "$report = ''",
