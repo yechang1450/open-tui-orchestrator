@@ -16,7 +16,7 @@ const context = resolveRuntimeContext(env);
 env.WORKSPACE_DIR = context.workspace;
 env.ORCH_STATE_DIR = context.state;
 if (!args.length || args.includes('--help')) {
-  console.log('open-tui-orchestrator --agent codex|pi|openclaw [--cli executable-or-supported-entry] [--workspace directory] [--acceptance file] --doctor|--plan request|--run-windows request|--resume-run id|--verify-run id|--spawn title prompt|--status\nHost identity is required. Fresh --run-windows opens TUI windows only for a genuinely parallel wave; single-block and dependency-only serial plans return an inline task inventory. OpenClaw support is pinned to 2026.9.2. Missing or unsupported CLIs fail without fallback.');
+  console.log('open-tui-orchestrator --agent codex|pi|openclaw|opencode|kimi [--cli executable-or-supported-entry] [--workspace directory] [--acceptance file] --doctor|--plan request|--run-windows request|--resume-run id|--verify-run id|--spawn title prompt|--status\nHost identity comes from --agent/ORCH_AGENT, then host env markers, then the initiating process chain. Fresh --run-windows opens TUI windows only for a genuinely parallel wave; single-block and dependency-only serial plans return an inline task inventory. OpenClaw support is pinned to 2026.9.2. Missing or unsupported CLIs fail without fallback.');
 } else {
   const child = spawn(process.execPath, [fileURLToPath(new URL('./scripts/orchestrate-sdk.mjs', import.meta.url)), ...args], {
     cwd: context.workspace, env, stdio: 'inherit', windowsHide: true,
