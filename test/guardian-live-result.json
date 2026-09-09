@@ -1,0 +1,238 @@
+{
+  "passed": true,
+  "runId": "guardian-b147e796-cc25-4c2a-8bc7-6beaf37ed9d5",
+  "entry": "C:\\Users\\yecha\\.tools\\open-tui-orchestrator\\scripts\\orchestrate-sdk.mjs",
+  "workspace": "C:\\Users\\yecha\\.tools\\open-tui-orchestrator",
+  "root": "C:\\Users\\yecha\\.tools\\open-tui-orchestrator\\temp\\guardian-b147e796-cc25-4c2a-8bc7-6beaf37ed9d5",
+  "agent": "kimi",
+  "coreVersion": "1.5.0",
+  "coreHash": "884227c4f27304ba7f5901b0a3eb8ecde59d0936b0982433546d07ba316bf0e5",
+  "coreUnchanged": true,
+  "generation": 2,
+  "windowLaunches": 2,
+  "attempts": [
+    1,
+    1
+  ],
+  "firstTaskExecutions": 1,
+  "controllerCrashInjected": true,
+  "guardianAutoResume": true,
+  "manualResume": false,
+  "adoptedSameLauncher": true,
+  "closed": true,
+  "summary": {
+    "protocol": 2,
+    "version": "1.5.0",
+    "agent": "kimi",
+    "runId": "guardian-b147e796-cc25-4c2a-8bc7-6beaf37ed9d5",
+    "workspace": "C:\\Users\\yecha\\.tools\\open-tui-orchestrator",
+    "request": "项目A：执行 node C:/Users/yecha/.tools/open-tui-orchestrator/temp/guardian-b147e796-cc25-4c2a-8bc7-6beaf37ed9d5/project-a/probeA.mjs 并等待命令结束，在发起目录 C:/Users/yecha/.tools/open-tui-orchestrator 执行，按主持提供的命令逐项记录检查点，禁止另开窗口禁止提交或写记忆；项目B：执行 node C:/Users/yecha/.tools/open-tui-orchestrator/temp/guardian-b147e796-cc25-4c2a-8bc7-6beaf37ed9d5/project-b/probeB.mjs 并等待命令结束，在发起目录 C:/Users/yecha/.tools/open-tui-orchestrator 执行，按主持提供的命令逐项记录检查点，禁止另开窗口禁止提交或写记忆",
+    "capacity": 12,
+    "coordinator": "D:\\temp\\orchestrator\\coordinator",
+    "generation": 2,
+    "history": [
+      {
+        "generation": 1
+      }
+    ],
+    "startedAt": 1788957884844,
+    "tasks": [
+      {
+        "id": "T001",
+        "prompt": "项目A：执行 node C:/Users/yecha/.tools/open-tui-orchestrator/temp/guardian-b147e796-cc25-4c2a-8bc7-6beaf37ed9d5/project-a/probeA.mjs 并等待命令结束，在发起目录 C:/Users/yecha/.tools/open-tui-orchestrator 执行，按主持提供的命令逐项记录检查点，禁止另开窗口禁止提交或写记忆"
+      },
+      {
+        "id": "T002",
+        "prompt": "项目B：执行 node C:/Users/yecha/.tools/open-tui-orchestrator/temp/guardian-b147e796-cc25-4c2a-8bc7-6beaf37ed9d5/project-b/probeB.mjs 并等待命令结束，在发起目录 C:/Users/yecha/.tools/open-tui-orchestrator 执行，按主持提供的命令逐项记录检查点，禁止另开窗口禁止提交或写记忆"
+      }
+    ],
+    "plan": [
+      {
+        "key": "B1",
+        "title": "project-a",
+        "b": {
+          "title": "project-a",
+          "type": "parallel",
+          "tasks": [
+            {
+              "prompt": "项目A：执行 node C:/Users/yecha/.tools/open-tui-orchestrator/temp/guardian-b147e796-cc25-4c2a-8bc7-6beaf37ed9d5/project-a/probeA.mjs 并等待命令结束，在发起目录 C:/Users/yecha/.tools/open-tui-orchestrator 执行，按主持提供的命令逐项记录检查点，禁止另开窗口禁止提交或写记忆",
+              "sourceIds": [
+                "T001"
+              ]
+            }
+          ],
+          "conflictKeys": [
+            "C:/Users/yecha/.tools/open-tui-orchestrator/temp/guardian-b147e796-cc25-4c2a-8bc7-6beaf37ed9d5/project-a",
+            "file:C:/Users/yecha/.tools/open-tui-orchestrator/temp/guardian-b147e796-cc25-4c2a-8bc7-6beaf37ed9d5/project-a/probeA.mjs"
+          ],
+          "dependsOn": []
+        },
+        "dependsOn": [],
+        "keys": [
+          "C:/Users/yecha/.tools/open-tui-orchestrator/temp/guardian-b147e796-cc25-4c2a-8bc7-6beaf37ed9d5/project-a",
+          "file:c:/users/yecha/.tools/open-tui-orchestrator/temp/guardian-b147e796-cc25-4c2a-8bc7-6beaf37ed9d5/project-a/probea.mjs"
+        ]
+      },
+      {
+        "key": "B2",
+        "title": "project-b",
+        "b": {
+          "title": "project-b",
+          "type": "parallel",
+          "tasks": [
+            {
+              "prompt": "项目B：执行 node C:/Users/yecha/.tools/open-tui-orchestrator/temp/guardian-b147e796-cc25-4c2a-8bc7-6beaf37ed9d5/project-b/probeB.mjs 并等待命令结束，在发起目录 C:/Users/yecha/.tools/open-tui-orchestrator 执行，按主持提供的命令逐项记录检查点，禁止另开窗口禁止提交或写记忆",
+              "sourceIds": [
+                "T002"
+              ]
+            }
+          ],
+          "conflictKeys": [
+            "C:/Users/yecha/.tools/open-tui-orchestrator/temp/guardian-b147e796-cc25-4c2a-8bc7-6beaf37ed9d5/project-b",
+            "file:C:/Users/yecha/.tools/open-tui-orchestrator/temp/guardian-b147e796-cc25-4c2a-8bc7-6beaf37ed9d5/project-b/probeB.mjs"
+          ],
+          "dependsOn": []
+        },
+        "dependsOn": [],
+        "keys": [
+          "C:/Users/yecha/.tools/open-tui-orchestrator/temp/guardian-b147e796-cc25-4c2a-8bc7-6beaf37ed9d5/project-b",
+          "file:c:/users/yecha/.tools/open-tui-orchestrator/temp/guardian-b147e796-cc25-4c2a-8bc7-6beaf37ed9d5/project-b/probeb.mjs"
+        ]
+      }
+    ],
+    "blocks": [
+      {
+        "key": "B1",
+        "title": "project-a",
+        "taskIds": [
+          "T001"
+        ]
+      },
+      {
+        "key": "B2",
+        "title": "project-b",
+        "taskIds": [
+          "T002"
+        ]
+      }
+    ],
+    "results": {
+      "B1": {
+        "status": "verified",
+        "attempts": [
+          {
+            "file": "C:\\Users\\yecha\\.tools\\open-tui-orchestrator\\temp\\orchestrator\\runs\\guardian-b147e796-cc25-4c2a-8bc7-6beaf37ed9d5\\attempts\\B1\\1\\attempt.json",
+            "runId": "guardian-b147e796-cc25-4c2a-8bc7-6beaf37ed9d5",
+            "token": "guardian-b147e796-cc25-4c2a-8bc7-6beaf37ed9d5-B1-a1-25bcf419ddb8",
+            "number": 1,
+            "taskIds": [
+              "T001"
+            ],
+            "createdAt": 1788957886841,
+            "endedAt": 1788957967083,
+            "exitCode": 0
+          }
+        ],
+        "leaseId": "020d10d06fcd3da1-B1",
+        "token": "guardian-b147e796-cc25-4c2a-8bc7-6beaf37ed9d5-B1-a1-25bcf419ddb8",
+        "launcherFiles": {
+          "lp": "C:\\Users\\yecha\\.tools\\open-tui-orchestrator\\temp\\win-launch-B1-guardian-b147e796-cc25-4c2a-8bc7-6beaf37ed9d5-a1.ps1",
+          "pidf": "C:\\Users\\yecha\\.tools\\open-tui-orchestrator\\temp\\window-B1-guardian-b147e796-cc25-4c2a-8bc7-6beaf37ed9d5-a1.pid",
+          "pf": "C:\\Users\\yecha\\.tools\\open-tui-orchestrator\\temp\\agent-win-B1-guardian-b147e796-cc25-4c2a-8bc7-6beaf37ed9d5-a1.md",
+          "rf": "C:\\Users\\yecha\\.tools\\open-tui-orchestrator\\temp\\win-B1-guardian-b147e796-cc25-4c2a-8bc7-6beaf37ed9d5-a1.result.json",
+          "log": "C:\\Users\\yecha\\.tools\\open-tui-orchestrator\\temp\\win-B1-guardian-b147e796-cc25-4c2a-8bc7-6beaf37ed9d5-a1.out.log"
+        },
+        "launcher": {
+          "ProcessId": 36868,
+          "Name": "powershell.exe",
+          "CommandLine": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\\Users\\yecha\\.tools\\open-tui-orchestrator\\temp\\win-launch-B1-guardian-b147e796-cc25-4c2a-8bc7-6beaf37ed9d5-a1.ps1",
+          "Started": "2026-09-09T12:44:49.3249820Z"
+        },
+        "endedAt": 1788957967083,
+        "startedAt": 1788957886844,
+        "exitCode": 0
+      },
+      "B2": {
+        "status": "verified",
+        "attempts": [
+          {
+            "file": "C:\\Users\\yecha\\.tools\\open-tui-orchestrator\\temp\\orchestrator\\runs\\guardian-b147e796-cc25-4c2a-8bc7-6beaf37ed9d5\\attempts\\B2\\1\\attempt.json",
+            "runId": "guardian-b147e796-cc25-4c2a-8bc7-6beaf37ed9d5",
+            "token": "guardian-b147e796-cc25-4c2a-8bc7-6beaf37ed9d5-B2-a1-0e55855ac418",
+            "number": 1,
+            "taskIds": [
+              "T002"
+            ],
+            "createdAt": 1788957887827,
+            "endedAt": 1788958002090,
+            "exitCode": 0
+          }
+        ],
+        "leaseId": "020d10d06fcd3da1-B2",
+        "token": "guardian-b147e796-cc25-4c2a-8bc7-6beaf37ed9d5-B2-a1-0e55855ac418",
+        "launcherFiles": {
+          "lp": "C:\\Users\\yecha\\.tools\\open-tui-orchestrator\\temp\\win-launch-B2-guardian-b147e796-cc25-4c2a-8bc7-6beaf37ed9d5-a1.ps1",
+          "pidf": "C:\\Users\\yecha\\.tools\\open-tui-orchestrator\\temp\\window-B2-guardian-b147e796-cc25-4c2a-8bc7-6beaf37ed9d5-a1.pid",
+          "pf": "C:\\Users\\yecha\\.tools\\open-tui-orchestrator\\temp\\agent-win-B2-guardian-b147e796-cc25-4c2a-8bc7-6beaf37ed9d5-a1.md",
+          "rf": "C:\\Users\\yecha\\.tools\\open-tui-orchestrator\\temp\\win-B2-guardian-b147e796-cc25-4c2a-8bc7-6beaf37ed9d5-a1.result.json",
+          "log": "C:\\Users\\yecha\\.tools\\open-tui-orchestrator\\temp\\win-B2-guardian-b147e796-cc25-4c2a-8bc7-6beaf37ed9d5-a1.out.log"
+        },
+        "launcher": {
+          "ProcessId": 35668,
+          "Name": "powershell.exe",
+          "CommandLine": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\\Users\\yecha\\.tools\\open-tui-orchestrator\\temp\\win-launch-B2-guardian-b147e796-cc25-4c2a-8bc7-6beaf37ed9d5-a1.ps1",
+          "Started": "2026-09-09T12:44:52.6675620Z"
+        },
+        "endedAt": 1788958002090,
+        "startedAt": 1788957887831,
+        "exitCode": 0
+      }
+    },
+    "taskResults": {
+      "T001": {
+        "status": "verified",
+        "evidence": [
+          {
+            "type": "json",
+            "path": "C:\\Users\\yecha\\.tools\\open-tui-orchestrator\\temp\\guardian-b147e796-cc25-4c2a-8bc7-6beaf37ed9d5\\project-a\\resultA.json",
+            "sha256": "406b6cde2256a3196c0ddfdaf725511320be13c0c6065f8171db09cfc3a74f6d"
+          }
+        ],
+        "checkpoint": {
+          "id": "T001",
+          "runId": "guardian-b147e796-cc25-4c2a-8bc7-6beaf37ed9d5",
+          "token": "guardian-b147e796-cc25-4c2a-8bc7-6beaf37ed9d5-B1-a1-25bcf419ddb8",
+          "state": "completed",
+          "startedAt": 1788957923034,
+          "updatedAt": 1788957960633
+        }
+      },
+      "T002": {
+        "status": "verified",
+        "evidence": [
+          {
+            "type": "json",
+            "path": "C:\\Users\\yecha\\.tools\\open-tui-orchestrator\\temp\\guardian-b147e796-cc25-4c2a-8bc7-6beaf37ed9d5\\project-b\\resultB.json",
+            "sha256": "921672d2718c74578971ffbcbd21216f4887079af5127c91c880400d339f46ac"
+          }
+        ],
+        "checkpoint": {
+          "id": "T002",
+          "runId": "guardian-b147e796-cc25-4c2a-8bc7-6beaf37ed9d5",
+          "token": "guardian-b147e796-cc25-4c2a-8bc7-6beaf37ed9d5-B2-a1-0e55855ac418",
+          "state": "completed",
+          "startedAt": 1788957922670,
+          "updatedAt": 1788957989251
+        }
+      }
+    },
+    "owner": {
+      "ProcessId": 39748,
+      "Name": "node.exe",
+      "CommandLine": "C:\\Users\\yecha\\.tools\\node22-fresh\\node.exe C:\\Users\\yecha\\.tools\\open-tui-orchestrator\\scripts\\orchestrate-sdk.mjs --resume-run guardian-b147e796-cc25-4c2a-8bc7-6beaf37ed9d5",
+      "Started": "2026-09-09T12:45:46.7638340Z"
+    },
+    "success": true,
+    "finishedAt": 1788958002091
+  }
+}
