@@ -14,10 +14,10 @@ open-tui-orchestrator --run-id my-run --acceptance-file D:/work/temp/acceptance.
 - 解析 PATH 上的 kimi.exe / kimi.cmd / kimi 启动入口，并补查 `%USERPROFILE%\.kimi-code\bin\kimi.exe` 原生安装位；`--help` 必须提供 `--prompt` / `--output-format` / `--auto`，版本取 `--version` 的语义化输出。显式路径错误时不回退、不安装。
 - 窗口采用 `kimi -p`（print 模式）：按产品契约，非交互模式默认 auto 权限策略处理常规工具调用，静态 deny 规则保持生效；`--prompt` 与 `--auto/--yolo` 互斥，因此不叠加权限旗标。model/thinking 继承发起窗：显式 ORCH_MODEL 优先，否则按 cwd 匹配最新 kimi 会话读其 wire.jsonl 末条 llm.request 的 modelAlias/thinkingEffort（回退 config.toml），model 转 `-m`、effort 经 KIMI_MODEL_THINKING_EFFORT 按进程透传（kimi provider 生效，其它 provider 类型自动回退 config.toml [thinking].effort）；不读取或输出凭据。
 - 提示词从文件读出后作为最后一个 argv 元素传入，且并入数组后再做 Windows PowerShell 5.1 原生命令行修正，嵌入引号、中文与多行内容不丢失。
-- 窗口把输出 tee 到日志，启动器按【本块唯一标识】token 行写结果文件（首行 JSON + `__EXIT__=N` 尾行）；等待方只解析首行 JSON。kimi `-p` 在回合结束后自行退出，无需扩展机制。
+- 窗口把输出 tee 到日志，启动器按【本块唯一标识】token 行写结果文件（首行 JSON + `__EXIT__=N` 尾行）；等待方只解析首行 JSON。kimi `-p` 在回合结束后自行退出，无需扩展机制。kimi 诊断（version/thinking/进度）走 stderr，启动器经 ErrorRecord 还原管道把它以普通文本并入日志，窗内不刷红色 NativeCommandError 块（2026-09-09 修复，回归测试锁定）。
 - 规划走 `kimi -p --output-format stream-json`：stdout 每行一个 JSON 对象，取最后一条 `role=assistant` 的 `content`；meta 行与 stderr 进度一律忽略。不支持的沙箱要求明确拒绝（KIMI_SANDBOX_UNSUPPORTED）。
 - argv 顺序硬约束：kimi 解析器对旗标值贪心绑定，提示词必须紧跟 `-p`、其余旗标放最后（`kimi -p --output-format stream-json <提示词>` 会报 `unknown command 'stream-json'`；2026-09-09 真机复现并修复，回归测试锁定）。
-- 已知限制（2026-09-09 实测）：kimi 规划器冷调用约 295s，远超拆块默认 90s 超时（ORCH_DECOMPOSE_TIMEOUT_MS 可调）。冷请求会因规划超时而回退单块串行 inline（不开窗）；命中拆块缓存则秒级返回。窗口执行路径不受影响（窗口不走规划器）。
+- 已知限制（2026-09-09 实测，当日已缓解）：kimi 规划器冷调用约 295s，远超 codex/pi 的 60-90s 拆块默认超时。kimi 适配器的规划超时默认已放宽到 360s（`KIMI_DECOMPOSE_TIMEOUT_DEFAULT_MS`，`ORCH_DECOMPOSE_TIMEOUT_MS` 显式设置时优先），冷请求可在首轮重试内完成规划；命中拆块缓存仍秒级返回。窗口执行路径不受影响（窗口不走规划器）。
 
 ## 验证入口
 

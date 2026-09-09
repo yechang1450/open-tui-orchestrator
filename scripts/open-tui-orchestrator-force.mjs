@@ -3,7 +3,7 @@
  * open-tui-orchestrator-force — technical enforcement gate for open-tui-orchestrator.
  *
  * The ONLY sanctioned path for REAL execution (write / build / install / test / restart / any
- * command that changes state) is a real, visible, interactive agent TUI window launched by
+ * command that changes state) is a real, visible agent TUI window launched by
  * `--run-windows`. This guard makes that a *checkable invariant*:
  *
  *   - `--enable`  : arm enforcement (write the marker). Once armed, real-execution kinds are
@@ -34,6 +34,11 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { powershellExe, systemToolExe } from "./core/contracts.mjs";
+
+// 锚定 SystemRoot：裸名会先按进程 cwd（任意工作区）解析，防二进制投毒。
+const PS_EXE = powershellExe();
+const TASKLIST_EXE = systemToolExe("tasklist.exe");
 
 import { resolveRuntimeContext } from './runtime-context.mjs';
 import { lockedForMaintenance, readMaintenanceLock, MAINTENANCE_MESSAGE } from './core/maintenance-lock.mjs';
@@ -74,7 +79,7 @@ function pidAlive(pid) {
   if (process.platform === "win32") {
     // 防伪造：仅识别“编排器工作窗”的真实进程，而非任意 powershell/codex 像。
     try {
-      const r = spawnSync("tasklist", ["/FI", `PID eq ${pid}`, "/FO", "CSV", "/NH"], { encoding: "utf8", windowsHide: true });
+      const r = spawnSync(TASKLIST_EXE, ["/FI", `PID eq ${pid}`, "/FO", "CSV", "/NH"], { encoding: "utf8", windowsHide: true });
       const out = String(r.stdout || "");
       if (!/"\S+","\d+"/.test(out)) return false; // 该 PID 无对应行
       const img = String(out.split(/\r?\n/)[0] || "").split(",")[0].replace(/"/g, "");
@@ -85,7 +90,7 @@ function pidAlive(pid) {
       // 其它任意 powershell/codex 一律视作伪造，不得过门禁（fail-closed）。
       // pid 已在 pidOf() 校验为 1..4194304 的合法整数，直接内联进 -Filter 安全；用 `$args[0]` 传参会
       // 触发 PowerShell 的 -Command 解析异常（UnexpectedToken），导致 CommandLine 查询返回空，故改为内联。
-      const ps = spawnSync("powershell.exe", ["-NoProfile", "-Command", `(Get-CimInstance Win32_Process -Filter "ProcessId=${pid}" -ErrorAction SilentlyContinue).CommandLine`], { encoding: "utf8", windowsHide: true });
+      const ps = spawnSync(PS_EXE, ["-NoProfile", "-Command", `(Get-CimInstance Win32_Process -Filter "ProcessId=${pid}" -ErrorAction SilentlyContinue).CommandLine`], { encoding: "utf8", windowsHide: true });
       const cl = String(ps.stdout || "");
       return /win-launch-.*\.ps1/i.test(cl) || /orchestrate-sdk\.mjs/i.test(cl) || /--run-windows/i.test(cl);
     } catch { return false; }
@@ -122,7 +127,7 @@ function runCli() {
     mkdirSync(STATE_DIR, { recursive: true });
     // 小标记直接用 writeFileSync 覆盖写，避免 tmp+rename→rm→rename 间隙内标记缺失的竞态。
     writeFileSync(FLAG, String(Date.now()), "utf8");
-    console.log("enforcement ARMED: real executions must go through --run-windows (visible interactive TUI).");
+    console.log("enforcement ARMED: real executions must go through --run-windows (visible agent TUI).");
   } else if (mode === "--disable") {
     try { rmSync(FLAG, { force: true }); } catch { /* ignore */ }
     console.log("enforcement disarmed.");
@@ -144,14 +149,14 @@ function runCli() {
       }
       console.log(
         "REFUSED: ORCH_WINDOW=1 but no live registered orchestration window (orchestrator-windows.json). " +
-          "The env var alone is not accepted — it may be forged. Route through  node orchestrate-sdk.mjs --run-windows \"<request>\"  (a real, visible, interactive agent TUI window)."
+          "The env var alone is not accepted — it may be forged. Route through  node orchestrate-sdk.mjs --run-windows \"<request>\"  (a real, visible agent TUI window)."
       );
       process.exit(1);
     }
     if (realKinds.has(kind)) {
       console.log(
         "REFUSED: real execution ('" + kind + "') from a NON-orchestrator context. " +
-          "Route it through  node orchestrate-sdk.mjs --run-windows \"<request>\"  (a real, visible, interactive agent TUI window)."
+          "Route it through  node orchestrate-sdk.mjs --run-windows \"<request>\"  (a real, visible agent TUI window)."
       );
       process.exit(1);
     }

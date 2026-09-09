@@ -92,7 +92,9 @@ export function writeOpenCodeLauncher(config, {key, prompt, suffix, workspace, t
     // Windows PowerShell 5.1 native-argv fix-up so embedded quotes/newlines survive.
     "$agentArgs = @(" + args.map(quote).join(',') + ') + @($p)',
     ...nativeArgumentLines(),
-    `& ${quote(config.bin)} @agentArgs 2>&1 | Tee-Object -FilePath $log`,
+    // 与 kimi 窗同款外观修复：opencode 诊断走 stderr，2>&1 合并时 PS5.1 会刷红色
+    // NativeCommandError 块；ErrorRecord 还原后以普通文本进日志，完成 token 不受影响。
+    `& ${quote(config.bin)} @agentArgs 2>&1 | ForEach-Object { if ($_ -is [System.Management.Automation.ErrorRecord]) { $_.TargetObject } else { $_ } } | Tee-Object -FilePath $log`,
     "$code = $LASTEXITCODE",
     "# opencode run -i exits on its own after the turn; capture the tail containing the token.",
     "$report = ''",

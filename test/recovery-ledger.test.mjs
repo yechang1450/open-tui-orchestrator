@@ -27,6 +27,9 @@ test('saved recovery ledger rejects inconsistent inventories without mutating in
     state => { state.generation = 0; },
     state => { state.history = null; },
     state => { state.plan[0].dependsOn = ['B1']; },
+    state => { state.acceptanceSha256 = 'not-a-sha256-hex'; },
+    state => { state.results.B1.attempts = [{runId: 'ledger', token: 't', file: 'f', taskIds: ['T001']}];
+               state.results.B1.launcherFiles = {lp: path.join(path.dirname(process.cwd()), 'win-launch-evil.ps1'), pidf: 'p', rf: 'r'}; },
   ];
   for (const change of changes) {
     const value = structuredClone(valid);
@@ -35,6 +38,12 @@ test('saved recovery ledger rejects inconsistent inventories without mutating in
     assert.throws(() => validateRecoverySummary(value), /Invalid recovery ledger/);
     assert.equal(JSON.stringify(value), saved);
   }
+  // launcherFiles 解析到工作区之内（含相对路径形式）是合法的，不得误伤。
+  const legit = structuredClone(valid);
+  legit.results.B1.attempts = [{runId: 'ledger', token: 't', file: 'f', taskIds: ['T001']}];
+  legit.results.B1.launcherFiles = {lp: 'temp/win-launch-x.ps1', pidf: path.join(process.cwd(), 'temp', 'window-x.pid'), rf: path.join(process.cwd(), 'temp', 'win-x.result.json')};
+  legit.acceptanceSha256 = 'a'.repeat(64);
+  validateRecoverySummary(legit);
 });
 
 test('resume rejects a damaged ledger before invoking execution hooks', async () => {

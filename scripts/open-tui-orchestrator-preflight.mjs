@@ -47,7 +47,7 @@ if (!armed()) {
   if (realKinds.has(kind)) {
     console.log(
       "REFUSED: preflight '" + kind + "' is a real-execution kind but the orchestrator is not armed (enforcement disabled). " +
-        "Route through  node orchestrate-sdk.mjs --run-windows \"<request>\"  (a real, visible, interactive agent TUI window)."
+        "Route through  node orchestrate-sdk.mjs --run-windows \"<request>\"  (a real, visible agent TUI window)."
     );
     process.exit(1);
   }
@@ -62,7 +62,7 @@ const alive = liveWindows().length;
 if (envWindow && alive === 0) {
   console.log(
     "REFUSED: ORCH_WINDOW=1 but no live registered orchestration window (env var alone is not accepted; may be forged). " +
-      "Route through  node orchestrate-sdk.mjs --run-windows \"<request>\"  (a real, visible, interactive agent TUI window)."
+      "Route through  node orchestrate-sdk.mjs --run-windows \"<request>\"  (a real, visible agent TUI window)."
   );
   process.exit(1);
 }
@@ -76,7 +76,7 @@ if (envWindow && alive > 0) {
 if (realKinds.has(kind)) {
   console.log(
     "REFUSED: preflight '" + kind + "' is a real-execution kind but this is NOT a sanctioned orchestration window. " +
-      "Route through  node orchestrate-sdk.mjs --run-windows \"<request>\"  (a real, visible, interactive agent TUI window)."
+      "Route through  node orchestrate-sdk.mjs --run-windows \"<request>\"  (a real, visible agent TUI window)."
   );
   process.exit(1);
 }

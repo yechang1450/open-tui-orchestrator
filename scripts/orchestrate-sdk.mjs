@@ -13,6 +13,7 @@ export const {
   readReportFromResult, sessionDir, writeInteractiveLauncher, staleTransientFiles,
   pidFileOfTransient, tryReserveWindow, commitReservation, cancelReservation, computeMaxWindows,
   blockKeys, keysOverlap, scanTaskComplete, windowExecutionPolicy, __setOrchHooks, isOrchestratorSelfMod, resolveCodexHome,
+  withRegistryLock, REGISTRY_LOCK_FILE,
 } = engine;
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';

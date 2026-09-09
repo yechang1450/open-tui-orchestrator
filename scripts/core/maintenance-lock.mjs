@@ -30,7 +30,12 @@ export function readMaintenanceLock(env = process.env, now = Date.now()) {
   let data;
   try { data = parseLockJson(raw); } catch { return { locked: false, invalid: true }; }
   const expiresAt = Number(data && data.expiresAt);
-  if (Number.isFinite(expiresAt) && expiresAt <= now) {
+  if (!Number.isFinite(expiresAt)) {
+    // expiresAt 缺失/非数字 = 损坏锁：按自身契约 fail-open（绝不把工具卡死），顺手清理。
+    try { fs.rmSync(file, { force: true }); } catch { /* ignore */ }
+    return { locked: false, invalid: true };
+  }
+  if (expiresAt <= now) {
     // 过期即解锁并顺手清理（维护方崩溃/忘记解锁也不会把编排器关死）。
     try { fs.rmSync(file, { force: true }); } catch { /* ignore */ }
     return { locked: false, expired: true };
@@ -39,7 +44,7 @@ export function readMaintenanceLock(env = process.env, now = Date.now()) {
     locked: true,
     reason: String((data && data.reason) || ''),
     startedAt: Number(data && data.startedAt) || null,
-    expiresAt: Number.isFinite(expiresAt) ? expiresAt : null,
+    expiresAt,
   };
 }
 

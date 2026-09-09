@@ -59,3 +59,40 @@ test('kimi result wait returns the launcher-written outcome immediately',async()
   assert.equal(res.done,true);assert.equal(res.exitCode,0);assert.equal(res.text,'ok');
  }finally{fs.rmSync(dir,{recursive:true,force:true});}
 });
+test('kimi planner timeout defaults to 360s (cold start ~295s) and honors ORCH_DECOMPOSE_TIMEOUT_MS',async()=>{
+ const {plannerTimeoutMs,KIMI_DECOMPOSE_TIMEOUT_DEFAULT_MS}=await import('../scripts/core/kimi-runtime.mjs');
+ assert.equal(KIMI_DECOMPOSE_TIMEOUT_DEFAULT_MS,360000);
+ const prev=process.env.ORCH_DECOMPOSE_TIMEOUT_MS;
+ try{
+  delete process.env.ORCH_DECOMPOSE_TIMEOUT_MS;
+  assert.equal(plannerTimeoutMs(),360000);
+  process.env.ORCH_DECOMPOSE_TIMEOUT_MS='12345';assert.equal(plannerTimeoutMs(),12345);
+  process.env.ORCH_DECOMPOSE_TIMEOUT_MS='bogus';assert.equal(plannerTimeoutMs(),360000);
+ }finally{if(prev===undefined)delete process.env.ORCH_DECOMPOSE_TIMEOUT_MS;else process.env.ORCH_DECOMPOSE_TIMEOUT_MS=prev;}
+});
+test('kimi planner kills a cold-hung planner after the configured timeout',async()=>{
+ const dir=fs.mkdtempSync(path.join(family,'kimi-planner-timeout-'));
+ const prev=process.env.ORCH_DECOMPOSE_TIMEOUT_MS;process.env.ORCH_DECOMPOSE_TIMEOUT_MS='400';
+ try{
+  const worker=path.join(dir,'hung kimi.mjs');
+  fs.writeFileSync(worker,'setTimeout(()=>{},30000);\n');
+  await assert.rejects(runKimiPlanner({bin:process.execPath,prefixArgs:[worker]},'规划',dir),/KIMI_PLANNER_TIMEOUT/);
+ }finally{if(prev===undefined)delete process.env.ORCH_DECOMPOSE_TIMEOUT_MS;else process.env.ORCH_DECOMPOSE_TIMEOUT_MS=prev;fs.rmSync(dir,{recursive:true,force:true});}
+});
+test('kimi launcher unwraps native stderr (no NativeCommandError red block) but keeps it in the log',()=>{
+ const dir=fs.mkdtempSync(path.join(family,'kimi-launch-stderr-'));
+ try{
+  const worker=path.join(dir,'fake kimi stderr.mjs');
+  fs.writeFileSync(worker,'console.error("kimi version 9.9.9 fake-diag");\nconsole.log("done 【本块唯一标识】 kimitest4");\n');
+  const prompt='stderr 外观测试\n【本块唯一标识】kimitest4';
+  const la=writeKimiLauncher({bin:process.execPath,prefixArgs:[worker]},{key:'B1',suffix:'test4',prompt,workspace:dir,temp:path.join(dir,'temp')});
+  const result=spawnSync('powershell.exe',['-NoProfile','-File',la.lp],{windowsHide:true,encoding:'utf8',timeout:20000});
+  assert.equal(result.status,0,result.stderr);
+  assert.doesNotMatch(result.stderr,/NativeCommandError/,'native stderr must not surface as PowerShell error records');
+  const buf=fs.readFileSync(la.log);
+  const log=buf.length>=2&&buf[0]===0xFF&&buf[1]===0xFE?buf.toString('utf16le'):buf.toString('utf8'); // Tee-Object 默认 UTF-16LE（带 BOM）
+  assert.ok(log.includes('kimi version 9.9.9 fake-diag'),'stderr diagnostics stay in the tee log');
+  const r=JSON.parse(fs.readFileSync(la.rf,'utf8').replace(/^﻿/,'').split(/\r?\n/)[0]);
+  assert.equal(r.__EXIT__,0);assert.ok(r.__REPORT__.includes('kimitest4'));
+ }finally{fs.rmSync(dir,{recursive:true,force:true});}
+});
