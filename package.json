@@ -3,7 +3,7 @@
   "version": "0.3.0",
   "private": true,
   "type": "module",
-  "bin": { "open-tui-orchestrator": "cli.mjs" },
+  "bin": { "open-tui-orchestrator": "cli.mjs", "orch": "orch.mjs" },
   "scripts": {
     "test": "node --test --test-concurrency=3 test/*.test.mjs",
     "doctor": "node cli.mjs --agent codex --doctor",
