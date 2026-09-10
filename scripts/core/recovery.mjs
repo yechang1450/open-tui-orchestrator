@@ -17,7 +17,10 @@ export function validateRecoverySummary(sum) {
   const ids=tasks.map(t=>t.id),blockIds=sum.blocks.map(b=>b?.key);
   if(!strings(blockIds)||!exact(blockIds,sum.results)||!exact(ids,sum.taskResults))fail('result inventory mismatch');
   const covered=[];
-  const workspaceRoot=path.resolve(sum.workspace)+path.sep;
+  // resolve 后的盘符根自带尾分隔符（D:\），再拼一个 sep 会变成 D:\\ 导致根工作区的
+  // 合法 launcherFiles 全被误判为逃逸（E 验收实跑发现）；只在缺尾分隔符时补。
+  const resolvedWorkspace=path.resolve(sum.workspace);
+  const workspaceRoot=resolvedWorkspace.endsWith(path.sep)?resolvedWorkspace:resolvedWorkspace+path.sep;
   for(let i=0;i<sum.blocks.length;i++) {
     const block=sum.blocks[i],plan=sum.plan[i],entry=sum.results[block.key];
     if(!strings(block.taskIds)||!block.taskIds.length||!object(plan)||plan.key!==block.key||!strings(plan.keys)||!strings(plan.dependsOn)||!Array.isArray(plan.b?.tasks))fail('invalid block or plan');
