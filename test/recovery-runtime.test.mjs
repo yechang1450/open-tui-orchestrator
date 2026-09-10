@@ -51,7 +51,7 @@ test('actual partial execution is recovered without repeating its completed side
   readPid:p=>{try{return fs.existsSync(p)?Number(fs.readFileSync(p,'utf8').replace(/^\uFEFF/,'')):0;}catch{return 0;}},
   session:async()=> 'controlled',wait:async(_session,_timeout,rf)=>{fs.writeFileSync(rf+'.go','go');const end=Date.now()+15000;while(!fs.existsSync(rf)&&Date.now()<end)await pause(20);return {done:fs.existsSync(rf),exitCode:JSON.parse(fs.readFileSync(rf)).exitCode};},
   exitCode:rf=>fs.existsSync(rf)?JSON.parse(fs.readFileSync(rf)).exitCode:null,
-  register:()=>{},commit:()=>{},unregister:()=>{},cleanup:()=>{},close:async()=>{await pause(300);},
+  register:()=>{},commit:()=>{},unregister:()=>{},cleanup:()=>{},close:async(pid)=>{try{process.kill(pid);}catch{}await pause(300);},
  };
  try{const opts={workspace:d,capacity:8,runId:'partial',acceptanceFile:checks,coordinator:path.join(d,'temp','coordinator'),auth:'test'};
   const sum=await runWindows('执行甲；执行乙',hooks,opts);
