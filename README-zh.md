@@ -43,7 +43,7 @@ node cli.mjs --agent codex --workspace 'D:\your-project' --plan '修复项目81�
 node cli.mjs --agent codex --workspace 'D:\your-project' --run-windows '修复项目81登录页，优化项目82购物车'
 ~~~
 
-`--plan` 只规划不执行；新鲜的 `--run-windows` 只有检测到并行波次才开窗；`--resume-run <id>` 接管中断后的已保存运行；`--verify-run <id>` 只重新验收，不重跑任务；`--status --readonly` 查看当前窗口和租约。安装依赖可运行 `npm run setup`，离线回归运行 `npm test`。
+`--plan` 只规划不执行；新鲜的 `--run-windows` 只有检测到并行波次才开窗；`--resume-run <id>` 接管中断后的已保存运行；`--verify-run <id>` 只重新验收，不重跑任务；`--status --readonly` 查看窗口、租约与活动 run 看板行；`--watch <id> [--jsonl]` 只读流式查看执行看板；`orch` 命令是强制编排入口——等价于 `--run-windows` 但跳过全部 inline 回退（单块、纯串行、只读定性、自改请求都会照常派发单元），除维护锁外 100% 被调用。安装依赖可运行 `npm run setup`，离线回归运行 `npm test`。
 
 ## 起因：为什么要做这个工具
 
@@ -132,7 +132,7 @@ Codex 规划和窗口沿用现有 HTTPS Responses 配置，避免先等待 WebSo
 
 ### 13. 维护锁：自身维护期间暂停编排
 
-对编排器自身做升级/优化/维护/更新等改动前，先上维护锁：`node scripts/maintenance-lock.mjs lock --reason "原因" [--ttl-minutes N]`。上锁期间任何 agent 调用编排器的动作入口（`--run-windows`/`--spawn`/`--resume-run`/`--run`/`--exec`/`--plan`、`open-tui-orchestrator-preflight.mjs`、`open-tui-orchestrator-force.mjs --assert/--verify`）都只返回一句话：`open-tui-orchestrator正在维护更新，本轮跳过orchestrator直接开始执行`，并以退出码 0 放行，由发起对话本轮直接执行。只读入口（`--status`/`--doctor`/`--verify-run`/`--clear-cache`）不受影响，`--status` 会额外显示锁状态。锁全局按用户生效（默认 `~/.open-tui-orchestrator/maintenance-lock.json`，可用 `ORCH_MAINTENANCE_LOCK` 覆盖），默认 180 分钟自动过期（上限 24 小时），过期或文件损坏一律 fail-open 视为未锁，绝不会把编排器卡死；`repair.mjs --clean`/`--target` 在未持锁时会自行上锁、结束即解。维护结束用 `node scripts/maintenance-lock.mjs unlock` 解锁。
+对编排器自身做升级/优化/维护/更新等改动前，先上维护锁：`node scripts/maintenance-lock.mjs lock --reason "原因" [--ttl-minutes N]`。上锁期间任何 agent 调用编排器的动作入口（`orch`、`--run-windows`/`--spawn`/`--resume-run`/`--run`/`--exec`/`--plan`、`open-tui-orchestrator-preflight.mjs`、`open-tui-orchestrator-force.mjs --assert/--verify`）都只返回一句话：`open-tui-orchestrator正在维护更新，本轮跳过orchestrator直接开始执行`，并以退出码 0 放行，由发起对话本轮直接执行。只读入口（`--status`/`--doctor`/`--verify-run`/`--clear-cache`）不受影响，`--status` 会额外显示锁状态。锁全局按用户生效（默认 `~/.open-tui-orchestrator/maintenance-lock.json`，可用 `ORCH_MAINTENANCE_LOCK` 覆盖），默认 180 分钟自动过期（上限 24 小时），过期或文件损坏一律 fail-open 视为未锁，绝不会把编排器卡死；`repair.mjs --clean`/`--target` 在未持锁时会自行上锁、结束即解。维护结束用 `node scripts/maintenance-lock.mjs unlock` 解锁。
 
 ## 相关文档
 
@@ -148,7 +148,7 @@ Codex 规划和窗口沿用现有 HTTPS Responses 配置，避免先等待 WebSo
 
 ## 当前支持与验证边界
 
-Codex CLI、pi CLI、opencode CLI、Kimi Code CLI 和 OpenClaw 2026.9.2 CLI 已完成适配。运行诊断：
+Codex CLI、pi CLI、opencode CLI、Kimi Code CLI、Claude Code CLI 和 OpenClaw 2026.9.2 CLI 已完成适配。运行诊断：
 
 ~~~powershell
 node cli.mjs --agent codex --doctor
@@ -156,6 +156,6 @@ node cli.mjs --agent pi --doctor
 node cli.mjs --agent openclaw --doctor
 ~~~
 
-当前通用核心为 1.8.0，离线回归为 234/234 通过；覆盖无窗 headless 派发默认（`--mode window` 保留可见弹窗；launcher/身份/租约/恢复契约同构，隐藏载具不抢焦点）、执行看板（块与任务状态实时 `[board]` 行、run `events.jsonl`、只读 `--watch <runId>` 流式视图含 `--jsonl`、`--status` 活动 run 摘要）、任务不丢失、多块并行容量调度、依赖波次、同项目任务按资源键精细化拆分、全局容量租约、Windows Terminal 启动（同步拉起，弹窗可靠且不抢发起窗焦点）、失焦启动回归、进程身份、断点恢复、恢复账本加固（launcherFiles 工作区包容、验收契约哈希绑定、注册表锁老化回收）、守护进程驱动的控制器丢失自动恢复（test/guardian-live-result.json）与手动 --resume-run 收编存活窗口恢复（test/recovery-live-result.json）、发起方进程链自动识别（kimi/codex/claude/pi/opencode/openclaw）、维护锁、当前核心安全审计及修复（docs/security-audit-2026-09-09.md）、弱网配置、SDK 诊断、宿主 CLI 探测超时重试与逐候选拒绝诊断、恢复账本校验覆盖盘符根工作区和干净发行副本。测试环境要求：离线套件假定发起 agent 的 CLI（默认 `codex`）可在 PATH 解析（Windows 下前置 codex vendor bin，即回归环境约定）；缺失时依赖 agent 解析的测试文件按设计快速失败（fail-closed），其中两个运行期依赖 CLI 的用例已标注 `{skip}`。真实模型额度、不同 Windows 用户安装、长时间断网恢复和每个未来 Agent 的现场兼容性也仍需单独验收。
+当前通用核心为 1.8.0，离线回归为 241/241 通过；覆盖无窗 headless 派发默认（`--mode window` 保留可见弹窗；launcher/身份/租约/恢复契约同构，隐藏载具不抢焦点）、执行看板（块与任务状态实时 `[board]` 行、run `events.jsonl`、只读 `--watch <runId>` 流式视图含 `--jsonl`、`--status` 活动 run 摘要）、任务不丢失、多块并行容量调度、依赖波次、同项目任务按资源键精细化拆分、全局容量租约、Windows Terminal 启动（同步拉起，弹窗可靠且不抢发起窗焦点）、失焦启动回归、进程身份、断点恢复、恢复账本加固（launcherFiles 工作区包容、验收契约哈希绑定、注册表锁老化回收）、守护进程驱动的控制器丢失自动恢复（test/guardian-live-result.json）与手动 --resume-run 收编存活窗口恢复（test/recovery-live-result.json）、发起方进程链自动识别（kimi/codex/claude/pi/opencode/openclaw）、维护锁、当前核心安全审计及修复（docs/security-audit-2026-09-09.md）、弱网配置、SDK 诊断、宿主 CLI 探测超时重试与逐候选拒绝诊断、恢复账本校验覆盖盘符根工作区和干净发行副本。测试环境要求：离线套件假定发起 agent 的 CLI（默认 `codex`）可在 PATH 解析（Windows 下前置 codex vendor bin，即回归环境约定）；缺失时依赖 agent 解析的测试文件按设计快速失败（fail-closed），其中两个运行期依赖 CLI 的用例已标注 `{skip}`。真实模型额度、不同 Windows 用户安装、长时间断网恢复和每个未来 Agent 的现场兼容性也仍需单独验收。
 
 未知宿主、无可执行 CLI 或显式路径无效时，命令会直接失败并给出原因；不会自动安装、猜测替代路径或换用其它 Agent。

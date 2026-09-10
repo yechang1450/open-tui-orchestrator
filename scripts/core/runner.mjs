@@ -215,14 +215,20 @@ export async function runWindows(request,hooks,options={}) {
             await stagger();
             if(!await hooks.spawn(la.lp,r.title,la.pidf,1,token))throw new Error('Visible window did not start');
             spawnConfirmed=true;
-            identity=await identityWithGrace(hooks,la);
-            if(!identity)throw new Error('Launcher process identity mismatch');
-            await coordinate(()=>bind(coordinator,leaseId,identity),deadline);hooks.commit(leaseId,identity.ProcessId);
+            // 秒退单元：结果文件已落盘时无需身份绑定（launcher 已退出，身份无法取得），直接进入结果读取路径。
+            if(fs.existsSync(la.rf)){
+              console.log(`[run] ${r.key} launcher already finished; reading its result without identity binding`);
+              identity=null;
+            }else{
+              identity=await identityWithGrace(hooks,la);
+              if(!identity)throw new Error('Launcher process identity mismatch');
+              await coordinate(()=>bind(coordinator,leaseId,identity),deadline);hooks.commit(leaseId,identity.ProcessId);
+            }
           }catch(error){e.status='popup-failed';e.reason=error.message;}
         }
         e=sum.results[r.key];e.launcher=identity||e.launcher;
         try {
-          if(identity) {
+          if(identity||fs.existsSync(la.rf)) {
             e.status='running';persist();
             const session=await hooks.session('【本块唯一标识】'+active.token,Math.min(90000,Math.max(0,deadline-Date.now())),la.rf);
             const result=session?await hooks.wait(session,Math.max(0,deadline-Date.now()),la.rf,'【本块唯一标识】'+active.token,la.pidf):{done:fs.existsSync(la.rf),exitCode:hooks.exitCode(la.rf)};
@@ -230,7 +236,7 @@ export async function runWindows(request,hooks,options={}) {
           }
         }catch(error){e.status='failed';e.reason=error.message;}
         finally {
-          if(!identity&&la&&spawnConfirmed)try{identity=await identityWithGrace(hooks,la,{graceMs:4000,intervalMs:300});}catch{identity=undefined;}
+          if(!identity&&la&&spawnConfirmed&&!fs.existsSync(la.rf))try{identity=await identityWithGrace(hooks,la,{graceMs:4000,intervalMs:300});}catch{identity=undefined;}
           if(identity)await hooks.close(identity.ProcessId,identity);
           if(identity&&!(await waitForProcessExit(identity))){e.status='failed';e.reason='Launcher still alive; lease retained';persist();return;}
           await coordinate(()=>release(coordinator,e.leaseId||leaseId),Date.now()+30000);

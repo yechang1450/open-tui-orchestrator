@@ -865,11 +865,14 @@ function spawnVisibleWindow(lp, title) {
 function windowGenuinelyPopped(pidf, token) {
   // 弹窗精准判定 = pid 文件存在 + launcher 进程真实存活（launcher 是 Windows Terminal pane 宿主进程，存活即窗口已弹出）。
   // 不把 agent 子进程作为必选证据：agent 冷启动(模型 provider)可能很慢，若等它会把"已弹出"误判为未弹出而重复弹窗；agent 未起由回收超时兜底。
+  // 秒退单元兜底：超快/秒崩的单元可能在确认轮询间隙里已跑完退出——结果文件已落盘即视为已启动，
+  // 交给正常 wait 路径读取结果，避免把"已完成"误判成 popup-failed 并白白重试。
   if (!pidf || !existsSync(pidf)) return false;
   const pid = readPidFile(pidf);
   if (!pid) return false;
-  if (!pidAliveCheck(pid)) return false;
-  return true;
+  if (pidAliveCheck(pid)) return true;
+  const rf = path.join(path.dirname(String(pidf)), path.basename(String(pidf)).replace(/^window-/, 'win-').replace(/\.pid$/, '.result.json'));
+  return existsSync(rf);
 }
 async function confirmWindowPopped(pidf, token) {
   const deadline = Date.now() + 35000;
@@ -2126,6 +2129,7 @@ async function classifyExecutionMode(request) {
 export async function main() {
   for(const [flag,key] of [["--run-id","ORCH_RUN_ID"],["--acceptance-file","ORCH_ACCEPTANCE_FILE"],["--acceptance","ORCH_ACCEPTANCE_FILE"]]){const index=process.argv.indexOf(flag);if(index>=0){if(!process.argv[index+1])throw new Error(flag+" needs a value");process.env[key]=process.argv[index+1];process.argv.splice(index,2);}}
   const modeArgIndex=process.argv.indexOf("--mode");if(modeArgIndex>=0){if(!process.argv[modeArgIndex+1])throw new Error("--mode needs a value");process.env.ORCH_SPAWN_MODE=process.argv[modeArgIndex+1];process.argv.splice(modeArgIndex,2);}
+  const forceIdx=process.argv.indexOf("--force-exec");if(forceIdx>=0){process.env.ORCH_FORCE_EXECUTE='1';process.argv.splice(forceIdx,1);}
   const mode = process.argv[2];
   // 维护锁：上锁期间一切动作模式（--run-windows/--spawn/--resume-run/--run/--exec/--plan/
   // --selftest-close 等）只回固定话术，发起 agent 本轮跳过编排器直接执行；只读模式不受影响。
@@ -2309,11 +2313,13 @@ export async function main() {
       SPAWN_MODE=normalizeSpawnMode(process.env.ORCH_SPAWN_MODE)||'headless';
     }
     console.log('[orchestrator] spawn mode: '+SPAWN_MODE);
+    const FORCE_EXECUTE=process.env.ORCH_FORCE_EXECUTE==='1';
+    if(FORCE_EXECUTE)console.log('[orchestrator] force-execute: inline gates bypassed (single/serial/read-only/self-mod still spawn units); maintenance lock still applies');
     if(!resume&&!request)throw new Error('--run-windows needs a request');
-    if(isOrchestratorSelfMod(request)){console.log(JSON.stringify({mode:'inline',reason:'Modify the orchestrator in the initiating conversation before opening windows'}));return;}
-    if(!resume&&await classifyExecutionMode(request)==='inline'){console.log(JSON.stringify({mode:'inline',reason:'Read-only analysis'}));return;}
+    if(!FORCE_EXECUTE&&isOrchestratorSelfMod(request)){console.log(JSON.stringify({mode:'inline',reason:'Modify the orchestrator in the initiating conversation before opening windows'}));return;}
+    if(!resume&&!FORCE_EXECUTE&&await classifyExecutionMode(request)==='inline'){console.log(JSON.stringify({mode:'inline',reason:'Read-only analysis'}));return;}
     const capacity=computeMaxWindows(os.totalmem()/1024**3);
-    if(!resume&&capacity<2){
+    if(!resume&&capacity<2&&!FORCE_EXECUTE){
       console.log(JSON.stringify({mode:'inline',reason:'capacity-below-two-windows',capacity,request,tasks:requestTasks(request),next:'在发起对话直接执行原始请求；不要再次调用 --run-windows'}));
       return;
     }
@@ -2322,10 +2328,11 @@ export async function main() {
     if(!resume){
       preflightPlan=await decomposeSafely(request,capacity);
       const policy=windowExecutionPolicy(preflightPlan);
-      if(policy.mode==='inline'){
+      if(policy.mode==='inline'&&!FORCE_EXECUTE){
         console.log(JSON.stringify({mode:'inline',reason:policy.reason,capacity,request,tasks:requestTasks(request),blocks:preflightPlan.map(b=>({title:b.title,type:b.type,dependsOn:b.dependsOn||[],tasks:b.tasks||[]})),next:'在发起对话直接执行原始请求；不要再次调用 --run-windows'}));
         return;
       }
+      if(policy.mode==='inline')console.log('[orchestrator] force-execute: inline gate bypassed ('+policy.reason+'); spawning unit(s) anyway');
     }
     armEnforcement();
     const result=await runWindows(request,{
