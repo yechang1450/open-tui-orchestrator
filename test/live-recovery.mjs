@@ -57,7 +57,7 @@ cache.entries[decomposeHash]={createdAt:Date.now(),blocks:planBlocks};
 fs.mkdirSync(path.dirname(cacheFile),{recursive:true});
 fs.writeFileSync(cacheFile,JSON.stringify(cache),'utf8');
 // ORCH_GUARDIAN=0: no detached guardian may race the manual --resume-run below.
-const env={...process.env,ORCH_AGENT:agent,ORCH_RUN_ID:runId,ORCH_ACCEPTANCE_FILE:acceptance,ORCH_MAX_POLL_MS:'600000',ORCH_GUARDIAN:'0'};
+const env={...process.env,ORCH_AGENT:agent,ORCH_SPAWN_MODE:'window',ORCH_RUN_ID:runId,ORCH_ACCEPTANCE_FILE:acceptance,ORCH_MAX_POLL_MS:'600000',ORCH_GUARDIAN:'0'};
 for(const key of ['WORKSPACE_DIR','ORCH_STATE_DIR','ORCH_TUI','ORCH_APPROVAL','ORCH_SANDBOX','NODE_TEST_CONTEXT'])delete env[key];
 const children=[];
 function launch(args,label){

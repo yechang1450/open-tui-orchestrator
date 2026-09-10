@@ -24,7 +24,7 @@ const acceptanceFile=path.join(root,'acceptance.json');
 const capacity = Math.round(Math.round(os.totalmem() / 1024 ** 3 * 1024 / 1000) * 3 / 4);
 if (process.platform !== 'win32' || capacity !== 12) throw new Error('This acceptance scenario requires Windows and a calculated capacity of twelve');
 fs.mkdirSync(root, { recursive: true });
-const env = { ...process.env, ORCH_AGENT: agent, ORCH_MAX_POLL_MS: '900000', ORCH_RUN_ID:runId, ORCH_ACCEPTANCE_FILE:acceptanceFile };
+const env = { ...process.env, ORCH_AGENT: agent, ORCH_SPAWN_MODE: 'window', ORCH_MAX_POLL_MS: '900000', ORCH_RUN_ID:runId, ORCH_ACCEPTANCE_FILE:acceptanceFile };
 for (const key of ['WORKSPACE_DIR', 'ORCH_STATE_DIR', 'ORCH_TUI', 'ORCH_SANDBOX', 'ORCH_APPROVAL']) delete env[key];
 const config = { nonce, workspace, ids: Array.from({ length: 9 }, (_, i) => String(91 + i)), capacity };
 fs.writeFileSync(path.join(root, 'config.json'), JSON.stringify(config));

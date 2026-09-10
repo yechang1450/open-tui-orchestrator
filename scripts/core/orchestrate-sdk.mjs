@@ -2134,6 +2134,7 @@ export async function main() {
   if (mode === "--doctor") {
     console.log(JSON.stringify({ agent: AGENT.agent, cli: CODEX, workspace: WORKSPACE,
       stateDir: STATE_DIR, terminal: wtAvailable() ? "wt" : "conhost",
+      spawnMode: normalizeSpawnMode(process.env.ORCH_SPAWN_MODE) || "headless",
       args: AGENT_ARGS_LIST, interactiveOutput: "inherited" }, null, 2));
     return;
   }
