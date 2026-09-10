@@ -12,8 +12,10 @@ const family=path.join('D:\\temp','orchestrator');
 test('published generic package keeps polling usable and diagnoses missing SDK',()=>{
   fs.mkdirSync(family,{recursive:true});
   const root=fs.mkdtempSync(path.join(family,'generic-package-'));
+  // publish 的礼貌锁必须走本用例私有路径，避免与并行动作类用例的维护锁检查相撞。
+  const repairEnv={...process.env,ORCH_MAINTENANCE_LOCK:path.join(root,'publish-lock.json')};
   try{
-    const publish=spawnSync(process.execPath,[path.join(source,'repair.mjs'),'--target',root],{cwd:source,encoding:'utf8',windowsHide:true,timeout:30000});
+    const publish=spawnSync(process.execPath,[path.join(source,'repair.mjs'),'--target',root],{cwd:source,env:repairEnv,encoding:'utf8',windowsHide:true,timeout:30000});
     assert.equal(publish.status,0,publish.stderr||publish.stdout);
     const pkg=path.join(root,'open-tui-orchestrator');
     assert.deepEqual(verifyRelease(pkg),verifyRelease(source));

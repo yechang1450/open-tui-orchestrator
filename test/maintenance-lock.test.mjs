@@ -177,7 +177,7 @@ test('locked --run-windows/--spawn skip orchestration with the one-liner and cre
     assert.match(status.stdout, /maintenance lock: LOCKED/);
     assert.match(status.stdout, /=== alive agent TUI windows ===/, 'read-only --status must bypass the lock');
     releaseMaintenanceLock(t.env);
-    const plan = spawnSync(process.execPath, [sdkFile, '--plan', '只是分析一下'], { cwd: ws, env: { ...process.env, ORCH_MAINTENANCE_LOCK: t.env.ORCH_MAINTENANCE_LOCK, ORCH_AGENT: 'codex', WORKSPACE_DIR: ws, ORCH_STATE_DIR: path.join(ws, 'temp', 'orchestrator') }, encoding: 'utf8', windowsHide: true, timeout: 60000 });
+    const plan = spawnSync(process.execPath, [sdkFile, '--plan', '修复项目81登录页'], { cwd: ws, env: { ...process.env, ORCH_MAINTENANCE_LOCK: t.env.ORCH_MAINTENANCE_LOCK, ORCH_AGENT: 'codex', WORKSPACE_DIR: ws, ORCH_STATE_DIR: path.join(ws, 'temp', 'orchestrator') }, encoding: 'utf8', windowsHide: true, timeout: 60000 });
     assert.equal(plan.status, 0, plan.stderr);
     assert.doesNotMatch(plan.stdout, new RegExp('^' + MAINTENANCE_MESSAGE + '$', 'm'), 'unlocked --plan must not be gated');
   } finally { t.cleanup(); fs.rmSync(ws, { recursive: true, force: true }); }
