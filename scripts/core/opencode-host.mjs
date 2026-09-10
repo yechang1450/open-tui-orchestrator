@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import {spawnSync} from 'node:child_process';
+import {probeCli} from './host-probe.mjs';
 
 // opencode adapter: resolve the real opencode binary and build window/planner argv.
 // Window mode is interactive `opencode run -i --auto` (auto-approves permissions like
@@ -12,6 +12,7 @@ export function resolveOpenCodeHost(env = process.env) {
     : String(env.PATH || env.Path || '')
         .split(path.delimiter)
         .flatMap((dir) => ['opencode.exe', 'opencode.cmd', 'opencode'].map((n) => path.join(dir, n)));
+  const rejected = [];
   for (const file of [...new Set(candidates)]) {
     if (!fs.existsSync(file) || !fs.statSync(file).isFile()) continue;
     let bin = file;
@@ -39,18 +40,17 @@ export function resolveOpenCodeHost(env = process.env) {
         prefixArgs = [entry];
       }
     }
-    const help = spawnSync(bin, [...prefixArgs, '--help'], {env, encoding:'utf8', windowsHide:true, shell:false, timeout:10000});
-    const helpOut = String((help.stdout || '') + (help.stderr || ''));
-    if (help.status !== 0 || !/run opencode with a message/.test(helpOut)) continue;
-    const runHelp = spawnSync(bin, [...prefixArgs, 'run', '--help'], {env, encoding:'utf8', windowsHide:true, shell:false, timeout:10000});
-    const runHelpOut = String((runHelp.stdout || '') + (runHelp.stderr || ''));
-    if (runHelp.status !== 0 || !['--interactive', '--auto', '--dir'].every((f) => runHelpOut.includes(f))) continue;
-    const versionResult = spawnSync(bin, [...prefixArgs, '--version'], {env, encoding:'utf8', windowsHide:true, shell:false, timeout:10000});
-    const version = String((versionResult.stdout || '') + (versionResult.stderr || '')).trim().split(/\s+/)[0];
-    if (versionResult.status !== 0 || !version) continue;
+    const label = [bin, ...prefixArgs].join(' ');
+    const help = probeCli(bin, [...prefixArgs, '--help'], {env});
+    if (help.status !== 0 || !/run opencode with a message/.test(help.out)) { rejected.push(`${label}: --help ${help.error ? 'probe error ' + help.error : 'exit ' + help.status + '; banner mismatch'}`); continue; }
+    const runHelp = probeCli(bin, [...prefixArgs, 'run', '--help'], {env});
+    if (runHelp.status !== 0 || !['--interactive', '--auto', '--dir'].every((f) => runHelp.out.includes(f))) { rejected.push(`${label}: run --help ${runHelp.error ? 'probe error ' + runHelp.error : 'exit ' + runHelp.status + '; flags mismatch'}`); continue; }
+    const versionResult = probeCli(bin, [...prefixArgs, '--version'], {env});
+    const version = versionResult.out.trim().split(/\s+/)[0];
+    if (versionResult.status !== 0 || !version) { rejected.push(`${label}: --version ${versionResult.error ? 'probe error ' + versionResult.error : 'exit ' + versionResult.status + '; unusable output'}`); continue; }
     return {agent:'opencode', config:{id:'opencode', label:'opencode', version, bin, prefixArgs, available:true, native:prefixArgs.length===0, completionMarker:'__ORCH_DONE__', modelEnv:'ORCH_MODEL', effortEnv:'ORCH_EFFORT'}};
   }
-  throw new Error('CLI_MISSING: opencode; no supported installed opencode CLI found. No fallback or automatic install.');
+  throw new Error(`CLI_MISSING: opencode; no supported installed opencode CLI found. No fallback or automatic install. Tried: ${rejected.join(' | ') || 'no candidate found on disk'}`);
 }
 
 // Base argv for an opencode run. The interactive window uses `run -i --auto --dir <cwd>`.
