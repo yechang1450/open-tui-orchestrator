@@ -191,6 +191,24 @@ function detectOpenCode({ configHome }) {
   return null;
 }
 
+// --------------------------------------------------------------- claude ----
+// Claude Code settings: ~/.claude/settings.json 顶层 model（别名或完整 id）；
+// effort 读取 settings 的 "effort"（存在时）。缺失即 null，绝不猜。
+function detectClaude({ claudeHome, env = process.env }) {
+  const home = claudeHome || env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
+  for (const name of ['settings.json', path.join('..', '.claude.json')]) {
+    try {
+      const file = path.join(home, name);
+      if (!fs.existsSync(file)) continue;
+      const cfg = JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, ''));
+      const model = typeof cfg?.model === 'string' && cfg.model.trim() ? cfg.model.trim() : '';
+      const effort = typeof cfg?.effort === 'string' && cfg.effort.trim() ? cfg.effort.trim() : '';
+      if (model || effort) return { model: model || null, effort: effort || null, source: 'claude-settings' };
+    } catch { /* try next */ }
+  }
+  return null;
+}
+
 // --------------------------------------------------------------- 调度 ------
 export function detectHostModelEffort(agent, { cwd, env = process.env, homes = {} } = {}) {
   try {
@@ -199,6 +217,7 @@ export function detectHostModelEffort(agent, { cwd, env = process.env, homes = {
       case 'kimi': return detectKimi({ cwd, kimiHome: homes.kimi, env });
       case 'pi': return detectPi({ piHome: homes.pi });
       case 'opencode': return detectOpenCode({ configHome: homes.opencode });
+      case 'claude': return detectClaude({ claudeHome: homes.claude, env });
       default: return null; // openclaw 与未知 agent：不检测
     }
   } catch { return null; } // 检测绝不让引擎崩

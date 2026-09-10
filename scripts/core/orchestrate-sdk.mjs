@@ -69,6 +69,7 @@ import {runPiPlanner,writePiLauncher,waitPiResult} from './pi-runtime.mjs';
 import {runOpenClawPlanner,writeOpenClawLauncher} from './openclaw-runtime.mjs';
 import {runOpenCodePlanner,writeOpenCodeLauncher,waitOpenCodeResult} from './opencode-runtime.mjs';
 import {runKimiPlanner,writeKimiLauncher,waitKimiResult} from './kimi-runtime.mjs';
+import {runClaudePlanner,writeClaudeLauncher,waitClaudeResult} from './claude-runtime.mjs';
 import {spawnInactiveWindow} from './inactive-window.mjs';
 import {ensureRunGuardian} from './run-guardian.mjs';
 import {lockedForMaintenance,readMaintenanceLock,MAINTENANCE_MESSAGE} from './maintenance-lock.mjs';
@@ -117,7 +118,7 @@ process.env.WORKSPACE_DIR = WORKSPACE;
 process.env.ORCH_STATE_DIR = STATE_DIR;
 const AGENT = resolveAgent();
 // Non-codex window completion is a launcher-written result file; each adapter owns its wait.
-const waitAdapterResult=(rf,timeout,pidf)=>AGENT.agent==='opencode'?waitOpenCodeResult(rf,timeout,pidf):AGENT.agent==='kimi'?waitKimiResult(rf,timeout,pidf):waitPiResult(rf,timeout,pidf);
+const waitAdapterResult=(rf,timeout,pidf)=>AGENT.agent==='opencode'?waitOpenCodeResult(rf,timeout,pidf):AGENT.agent==='kimi'?waitKimiResult(rf,timeout,pidf):AGENT.agent==='claude'?waitClaudeResult(rf,timeout,pidf):waitPiResult(rf,timeout,pidf);
 const CODEX = AGENT.config.bin;
 // PowerShell 单引号字符串内嵌路径：把 ' 转义成 ''，避免路径含引号时破坏脚本/注入。
 const WORKSPACE_Q = WORKSPACE.replace(/'/g, "''");
@@ -624,6 +625,7 @@ async function runThreadPrompt(prompt, opts = {}) {
   if(AGENT.agent==='pi')return runPiPlanner(AGENT.config,prompt,WORKSPACE);
   if(AGENT.agent==='opencode')return runOpenCodePlanner(AGENT.config,prompt,WORKSPACE);
   if(AGENT.agent==='kimi')return runKimiPlanner(AGENT.config,prompt,WORKSPACE);
+  if(AGENT.agent==='claude')return runClaudePlanner(AGENT.config,prompt,WORKSPACE);
   // outputSchema 走 runStreamed 的 turn 选项（强制结构化输出 / 纯 JSON），不能混进 startThread 配置。
   const { outputSchema, ...threadOpts } = opts;
   const thread = codex.startThread({ ...threadBase(), ...threadOpts });
@@ -1152,6 +1154,7 @@ function writeInteractiveLauncher(title, prompt, sfx) {
   if(AGENT.agent==='openclaw')return writeOpenClawLauncher(AGENT.config,{key:title,prompt,suffix:sfx,workspace:WORKSPACE,temp:TMP});
   if(AGENT.agent==='opencode')return writeOpenCodeLauncher(AGENT.config,{key:title,prompt,suffix:sfx,workspace:WORKSPACE,temp:TMP});
   if(AGENT.agent==='kimi')return writeKimiLauncher(AGENT.config,{key:title,prompt,suffix:sfx,workspace:WORKSPACE,temp:TMP});
+  if(AGENT.agent==='claude')return writeClaudeLauncher(AGENT.config,{key:title,prompt,suffix:sfx,workspace:WORKSPACE,temp:TMP});
   const s = safe(title) + (sfx ? "-" + sfx : "");
   mkdirSync(TMP, { recursive: true });
   const pf = path.join(TMP, `agent-win-${s}.md`);

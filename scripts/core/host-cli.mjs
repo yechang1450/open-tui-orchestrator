@@ -6,6 +6,7 @@ import {resolvePiHost,piArgs} from './pi-host.mjs';
 import {resolveOpenClawHost} from './openclaw-host.mjs';
 import {resolveOpenCodeHost,opencodeArgs} from './opencode-host.mjs';
 import {resolveKimiHost,kimiArgs} from './kimi-host.mjs';
+import {resolveClaudeHost,claudeArgs} from './claude-host.mjs';
 
 // Adapter contract: resolve a real CLI before any planner/window is started.
 // Additional adapters must implement planning, interactive argv and completion
@@ -15,6 +16,7 @@ export const adapters = Object.freeze({
   pi: Object.freeze({id:'pi',label:'pi agent',native:false,completionMarker:'__ORCH_DONE__',verified:false}),
   opencode: Object.freeze({id:'opencode',label:'opencode',native:false,completionMarker:'__ORCH_DONE__',verified:false}),
   kimi: Object.freeze({id:'kimi',label:'Kimi Code CLI',native:true,completionMarker:'__ORCH_DONE__',verified:false}),
+  claude: Object.freeze({id:'claude',label:'Claude Code CLI',native:true,completionMarker:'__ORCH_DONE__',verified:false}),
   codex: Object.freeze({ id: 'codex', label: 'Codex CLI', native: true,
     modelEnv: 'ORCH_MODEL', effortEnv: 'ORCH_EFFORT',
     completionMarker: '__ORCH_DONE__', verified: false }),
@@ -25,6 +27,7 @@ export const adapters = Object.freeze({
 // its own orchestration therefore binds to its own agent, not the outer one).
 const HOST_CHAIN_MATCHERS = Object.freeze([
   ['kimi', Object.freeze({ name: /^kimi\.exe$/i })],
+  ['claude', Object.freeze({ name: /^claude\.exe$/i, cmd: /[\\/]@anthropic-ai[\\/]claude-code[\\/]/i })],
   ['codex', Object.freeze({ name: /^codex\.exe$/i, cmd: /[\\/]codex\.js([\s"']|$)|[\\/]@openai[\\/]codex[\\/]/i })],
   ['pi', Object.freeze({ cmd: /[\\/]pi-coding-agent[\\/]/i })],
   ['opencode', Object.freeze({ name: /^opencode\.exe$/i, cmd: /[\\/]opencode-ai[\\/]/i })],
@@ -63,6 +66,7 @@ export function detectHostAgent(env = process.env, { chain } = {}) {
   const explicit = String(env.ORCH_AGENT || '').trim().toLowerCase();
   if (explicit) return explicit;
   if (env.CODEX_THREAD_ID || env.CODEX_SESSION_ID) return 'codex';
+  if (env.CLAUDECODE || env.CLAUDE_CODE_ENTRYPOINT) return 'claude';
   const detected = detectHostFromChain(chain ?? hostProcessChain({ env }));
   if (detected) return detected;
   throw new Error('HOST_UNKNOWN: set ORCH_AGENT to the initiating agent; no Codex fallback.');
@@ -114,6 +118,7 @@ export function resolveHost({ env = process.env, agent, candidates = cliCandidat
   if(id==='openclaw')return resolveOpenClawHost(env);
   if(id==='opencode')return resolveOpenCodeHost(env);
   if(id==='kimi')return resolveKimiHost(env);
+  if(id==='claude')return resolveClaudeHost(env);
   const adapter = adapters[id];
   if (!adapter) throw new Error(`ADAPTER_UNSUPPORTED: ${id}; no CLI adapter implemented; no fallback or automatic install.`);
   const bin = candidates(env).find(probe);
@@ -137,6 +142,10 @@ export function launchArgs(config, options = {}) {
   if(config?.id==='kimi'){
     if(options.sandbox&&options.sandbox!=='danger-full-access')throw new Error('KIMI_SANDBOX_UNSUPPORTED: kimi does not implement the requested sandbox');
     return kimiArgs(config,{model:process.env.ORCH_MODEL});
+  }
+  if(config?.id==='claude'){
+    if(options.sandbox&&options.sandbox!=='danger-full-access')throw new Error('CLAUDE_SANDBOX_UNSUPPORTED: claude does not implement the requested sandbox');
+    return claudeArgs(config,{model:process.env.ORCH_MODEL,effort:process.env.ORCH_EFFORT});
   }
   if (!adapters[config?.id]) throw new Error('ADAPTER_UNSUPPORTED: refusing Codex argv for another agent.');
   const cwd = options.cwd || process.cwd();
