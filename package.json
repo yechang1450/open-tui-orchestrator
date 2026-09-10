@@ -5,7 +5,7 @@
   "type": "module",
   "bin": { "open-tui-orchestrator": "cli.mjs" },
   "scripts": {
-    "test": "node --test test/*.test.mjs",
+    "test": "node --test --test-concurrency=3 test/*.test.mjs",
     "doctor": "node cli.mjs --agent codex --doctor",
     "setup": "npm ci --prefix scripts"
   },

@@ -5,7 +5,7 @@ $name='Local\TuiOrchestrator.Leases.'+[BitConverter]::ToString($hash.ComputeHash
 $mutex=[Threading.Mutex]::new($false,$name)
 $held=$false
 try {
-  try {$held=$mutex.WaitOne(15000)} catch [Threading.AbandonedMutexException] {$held=$true}
+  try {$held=$mutex.WaitOne(20000)} catch [Threading.AbandonedMutexException] {$held=$true}
   if(-not $held){exit 2}
   [IO.File]::WriteAllText($Ticket+'.ready','ready')
   while(-not [IO.File]::Exists($Ticket+'.release')) {

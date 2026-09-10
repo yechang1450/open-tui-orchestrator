@@ -41,7 +41,25 @@ export function coordinatorDir(workspace,env=process.env) {
   if(r.status!==0||!r.stdout.trim())throw new Error('Unable to locate machine window coordinator');
   return path.resolve(r.stdout.trim());
 }
-export function atomicJson(file,value){fs.mkdirSync(path.dirname(file),{recursive:true});const tmp=file+'.'+process.pid+'.tmp';fs.writeFileSync(tmp,JSON.stringify(value,null,2));fs.renameSync(tmp,file);}
+export function atomicJson(file,value){
+  fs.mkdirSync(path.dirname(file),{recursive:true});
+  const tmp=file+'.'+process.pid+'.tmp';fs.writeFileSync(tmp,JSON.stringify(value,null,2));
+  // Windows: renameSync 不覆盖已存在目标，且目标被杀软/索引器瞬时占用时报 EPERM/EACCES。
+  // 单次 remove+rename 仍有窗口，这里做短暂退避重试；非暂时性错误立即上抛，临时文件不残留。
+  const sleepSync=ms=>{try{Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,ms);}catch{}};
+  let lastError=null;
+  for(let attempt=0;attempt<6;attempt++){
+    try{fs.renameSync(tmp,file);return;}
+    catch(error){
+      lastError=error;
+      if(!error||!['EEXIST','EPERM','EACCES'].includes(error.code))break;
+      try{fs.rmSync(file,{force:true});}catch{}
+      sleepSync(60+attempt*80);
+    }
+  }
+  try{fs.rmSync(tmp,{force:true});}catch{}
+  throw lastError;
+}
 export function transaction(dir,fn,snapshot=processSnapshot) {
   fs.mkdirSync(dir,{recursive:true});const lock=path.join(dir,'mutex.json'),file=path.join(dir,'leases.json');
   let processes=snapshot();const owner=processes.get(process.pid);
@@ -53,7 +71,7 @@ export function transaction(dir,fn,snapshot=processSnapshot) {
     const ticket=path.join(dir,'lock-'+crypto.randomUUID());
     const child=spawn(PS_EXE,['-NoProfile','-File',fileURLToPath(new URL('./lease-lock.ps1',import.meta.url)),'-Directory',dir,'-Ticket',ticket,'-Owner',String(owner.ProcessId),'-Started',owner.Started],{windowsHide:true,stdio:'ignore'});
     child.on('error',()=>{});child.unref();
-    const deadline=Date.now()+20000;
+    const deadline=Date.now()+30000;
     while(!fs.existsSync(ticket+'.ready')&&Date.now()<deadline)Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,25);
     unlock=()=>fs.writeFileSync(ticket+'.release','release');
     if(!fs.existsSync(ticket+'.ready')){unlock();throw new Error('Coordinator mutex acquisition failed');}
