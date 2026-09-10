@@ -1,0 +1,28 @@
+{
+  "fixture": "D:\\temp\\open-live-E",
+  "runId": "acceptance-296d75d9-17c3-4e8d-ab50-30948ed6ec72",
+  "startedAt": "2026-09-10T12:54:34.915Z",
+  "phase1": {
+    "barrierStarted": 8,
+    "t009Verified": true
+  },
+  "result99BeforeKill": "dad107610a9e86bc86caee7a1aeb1bca6474c559a405d51d08b46839bf7ff089",
+  "killed": {
+    "remainingAfterSweeps": 0
+  },
+  "noRespawnWatch": {
+    "seconds": 60,
+    "resurrected": 0,
+    "barrierStartedAgain": 0
+  },
+  "phase3": {
+    "barrierRestarted": 8
+  },
+  "resumeExitCode": 0,
+  "receiptCount": 9,
+  "mismatches": [],
+  "result99AfterResume": "dad107610a9e86bc86caee7a1aeb1bca6474c559a405d51d08b46839bf7ff089",
+  "result99Unchanged": true,
+  "passed": true,
+  "finishedAt": "2026-09-10T13:14:20.516Z"
+}

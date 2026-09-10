@@ -1,0 +1,106 @@
+{
+  "schema": 1,
+  "date": "2026-09-10",
+  "coreVersion": "1.8.0",
+  "note": "open-tui-orchestrator 1.8.0 headless(默认) 实机证据汇总",
+  "runs": [
+    {
+      "name": "qA-headless",
+      "runId": "acceptance-6c4d0a15-4bf1-43ba-bc13-aa00886ded5e",
+      "agent": "kimi",
+      "spawnMode": "headless",
+      "blocks": 9,
+      "success": true,
+      "finished": true,
+      "taskStatuses": {
+        "T001": "verified",
+        "T002": "verified",
+        "T003": "verified",
+        "T004": "verified",
+        "T005": "verified",
+        "T006": "verified",
+        "T007": "verified",
+        "T008": "verified",
+        "T009": "verified"
+      }
+    },
+    {
+      "name": "pi",
+      "runId": "live-pi-1",
+      "agent": "pi",
+      "spawnMode": "headless",
+      "blocks": 2,
+      "success": true,
+      "finished": true,
+      "taskStatuses": {
+        "T001": "verified",
+        "T002": "verified"
+      }
+    },
+    {
+      "name": "claude",
+      "runId": "live-claude-1",
+      "agent": "claude",
+      "spawnMode": "headless",
+      "blocks": 2,
+      "success": true,
+      "finished": true,
+      "taskStatuses": {
+        "T001": "verified",
+        "T002": "verified"
+      }
+    },
+    {
+      "name": "claude-window",
+      "runId": "live-claude-window",
+      "agent": "claude",
+      "spawnMode": "window",
+      "blocks": 2,
+      "success": true,
+      "finished": true,
+      "taskStatuses": {
+        "T001": "verified",
+        "T002": "verified"
+      }
+    },
+    {
+      "name": "opencode",
+      "runId": "live-opencode-1",
+      "agent": "opencode",
+      "spawnMode": "headless",
+      "blocks": 2,
+      "success": true,
+      "finished": true,
+      "taskStatuses": {
+        "T001": "verified",
+        "T002": "verified"
+      }
+    },
+    {
+      "name": "kimi",
+      "runId": "live-kimi-final2",
+      "agent": "kimi",
+      "spawnMode": "headless",
+      "blocks": 2,
+      "success": true,
+      "finished": true,
+      "taskStatuses": {
+        "T001": "verified",
+        "T002": "verified"
+      }
+    },
+    {
+      "name": "kimi-board-demo",
+      "runId": "board-demo-1",
+      "agent": "kimi",
+      "spawnMode": "headless",
+      "blocks": 2,
+      "success": true,
+      "finished": true,
+      "taskStatuses": {
+        "T001": "verified",
+        "T002": "verified"
+      }
+    }
+  ]
+}

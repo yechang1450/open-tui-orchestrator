@@ -1,0 +1,13 @@
+{
+  "fixture": "D:\\temp\\open-live-qA",
+  "agent": "kimi",
+  "runId": "acceptance-6c4d0a15-4bf1-43ba-bc13-aa00886ded5e",
+  "startedAt": "2026-09-10T12:45:56.339Z",
+  "overlapWindows": 8,
+  "engineExitCode": 0,
+  "peakOverlap": 8,
+  "receiptCount": 9,
+  "mismatches": [],
+  "passed": true,
+  "finishedAt": "2026-09-10T12:54:28.667Z"
+}
