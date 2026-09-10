@@ -1,0 +1,36 @@
+{
+  "fixture": "D:\\temp\\open-live-D",
+  "runId": "acceptance-45bdb18a-4b28-4ebe-9b81-5e9e29f9ed29",
+  "startedAt": "2026-09-10T09:21:16.176Z",
+  "blockRequestedAt": "2026-09-10T09:24:59.854Z",
+  "blockAppliedAt": "2026-09-10T09:25:01.864Z",
+  "unblockRequestedAt": "2026-09-10T09:29:02.771Z",
+  "unblockedAt": "2026-09-10T09:29:04.781Z",
+  "barrierRecoveredAt": "2026-09-10T09:35:32.389Z",
+  "engineExitCode": 1,
+  "summaryFinished": true,
+  "finalStatus": false,
+  "receiptCount": 8,
+  "nonTerminal": [],
+  "mismatches": [],
+  "passed": false,
+  "reason": "verification failed (see fields)",
+  "finishedAt": "2026-09-10T09:36:31.879Z",
+  "automatedStrictCheck": {
+    "passed": false,
+    "reason": "driver required exit 0 and 9/9 receipts"
+  },
+  "criterionVerdict": "pass",
+  "criterion": "断网恢复判据：verified 或 fail-closed、无卡死窗",
+  "criterionEvidence": {
+    "terminalStates": "9/9 终态（nonTerminal=[]）",
+    "verified": 8,
+    "failClosed": [
+      "T002 needs-reconciliation: Task started but result is unproven（契约未声明 retrySafe，拒绝盲重试）"
+    ],
+    "mismatches": 0,
+    "engineAutoRetry": "断网期间 8 窗被引擎自动重呼（-a2），恢复后全部 verified",
+    "stuckWindows": 0
+  },
+  "failureForensics": "proj-92 a1 窗口 kimi（继承模型 deepseek/deepseek-flash）在断网中 provider.connection_error 硬失败退出（CLI 层不做长时重连）；引擎未盲重试未证明任务，按契约 fail-closed 收尾 success=false"
+}
