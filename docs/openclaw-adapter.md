@@ -1,6 +1,6 @@
 # OpenClaw adapter
 
-The generic CLI implements an OpenClaw-specific adapter for the installed OpenClaw 2026.9.2 release on Windows. It does not pass Codex or pi arguments to OpenClaw. Other OpenClaw versions fail explicitly until their configuration, transcript and TUI interfaces are validated.
+The generic CLI implements an OpenClaw-specific adapter for the validated OpenClaw 2026.9.2 release on Windows. It does not pass Codex or pi arguments to OpenClaw. Other OpenClaw versions fail explicitly until their configuration, transcript and TUI interfaces are validated.
 
 From the initiating workspace:
 

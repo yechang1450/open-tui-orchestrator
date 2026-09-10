@@ -31,7 +31,7 @@ const timer=setInterval(()=>{
   if(!text){seenAt=0;return;}
   if(!seenAt){seenAt=Date.now();return;}
   if(Date.now()-seenAt>=1000){marker=text;closingAt=Date.now();child.write('/exit\r');}
- }catch(error){if(!/locked|busy|no such table/i.test(error.message)){failure='OPENCLAW_TRANSCRIPT_UNSUPPORTED';closingAt=Date.now();child.write('/exit\r');}}
+ }catch(error){if(!/locked|busy|no such table/i.test(error.message)){failure='OPENCLAW_TRANSCRIPT_UNSUPPORTED: '+error.message;closingAt=Date.now();child.write('/exit\r');}}
  finally{db?.close();}
 },500);
 child.onExit(({exitCode})=>{

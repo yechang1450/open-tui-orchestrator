@@ -4,10 +4,13 @@ import {completionText, isolatedConfig,protectSecrets} from '../scripts/core/ope
 import {resolveOpenClawHost} from '../scripts/core/openclaw-host.mjs';
 test('installed OpenClaw is resolved as its own versioned CLI',()=>{
  try{
-  const host=resolveOpenClawHost();assert.equal(host.agent,'openclaw');assert.equal(host.config.version,'2026.9.2');assert.match(host.config.entry,/openclaw\.mjs$/);
+  const host=resolveOpenClawHost();
+  assert.equal(host.agent,'openclaw');
+  assert.equal(host.config.version,'2026.9.2');
+  assert.match(host.config.entry,/openclaw\.mjs$/);
  }catch(e){
-  // 环境里的 openclaw 已升到未验收版本（现状 2026.9.3）：版本钉必须 fail-closed；
-  // 2026.9.3 的快照/记录模式实机验收是通过前独立工作项，不在本套件内放宽。
+  // 环境里的 openclaw 高于钉版（现状 2026.9.3）时必须 fail-closed：扩版需逐版实机验收
+  // （2026-09-10 首次尝试因环境 gateway 密钥条件未闭环，见 memory/2026-09-10.md）。
   assert.match(e.message,/OPENCLAW_VERSION_UNTESTED|CLI_MISSING/);
  }
 });
