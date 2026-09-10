@@ -824,6 +824,14 @@ function checkDiskSpace(opts = {}) {
   }
 }
 // ---------------------------------------------------------------------------
+// Spawn mode: window (visible Windows Terminal carrier) vs headless (hidden
+// carrier; the SAME launcher ps1 keeps writing pidf/rf/log, so identity,
+// leases, recovery adoption and enforcement gates are untouched). Default
+// headless; --mode window (or ORCH_SPAWN_MODE=window) opts back in to popups.
+const SPAWN_MODE_ALIASES={headless:"headless",exec:"headless",window:"window"};
+let SPAWN_MODE="headless";
+function normalizeSpawnMode(value){const v=String(value||"").trim().toLowerCase();if(!v)return null;const m=SPAWN_MODE_ALIASES[v];if(!m)throw new Error("UNSUPPORTED_SPAWN_MODE: "+value+" (use headless|exec|window)");return m;}
+// ---------------------------------------------------------------------------
 // Visible window (REAL popup, via cmd /c start — reliably opens a new console)
 // ---------------------------------------------------------------------------
 // Trust configuration is owned by the user, never rewritten here.
@@ -917,6 +925,44 @@ async function spawnWindowWithRetry(lp, title, pidf, maxRetry = 3, token, reserv
   console.log("  !! [window] popup FAILED after " + maxRetry + " attempts for [" + title + "]");
   return false;
 }
+// Headless carrier: same launcher contract, no visible window. The ps1 still
+// writes pidf/rf/log and exports ORCH_WINDOW=1, so launcherIdentity, leases,
+// recovery adoption, closeWindowByPid and the enforcement gates all behave
+// exactly as in window mode. windowsHide + no console window also means focus
+// can never be stolen.
+function spawnHeadlessUnit(lp, title) {
+  const bn = path.basename(String(lp || ""));
+  const unitName = bn.replace(/^win-launch-/, "").replace(/\.ps1$/, "");
+  const child = spawn(PS_EXE, ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", lp], { cwd: WORKSPACE, env: process.env, windowsHide: true, stdio: "ignore" });
+  child.unref();
+  console.log("spawned headless " + AGENT.agent + " unit: " + title + " (unit=" + unitName + ")");
+}
+async function spawnHeadlessWithRetry(lp, title, pidf, maxRetry = 3, token, reservedByRunner = false) {
+  const auxiliaryId="aux-"+path.basename(lp); let coordinator;
+  if(!reservedByRunner){coordinator=coordinatorDir(WORKSPACE);const auxCap=Math.max(0,Number(process.env.ORCH_MAX_WINDOWS||0)||0);const claim=reserve(coordinator,{id:auxiliaryId,keys:["aux:"+token]},auxCap?Math.min(computeMaxWindows(os.totalmem()/1024**3),auxCap):computeMaxWindows(os.totalmem()/1024**3));if(!claim.ok)throw new Error("Window admission waiting: "+claim.reason);}
+  // Hidden spawn is deterministic (no OS window manager in the loop), so a
+  // single attempt usually confirms; keep the retry budget for cold-start
+  // hiccups and parity with the window path.
+  for (let attempt = 1; attempt <= maxRetry; attempt++) {
+    spawnHeadlessUnit(lp, title);
+    const deadline = Date.now() + 35000;
+    let ok = false;
+    const t0 = Date.now();
+    while (Date.now() < deadline) {
+      if (windowGenuinelyPopped(pidf, token)) { ok = true; break; }
+      await new Promise((r) => setTimeout(r, 500));
+    }
+    if (ok) {
+      await warmupWindow(pidf, token);
+      if(!reservedByRunner)bind(coordinator,auxiliaryId,launcherIdentity(readPidFile(pidf),pidf));
+      if (attempt > 1 || Date.now() - t0 > 6500) console.log("  [headless] launch CONFIRMED (pidf+launcher alive) for [" + title + "]");
+      return true;
+    }
+    console.log("  [headless] launch NOT confirmed (attempt " + attempt + "/" + maxRetry + ") for [" + title + "]");
+  }
+  console.log("  !! [headless] launch FAILED after " + maxRetry + " attempts for [" + title + "]");
+  return false;
+}
 // 失败/未决块自动重试：窗已关但块未完成时，用全新 token 重新弹窗再跑，避免“提前结束轮询/留计划草稿”。
 // 返回 { status, exitCode, result }；只有抓到本块自己的完成标记才算 done。
 async function retryBlock(rec, rid, auth, maxRetry, closeDelayMs) {
@@ -932,7 +978,7 @@ async function retryBlock(rec, rid, auth, maxRetry, closeDelayMs) {
       for (const f of [pf, lp]) { try { if (existsSync(f)) rmSync(f, { force: true }); } catch { /* ignore */ } }
       continue;
     }
-    const popped = await spawnWindowWithRetry(lp, rec.title, pidf, 3, tk);
+    const popped = await (SPAWN_MODE==="headless"?spawnHeadlessWithRetry:spawnWindowWithRetry)(lp, rec.title, pidf, 3, tk);
     if (!popped) {
       cancelReservation(claim.id);
       for (const f of [pf, lp, rf, pidf, pidf + ".self-closed", rf + ".self-closed"]) { try { if (existsSync(f)) rmSync(f, { force: true }); } catch { /* ignore */ } }
@@ -2062,6 +2108,7 @@ async function classifyExecutionMode(request) {
 }
 export async function main() {
   for(const [flag,key] of [["--run-id","ORCH_RUN_ID"],["--acceptance-file","ORCH_ACCEPTANCE_FILE"],["--acceptance","ORCH_ACCEPTANCE_FILE"]]){const index=process.argv.indexOf(flag);if(index>=0){if(!process.argv[index+1])throw new Error(flag+" needs a value");process.env[key]=process.argv[index+1];process.argv.splice(index,2);}}
+  const modeArgIndex=process.argv.indexOf("--mode");if(modeArgIndex>=0){if(!process.argv[modeArgIndex+1])throw new Error("--mode needs a value");process.env.ORCH_SPAWN_MODE=process.argv[modeArgIndex+1];process.argv.splice(modeArgIndex,2);}
   const mode = process.argv[2];
   // 维护锁：上锁期间一切动作模式（--run-windows/--spawn/--resume-run/--run/--exec/--plan/
   // --selftest-close 等）只回固定话术，发起 agent 本轮跳过编排器直接执行；只读模式不受影响。
@@ -2235,6 +2282,15 @@ export async function main() {
     const resume=mode==='--resume-run';
     const request=resume?'':process.argv.slice(3).join(' ');
     if(resume)process.env.ORCH_RUN_ID=process.argv[3]||process.env.ORCH_RUN_ID;
+    if(resume){
+      let saved=null;try{saved=normalizeSpawnMode(JSON.parse(readFileSync(path.join(STATE_DIR,'runs',String(process.env.ORCH_RUN_ID||''),'summary.json'),'utf8')).spawnMode);}catch{}
+      const requested=normalizeSpawnMode(process.env.ORCH_SPAWN_MODE);
+      if(requested&&saved&&requested!==saved)console.warn('[orchestrator] spawn mode override ignored on resume (run fixed at '+saved+' mode)');
+      SPAWN_MODE=saved||requested||'window';
+    }else{
+      SPAWN_MODE=normalizeSpawnMode(process.env.ORCH_SPAWN_MODE)||'headless';
+    }
+    console.log('[orchestrator] spawn mode: '+SPAWN_MODE);
     if(!resume&&!request)throw new Error('--run-windows needs a request');
     if(isOrchestratorSelfMod(request)){console.log(JSON.stringify({mode:'inline',reason:'Modify the orchestrator in the initiating conversation before opening windows'}));return;}
     if(!resume&&await classifyExecutionMode(request)==='inline'){console.log(JSON.stringify({mode:'inline',reason:'Read-only analysis'}));return;}
@@ -2256,13 +2312,13 @@ export async function main() {
     armEnforcement();
     const result=await runWindows(request,{
       plan:decomposeSafely,compact:capPlanBlocks,infer:inferTargetKeys,launcher:writeInteractiveLauncher,prompt:buildBlockPrompt,
-      spawn:(...args)=>spawnWindowWithRetry(...args,true),readPid:readPidFile,
+      spawn:(...args)=>(SPAWN_MODE==="headless"?spawnHeadlessWithRetry:spawnWindowWithRetry)(...args,true),readPid:readPidFile,
       session:AGENT.agent!=='codex'?async(_token,_timeout,rf)=>rf:waitForSessionFile,
       wait:AGENT.agent!=='codex'?(async(_session,timeout,rf,_token,pidf)=>waitAdapterResult(rf,timeout,pidf)):waitTaskComplete,exitCode:readExitCode,
       register:r=>updateWindows(ws=>[...ws,r]),commit:commitReservation,unregister:cancelReservation,close:closeWindowByPid,
       guardian:g=>ensureRunGuardian({...g,agent:AGENT.agent,env:process.env}),
-      cleanup:la=>{const wsRoot=path.resolve(WORKSPACE)+path.sep;for(const f of [la.lp,la.pf,la.pidf,la.rf,la.pidf+'.self-closed',la.rf+'.self-closed'])try{const resolved=path.resolve(String(f||''));if(resolved.startsWith(wsRoot))rmSync(resolved,{force:true});}catch{}}
-    },{workspace:WORKSPACE,capacity,resume,agent:AGENT.agent,runId:process.env.ORCH_RUN_ID,acceptanceFile:process.env.ORCH_ACCEPTANCE_FILE,timeoutMs:POLL_TIMEOUT_MS,auth:readAuthPrompt(),plan:preflightPlan,spawnStaggerMs:Math.max(0,Number(process.env.ORCH_WINDOW_STAGGER_MS||0)||0),windowCap:Math.max(0,Number(process.env.ORCH_MAX_WINDOWS||0)||0)||undefined});
+      cleanup:la=>{const wsRoot=(()=>{const r=path.resolve(WORKSPACE);return r.endsWith(path.sep)?r:r+path.sep;})();for(const f of [la.lp,la.pf,la.pidf,la.rf,la.pidf+'.self-closed',la.rf+'.self-closed'])try{const resolved=path.resolve(String(f||''));if(resolved.startsWith(wsRoot))rmSync(resolved,{force:true});}catch{}}
+    },{workspace:WORKSPACE,capacity,resume,agent:AGENT.agent,runId:process.env.ORCH_RUN_ID,acceptanceFile:process.env.ORCH_ACCEPTANCE_FILE,timeoutMs:POLL_TIMEOUT_MS,auth:readAuthPrompt(),plan:preflightPlan,spawnMode:SPAWN_MODE,spawnStaggerMs:Math.max(0,Number(process.env.ORCH_WINDOW_STAGGER_MS||0)||0),windowCap:Math.max(0,Number(process.env.ORCH_MAX_WINDOWS||0)||0)||undefined});
     process.exitCode=result.success?0:1;return;
   }
 
@@ -2332,4 +2388,4 @@ if (isMain) main().catch((e) => {
   console.error("[orchestrator] FATAL: " + e.message);
   process.exitCode = 1;
 });
-export { classifyBlockComplexity, classifyExecutionMode, windowExecutionPolicy, appendModelEffortArgs, genericProjectSplit, trySingleBlock, conflictByKeys, loadCachedDecompose, buildBlocksFromTasks, resolveHints, extractTasks, classifyPrompt, buildBlockPrompt, levelWaves, decomposeHash, checkDiskSpace, readPidFile, pidAliveCheck, closeWindowByPid, windowGenuinelyPopped, extractResult, extractUsage, readReportFromResult, sessionDir, writeInteractiveLauncher, staleTransientFiles, pidFileOfTransient, tryReserveWindow, commitReservation, cancelReservation, computeMaxWindows, blockKeys, keysOverlap, scanTaskComplete, __setOrchHooks, isOrchestratorSelfMod, resolveCodexHome, withRegistryLock, REG_LOCK as REGISTRY_LOCK_FILE };
+export { classifyBlockComplexity, classifyExecutionMode, windowExecutionPolicy, appendModelEffortArgs, genericProjectSplit, trySingleBlock, conflictByKeys, loadCachedDecompose, buildBlocksFromTasks, resolveHints, extractTasks, classifyPrompt, buildBlockPrompt, levelWaves, decomposeHash, checkDiskSpace, readPidFile, pidAliveCheck, closeWindowByPid, windowGenuinelyPopped, extractResult, extractUsage, readReportFromResult, sessionDir, writeInteractiveLauncher, staleTransientFiles, pidFileOfTransient, tryReserveWindow, commitReservation, cancelReservation, computeMaxWindows, blockKeys, keysOverlap, scanTaskComplete, __setOrchHooks, isOrchestratorSelfMod, resolveCodexHome, withRegistryLock, spawnHeadlessWithRetry, normalizeSpawnMode, REG_LOCK as REGISTRY_LOCK_FILE };

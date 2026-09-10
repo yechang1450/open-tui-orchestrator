@@ -38,10 +38,10 @@ test('actual partial execution is recovered without repeating its completed side
  while(!fs.existsSync(rf+'.go'))await new Promise(r=>setTimeout(r,20));
  for(const id of a.taskIds){recordCheckpoint(file,id,'started');
  if(id==='T001'){const f=path.join(root,'count.json');const count=fs.existsSync(f)?JSON.parse(fs.readFileSync(f)).count:0;fs.writeFileSync(f,JSON.stringify({count:count+1}));}
- if(id==='T002'&&a.number===1){fs.writeFileSync(rf,JSON.stringify({exitCode:23}));process.exit(23);}
+ if(id==='T002'&&a.number===1){fs.writeFileSync(rf,JSON.stringify({exitCode:23,attempt:a.number}));process.exit(23);}
  if(id==='T002')fs.writeFileSync(path.join(root,'done.json'),JSON.stringify({done:true}));
  recordCheckpoint(file,id,'completed');}
- fs.writeFileSync(rf,JSON.stringify({exitCode:0}));`);
+ fs.writeFileSync(rf,JSON.stringify({exitCode:0,attempt:a.number}));`);
  const checks=path.join(d,'acceptance.json');fs.writeFileSync(checks,JSON.stringify({T001:[{type:'json',path:'count.json',equals:{count:1}}],T002:{retrySafe:true,checks:[{type:'json',path:'done.json',equals:{done:true}}]}}));
  const hooks={plan:async()=>[{title:'linked',type:'linked',tasks:[{prompt:'执行甲'},{prompt:'执行乙'}]}],compact:p=>p,infer:()=>[],prompt:p=>p,
   launcher:(key,prompt,suffix)=>{const file=/开始前：node "[^"]+" "([^"]+)"/.exec(prompt)[1];attempts.push(JSON.parse(fs.readFileSync(file)).taskIds);
@@ -51,10 +51,11 @@ test('actual partial execution is recovered without repeating its completed side
   readPid:p=>{try{return fs.existsSync(p)?Number(fs.readFileSync(p,'utf8').replace(/^\uFEFF/,'')):0;}catch{return 0;}},
   session:async()=> 'controlled',wait:async(_session,_timeout,rf)=>{fs.writeFileSync(rf+'.go','go');const end=Date.now()+15000;while(!fs.existsSync(rf)&&Date.now()<end)await pause(20);return {done:fs.existsSync(rf),exitCode:JSON.parse(fs.readFileSync(rf)).exitCode};},
   exitCode:rf=>fs.existsSync(rf)?JSON.parse(fs.readFileSync(rf)).exitCode:null,
-  register:()=>{},commit:()=>{},unregister:()=>{},cleanup:()=>{},close:async(pid)=>{try{process.kill(pid);}catch{}await pause(300);},
+  register:()=>{},commit:()=>{},unregister:()=>{},cleanup:()=>{},close:async(pid)=>{const end=Date.now()+10000;while(Date.now()<end){try{process.kill(pid,0);}catch{await pause(100);return;}await pause(100);}try{process.kill(pid);}catch{}await pause(300);},
  };
  try{const opts={workspace:d,capacity:8,runId:'partial',acceptanceFile:checks,coordinator:path.join(d,'temp','coordinator'),auth:'test'};
   const sum=await runWindows('执行甲；执行乙',hooks,opts);
+  if(!sum.success){const dump=[];const walk=(p,pre='')=>{try{for(const e of fs.readdirSync(p,{withFileTypes:true})){const fp=path.join(p,e.name);if(e.isDirectory())walk(fp,pre+e.name+'/');else{let c='';try{c=fs.readFileSync(fp,'utf8').slice(0,300)}catch(x){c='<'+x.message+'>'}dump.push(pre+e.name+' :: '+c.replace(/\n/g,' '))}}}catch{}};walk(d);console.error('RRT-DUMP\n'+dump.join('\n')+'\nRRT-END');}
   assert.equal(sum.success,true,JSON.stringify(sum.results));assert.deepEqual(attempts,[['T001','T002'],['T002']]);assert.equal(JSON.parse(fs.readFileSync(path.join(d,'count.json'))).count,1);
   const recovered=await runWindows('',hooks,{...opts,resume:true});assert.equal(recovered.success,true);assert.equal(attempts.length,2,'verified resume must open no new window');
  }finally{for(const child of children)if(child.exitCode===null)child.kill();await pause(500);fs.rmSync(d,{recursive:true,force:true});}
@@ -68,7 +69,7 @@ test('resume and verify refuse a tampered acceptance contract',async()=>{
  const [file,rf,root]=process.argv.slice(2),a=JSON.parse(fs.readFileSync(file));
  while(!fs.existsSync(rf+'.go'))await new Promise(r=>setTimeout(r,20));
  for(const id of a.taskIds){recordCheckpoint(file,id,'started');fs.writeFileSync(path.join(root,'done.json'),JSON.stringify({done:true}));recordCheckpoint(file,id,'completed');}
- fs.writeFileSync(rf,JSON.stringify({exitCode:0}));`);
+ fs.writeFileSync(rf,JSON.stringify({exitCode:0,attempt:a.number}));`);
  const checks=path.join(d,'acceptance-src.json');fs.writeFileSync(checks,JSON.stringify({T001:[{type:'json',path:'done.json',equals:{done:true}}]}));
  const hooks={plan:async()=>[{title:'only',type:'parallel',tasks:[{prompt:'执行甲'}]}],compact:p=>p,infer:()=>[],prompt:p=>p,
   launcher:(key,prompt,suffix)=>{const file=/开始前：node "[^"]+" "([^"]+)"/.exec(prompt)[1];

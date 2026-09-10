@@ -8,6 +8,22 @@ import {scheduleReady,recoveryTasks,taskPolicy,validateRecoverySummary} from './
 import {readCheckpoints} from './checkpoint.mjs';
 export {scheduleReady,recoveryTasks};
 const pause=ms=>new Promise(r=>setTimeout(r,ms));
+// Identity acquisition under load: a full-process snapshot can be slow or miss a
+// just-spawned launcher, and one unlucky read used to burn the whole attempt
+// budget as popup-failed ('Launcher process identity mismatch'). Retry within a
+// short grace window before giving up; transient snapshot failures are retried,
+// a persistent one still fails fast.
+export async function identityWithGrace(hooks,la,{graceMs=10000,intervalMs=800}={}) {
+  const end=Date.now()+graceMs;let identity=null,lastError=null;
+  while(true){
+    try{identity=launcherIdentity(hooks.readPid(la.pidf),la.pidf);}catch(error){lastError=error;}
+    if(identity)return identity;
+    if(Date.now()>=end)break;
+    await pause(intervalMs);
+  }
+  if(lastError)throw lastError;
+  return null;
+}
 export async function waitForProcessExit(expected,{timeoutMs=5000,intervalMs=100,snapshot=processSnapshot}={}) {
   if(!expected||!Number.isFinite(Number(expected.ProcessId)))return true;
   const timeout=Math.max(0,Math.min(15000,Number(timeoutMs)||0)),interval=Math.max(10,Math.min(1000,Number(intervalMs)||100));
@@ -121,7 +137,7 @@ export async function runWindows(request,hooks,options={}) {
       const {plan,tasks}=ledgerPlan(request,candidate,capacity,hooks.compact);
       const recs=plan.map((b,i)=>({key:`B${i+1}`,title:b.title,b,dependsOn:b.dependsOn||[],keys:[...new Set([...(b.conflictKeys||[]),...b.tasks.flatMap(t=>hooks.infer(t.prompt||''))].map(k=>canonicalKey(k,workspace)))]}));
       levelWaves(recs);
-      sum={protocol:2,version:CORE_VERSION,agent:options.agent||'codex',runId,workspace,request,capacity,coordinator,generation:1,history:[],startedAt:Date.now(),tasks,plan:recs,
+      sum={protocol:2,version:CORE_VERSION,agent:options.agent||'codex',runId,workspace,request,capacity,coordinator,generation:1,history:[],startedAt:Date.now(),tasks,plan:recs,spawnMode:options.spawnMode||'window',
         blocks:recs.map(r=>({key:r.key,title:r.title,taskIds:r.b.tasks.flatMap(t=>t.sourceIds)})),results:{},taskResults:{}};
       for(const r of recs){sum.results[r.key]={status:'pending',attempts:[]};for(const id of sum.blocks.find(b=>b.key===r.key).taskIds)sum.taskResults[id]={status:'pending'};}
       sum.acceptanceSha256=checksHash(checks);
@@ -149,11 +165,11 @@ export async function runWindows(request,hooks,options={}) {
     async function execute(r) {
       const b=sum.blocks.find(b=>b.key===r.key),tasks=b.taskIds.map(id=>sum.tasks.find(t=>t.id===id));
       const leaseId=crypto.createHash('sha256').update(runKey).digest('hex').slice(0,16)+'-'+r.key;
-      let attemptsThisController=0;
+      let attemptsThisController=0,spawnConfirmed=false;
       const limit=Math.max(1,Math.min(3,Number(options.maxAttempts||2)));
       while(Date.now()<deadline) {
-        let e=sum.results[r.key],la=e.launcherFiles,identity;
-        if(la)identity=launcherIdentity(hooks.readPid(la.pidf),la.pidf);
+        let e=sum.results[r.key],la=e.launcherFiles,identity;spawnConfirmed=false;
+        if(la)try{identity=launcherIdentity(hooks.readPid(la.pidf),la.pidf);}catch{identity=undefined;}
         const adopted=identity&&(!e.launcher||sameProcess(e.launcher,identity));
         let active;
         if(adopted) {
@@ -194,7 +210,8 @@ export async function runWindows(request,hooks,options={}) {
             await coordinate(()=>prepare(coordinator,leaseId,la.pidf),deadline);
             await stagger();
             if(!await hooks.spawn(la.lp,r.title,la.pidf,1,token))throw new Error('Visible window did not start');
-            identity=launcherIdentity(hooks.readPid(la.pidf),la.pidf);
+            spawnConfirmed=true;
+            identity=await identityWithGrace(hooks,la);
             if(!identity)throw new Error('Launcher process identity mismatch');
             await coordinate(()=>bind(coordinator,leaseId,identity),deadline);hooks.commit(leaseId,identity.ProcessId);
           }catch(error){e.status='popup-failed';e.reason=error.message;}
@@ -209,7 +226,7 @@ export async function runWindows(request,hooks,options={}) {
           }
         }catch(error){e.status='failed';e.reason=error.message;}
         finally {
-          if(!identity&&la)identity=launcherIdentity(hooks.readPid(la.pidf),la.pidf);
+          if(!identity&&la&&spawnConfirmed)try{identity=await identityWithGrace(hooks,la,{graceMs:4000,intervalMs:300});}catch{identity=undefined;}
           if(identity)await hooks.close(identity.ProcessId,identity);
           if(identity&&!(await waitForProcessExit(identity))){e.status='failed';e.reason='Launcher still alive; lease retained';persist();return;}
           await coordinate(()=>release(coordinator,e.leaseId||leaseId),Date.now()+30000);
