@@ -6,6 +6,7 @@ import {CORE_VERSION,ledgerPlan,levelWaves,verifyChecks,summaryComplete,TERMINAL
 import {coordinatorDir,reserve,bind,release,prepare,atomicJson,launcherIdentity,processSnapshot,sameProcess,claimRun,releaseRun} from './leases.mjs';
 import {scheduleReady,recoveryTasks,taskPolicy,validateRecoverySummary} from './recovery.mjs';
 import {readCheckpoints} from './checkpoint.mjs';
+import {boardSignature,boardJson,boardSummaryLine} from './run-board.mjs';
 export {scheduleReady,recoveryTasks};
 const pause=ms=>new Promise(r=>setTimeout(r,ms));
 // Identity acquisition under load: a full-process snapshot can be slow or miss a
@@ -149,7 +150,10 @@ export async function runWindows(request,hooks,options={}) {
       if(keyDiff?.missing.length)console.warn('[orchestrator] acceptance has no checks for task(s): '+keyDiff.missing.join(', ')+'；这些任务将停在 awaiting-verification');
     }
     atomicJson(path.join(dir,'acceptance.json'),checks);
-    const persist=()=>atomicJson(summaryFile,sum);
+    const eventsFile=path.join(dir,'events.jsonl');
+    let lastBoardSig='';
+    const emitBoard=()=>{try{const sig=boardSignature(sum);if(sig===lastBoardSig)return;lastBoardSig=sig;fs.appendFileSync(eventsFile,JSON.stringify(boardJson(sum))+'\n');console.log(boardSummaryLine(sum));}catch{/* board is best-effort; never fail the run */}};
+    const persist=()=>{atomicJson(summaryFile,sum);emitBoard();};
     const mark=(r,status,reason)=>{sum.results[r.key]={...sum.results[r.key],status,reason};for(const id of sum.blocks.find(b=>b.key===r.key).taskIds)if(sum.taskResults[id]?.status!=='verified')sum.taskResults[id]={...sum.taskResults[id],status,reason};persist();};
     persist();console.log(`[run] runId=${runId} blocks=${sum.blocks.length} capacity=${capacity} generation=${sum.generation} summary=${summaryFile}`);
     // Auto-recovery: a detached guardian watches this controller and relaunches

@@ -74,6 +74,7 @@ import {ensureRunGuardian} from './run-guardian.mjs';
 import {lockedForMaintenance,readMaintenanceLock,MAINTENANCE_MESSAGE} from './maintenance-lock.mjs';
 import { networkConfig } from "./network-policy.mjs";
 import { spawn, spawnSync } from "node:child_process";
+import {watchRun, boardSummaryLine} from "./run-board.mjs";
 import { resolveAgent, launchArgs } from "./agent.mjs";
 import { inheritHostModelEffort } from "./host-model.mjs";
 import { writeFileSync, mkdirSync, readFileSync, existsSync, rmSync, readdirSync, statSync, statfsSync, openSync, readSync, closeSync, renameSync } from "node:fs";
@@ -2081,6 +2082,19 @@ function showStatus(readonly) {
   console.log("=== pending locks (waiting for a window to close) ===");
   for (const l of locks) console.log("  [blocked] \"" + (l.title || l.block) + "\" waits for window \"" + l.blockedBy + "\"");
   if (!locks.length) console.log("  (none)");
+  console.log("=== active runs ===");
+  let boardRows = [];
+  try {
+    const runsDir = path.join(STATE_DIR, "runs");
+    for (const d of readdirSync(runsDir)) {
+      try {
+        const sum = JSON.parse(readFileSync(path.join(runsDir, d, "summary.json"), "utf8").replace(/^\uFEFF/, ""));
+        if (sum && !sum.finishedAt) boardRows.push(boardSummaryLine(sum));
+      } catch { /* mid-write or foreign dir */ }
+    }
+  } catch { /* no runs dir yet */ }
+  if (!boardRows.length) console.log("  (no active runs)");
+  else for (const row of boardRows) console.log("  " + row);
 }
 // ---------------------------------------------------------------------------
 // CLI
@@ -2112,7 +2126,7 @@ export async function main() {
   const mode = process.argv[2];
   // 维护锁：上锁期间一切动作模式（--run-windows/--spawn/--resume-run/--run/--exec/--plan/
   // --selftest-close 等）只回固定话术，发起 agent 本轮跳过编排器直接执行；只读模式不受影响。
-  const MAINTENANCE_BYPASS = new Set([undefined, "--doctor", "--status", "--verify-run", "--clear-cache"]);
+  const MAINTENANCE_BYPASS = new Set([undefined, "--doctor", "--status", "--watch", "--verify-run", "--clear-cache"]);
   if (lockedForMaintenance() && !MAINTENANCE_BYPASS.has(mode)) {
     console.log(MAINTENANCE_MESSAGE);
     return;
@@ -2322,6 +2336,15 @@ export async function main() {
     process.exitCode=result.success?0:1;return;
   }
 
+  if (mode === "--watch") {
+    const id = process.argv[3] || process.env.ORCH_RUN_ID;
+    if (!id) throw new Error("--watch needs a run id");
+    const jsonl = process.argv.includes("--jsonl");
+    const ivRaw = process.argv.indexOf("--interval-ms");
+    const iv = ivRaw >= 0 ? Number(process.argv[ivRaw + 1]) : NaN;
+    process.exitCode = await watchRun({ workspace: WORKSPACE, runId: id, intervalMs: Number.isFinite(iv) && iv > 0 ? iv : 800, jsonl });
+    return;
+  }
   if (mode === "--status") {
     const mlock = readMaintenanceLock();
     if (mlock.locked) console.log("maintenance lock: LOCKED" + (mlock.reason ? " (" + mlock.reason + ")" : "") + (mlock.expiresAt ? ", expires " + new Date(mlock.expiresAt).toISOString() : "") + " - " + MAINTENANCE_MESSAGE);
