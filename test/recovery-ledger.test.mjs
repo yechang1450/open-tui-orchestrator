@@ -46,6 +46,19 @@ test('saved recovery ledger rejects inconsistent inventories without mutating in
   validateRecoverySummary(legit);
 });
 
+test('launcher containment accepts drive-root workspaces', () => {
+  // path.resolve 后的盘符根自带尾分隔符；拼sep变双分隔符会把根工作区的合法账本全误判逃逸。
+  const root = path.parse(process.cwd()).root;
+  const state = fixture(root);
+  state.results.B1.attempts = [{runId: 'ledger', token: 't', file: 'f', taskIds: ['T001']}];
+  state.results.B1.launcherFiles = {lp: path.join(root, 'temp', 'win-launch-x.ps1'), pidf: path.join(root, 'temp', 'window-x.pid'), rf: path.join(root, 'temp', 'win-x.result.json')};
+  validateRecoverySummary(state);
+  const escaped = structuredClone(state);
+  const otherDrive = /^c:/i.test(root) ? 'D:\\' : 'C:\\';
+  escaped.results.B1.launcherFiles = {lp: path.join(otherDrive, 'win-launch-evil.ps1'), pidf: 'p', rf: 'r'};
+  assert.throws(() => validateRecoverySummary(escaped), /Invalid recovery ledger/);
+});
+
 test('resume rejects a damaged ledger before invoking execution hooks', async () => {
   const family = fileURLToPath(new URL('../temp/', import.meta.url));
   fs.mkdirSync(family, {recursive: true});
