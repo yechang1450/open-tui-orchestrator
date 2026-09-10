@@ -13,11 +13,14 @@ test('repair validates and publishes a clean CLI package', () => {
   const family = path.join('D:\\temp', 'orchestrator');
   fs.mkdirSync(family, {recursive: true});
   const root = fs.mkdtempSync(path.join(family, 'publication-'));
+  // publish 期间 repair.mjs 会礼貌性上锁（礼让并发引擎）；锁路径必须是本用例私有的，
+  // 否则并行跑的动作类用例会撞见这把锁而误吃维护话术（曾致 status/force 用例偶发红）。
+  const repairEnv = { ...process.env, ORCH_MAINTENANCE_LOCK: path.join(root, 'publish-lock.json') };
   try {
-    const check = spawnSync(process.execPath, [repair], {cwd: source, encoding: 'utf8', windowsHide: true, timeout: 30000});
+    const check = spawnSync(process.execPath, [repair], {cwd: source, env: repairEnv, encoding: 'utf8', windowsHide: true, timeout: 30000});
     assert.equal(check.status, 0, check.stderr || check.stdout);
 
-    const publish = spawnSync(process.execPath, [repair, '--target', root], {cwd: source, encoding: 'utf8', windowsHide: true, timeout: 30000});
+    const publish = spawnSync(process.execPath, [repair, '--target', root], {cwd: source, env: repairEnv, encoding: 'utf8', windowsHide: true, timeout: 30000});
     assert.equal(publish.status, 0, publish.stderr || publish.stdout);
     const published = path.join(root, 'open-tui-orchestrator');
     assert.deepEqual(verifyRelease(published), verifyRelease(source));
@@ -26,7 +29,7 @@ test('repair validates and publishes a clean CLI package', () => {
     }
     assert.equal(fs.existsSync(path.join(published, 'scripts', '.agent-cache.json')), false);
 
-    const duplicate = spawnSync(process.execPath, [repair, '--target', root], {cwd: source, encoding: 'utf8', windowsHide: true, timeout: 30000});
+    const duplicate = spawnSync(process.execPath, [repair, '--target', root], {cwd: source, env: repairEnv, encoding: 'utf8', windowsHide: true, timeout: 30000});
     assert.equal(duplicate.status, 2, duplicate.stdout);
     assert.match(duplicate.stderr, /already exists/i);
   } finally {

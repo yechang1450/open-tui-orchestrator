@@ -1,11 +1,11 @@
 {
   "schema": 2,
-  "coreVersion": "1.7.2",
+  "coreVersion": "1.7.3",
   "files": {
     "agent-auth-prompt.txt": "18fa9c01972cd99a2fe2b1b74a440b34921a051ba6c0d54daf2f5bf1096457b0",
     "agent.mjs": "e75eb20ebe560072f67d9e7803467eba4114fb23716b04f82147aebb17a12555",
     "checkpoint.mjs": "246de59db9a7aac48b12eea1554ff281eaf9dd897e620ecf73d954f39b3cf94a",
-    "contracts.mjs": "1bd58b95b29bfe9a67799d703fb9649363f7ad83ae6f657c1c6a1e8e2a0e5202",
+    "contracts.mjs": "216c9f798366218e0a81945eb31bb8ce39d88b2c2fffd34c3a6a6b95aa2298a9",
     "host-cli.mjs": "24597949708e0bed21fae3ee3097a5d0d1aea83fda707839059f2a1563f4bdcd",
     "host-model.mjs": "b732336ef7eb8aa44b3bd7cfa00947e30631c7f01f7de7798ab7fa58c4c4155e",
     "host-probe.mjs": "90d0831ca2775e54183145638880277f8c45fbf457a8b948d65966b6f96c378f",
@@ -36,7 +36,7 @@
     "runtime-context.mjs": "39ee58751764034504a6e3c5a6cb53ded725abee5a5ccd7675ade7d690bdb58b"
   },
   "runtimeFiles": {
-    "cli.mjs": "7d54dedc7d41ff74dd58426e90694a5e3a184d6915e17791fedfd669ecdef824",
+    "cli.mjs": "6188a005e368b45fca5d484ccf7eeab47f91407c22a19baa9d7614145489bd16",
     "package.json": "622a8244b6a2ddac4f7515bf77f1d89a7af963d59b1982140c9bb04713f229ae",
     "repair.mjs": "5a456b42560bfa21fd1e66ccdff7416f88e82fe711db5c04279717e73275a076",
     "scripts/agent-auth-prompt.txt": "18fa9c01972cd99a2fe2b1b74a440b34921a051ba6c0d54daf2f5bf1096457b0",
@@ -44,7 +44,7 @@
     "scripts/core/agent-auth-prompt.txt": "18fa9c01972cd99a2fe2b1b74a440b34921a051ba6c0d54daf2f5bf1096457b0",
     "scripts/core/agent.mjs": "e75eb20ebe560072f67d9e7803467eba4114fb23716b04f82147aebb17a12555",
     "scripts/core/checkpoint.mjs": "246de59db9a7aac48b12eea1554ff281eaf9dd897e620ecf73d954f39b3cf94a",
-    "scripts/core/contracts.mjs": "1bd58b95b29bfe9a67799d703fb9649363f7ad83ae6f657c1c6a1e8e2a0e5202",
+    "scripts/core/contracts.mjs": "216c9f798366218e0a81945eb31bb8ce39d88b2c2fffd34c3a6a6b95aa2298a9",
     "scripts/core/host-cli.mjs": "24597949708e0bed21fae3ee3097a5d0d1aea83fda707839059f2a1563f4bdcd",
     "scripts/core/host-model.mjs": "b732336ef7eb8aa44b3bd7cfa00947e30631c7f01f7de7798ab7fa58c4c4155e",
     "scripts/core/host-probe.mjs": "90d0831ca2775e54183145638880277f8c45fbf457a8b948d65966b6f96c378f",
