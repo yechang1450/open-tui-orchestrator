@@ -7,6 +7,7 @@ import {resolveOpenClawHost} from './openclaw-host.mjs';
 import {resolveOpenCodeHost,opencodeArgs} from './opencode-host.mjs';
 import {resolveKimiHost,kimiArgs} from './kimi-host.mjs';
 import {resolveClaudeHost,claudeArgs} from './claude-host.mjs';
+import {resolveProfileHost,profileArgs,listProfiles,loadProfile} from './print-profile.mjs';
 
 // Adapter contract: resolve a real CLI before any planner/window is started.
 // Additional adapters must implement planning, interactive argv and completion
@@ -67,8 +68,24 @@ export function detectHostAgent(env = process.env, { chain } = {}) {
   if (explicit) return explicit;
   if (env.CODEX_THREAD_ID || env.CODEX_SESSION_ID) return 'codex';
   if (env.CLAUDECODE || env.CLAUDE_CODE_ENTRYPOINT) return 'claude';
-  const detected = detectHostFromChain(chain ?? hostProcessChain({ env }));
+  // profile-class agents: env markers first, then ancestor process name/cmd patterns.
+  for (const pid of listProfiles(env)) {
+    const p = loadProfile(pid, env);
+    if (p && (p.envMarkers || []).some((m) => env[m])) return pid;
+  }
+  const procs = chain ?? hostProcessChain({ env });
+  const detected = detectHostFromChain(procs);
   if (detected) return detected;
+  for (const pid of listProfiles(env)) {
+    const p = loadProfile(pid, env);
+    if (!p) continue;
+    let patterns = [];
+    try { patterns = (p.processNames || []).map((s) => new RegExp(s, 'i')); } catch { patterns = []; }
+    for (const proc of procs) {
+      const name = String(proc?.name || ''), cmd = String(proc?.cmdline || '');
+      if (patterns.some((re) => re.test(name) || re.test(cmd))) return pid;
+    }
+  }
   throw new Error('HOST_UNKNOWN: set ORCH_AGENT to the initiating agent; no Codex fallback.');
 }
 
@@ -119,6 +136,10 @@ export function resolveHost({ env = process.env, agent, candidates = cliCandidat
   if(id==='opencode')return resolveOpenCodeHost(env);
   if(id==='kimi')return resolveKimiHost(env);
   if(id==='claude')return resolveClaudeHost(env);
+  // print-class 通用适配：有画像文件（scripts/core/agent-profiles/<id>.json）的 agent
+  // 走数据驱动的通用解析；画像存在即权威（CLI 缺失时 fail-closed，不回退）。
+  const profileHost = resolveProfileHost(env,id);
+  if (profileHost) return profileHost;
   const adapter = adapters[id];
   if (!adapter) throw new Error(`ADAPTER_UNSUPPORTED: ${id}; no CLI adapter implemented; no fallback or automatic install.`);
   const bin = candidates(env).find(probe);
@@ -146,6 +167,10 @@ export function launchArgs(config, options = {}) {
   if(config?.id==='claude'){
     if(options.sandbox&&options.sandbox!=='danger-full-access')throw new Error('CLAUDE_SANDBOX_UNSUPPORTED: claude does not implement the requested sandbox');
     return claudeArgs(config,{model:process.env.ORCH_MODEL,effort:process.env.ORCH_EFFORT});
+  }
+  if(config?.profile){
+    if(options.sandbox&&options.sandbox!=='danger-full-access')throw new Error('PROFILE_SANDBOX_UNSUPPORTED: '+config.id+' does not implement the requested sandbox');
+    return profileArgs(config,{model:process.env.ORCH_MODEL,effort:process.env.ORCH_EFFORT});
   }
   if (!adapters[config?.id]) throw new Error('ADAPTER_UNSUPPORTED: refusing Codex argv for another agent.');
   const cwd = options.cwd || process.cwd();
