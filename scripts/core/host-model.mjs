@@ -16,6 +16,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import {loadProfile} from './print-profile.mjs';
 
 // 合法 model/effort 值绝不含空白与引号；脏值一律丢弃（下游会拼进 ps1/argv，防注入）。
 function clean(v) {
@@ -209,6 +210,41 @@ function detectClaude({ claudeHome, env = process.env }) {
   return null;
 }
 
+// --------------------------------------------------------------- profile ----
+// print-class 画像 agent 的 model/effort 探测：由画像的可选 modelDetection 规格描述
+// （adapt 自动做精确候选发现，也可手填）。规格形态：
+//   modelDetection: { env:["<ID>_MODEL"], config:[{file:"~/.x.conf.yml", modelKey:"model", effortKey:"effort"}] }
+// 只读精确键名，绝不猜测；缺失即 null（回退该 CLI 自身默认，或用 ORCH_MODEL/ORCH_EFFORT 显式指定）。
+export function readProfileKey(file, key, jsonc) {
+  let text = fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, '');
+  if (/\.jsonc$/i.test(file) || jsonc) text = text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  if (/\.jsonc?$/i.test(file) || jsonc) {
+    const value = JSON.parse(text)?.[key];
+    return typeof value === 'string' && value.trim() ? value.trim() : '';
+  }
+  const re = new RegExp('^\\s*' + key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s*:\\s*["\']?([^"\'#\\r\\n]+)', 'm');
+  const m = re.exec(text);
+  return m && m[1].trim() ? m[1].trim() : '';
+}
+function detectProfile({ id, env = process.env }) {
+  const profile = loadProfile(id, env);
+  const md = profile && profile.modelDetection;
+  if (!md) return null;
+  let model = '', effort = '';
+  for (const name of md.env || []) { if (!model && env[name]) model = String(env[name]).trim(); }
+  for (const name of md.effortEnv || []) { if (!effort && env[name]) effort = String(env[name]).trim(); }
+  for (const c of md.config || []) {
+    try {
+      const home = env.USERPROFILE || env.HOME || os.homedir();
+      const file = String(c.file || '').startsWith('~') ? path.join(home, String(c.file).slice(1)) : path.resolve(String(c.file || ''));
+      if (!file || !fs.existsSync(file)) continue;
+      if (!model && c.modelKey) model = readProfileKey(file, c.modelKey);
+      if (!effort && c.effortKey) effort = readProfileKey(file, c.effortKey);
+    } catch { /* try next */ }
+  }
+  return model || effort ? { model: model || null, effort: effort || null, source: 'profile:' + id } : null;
+}
+
 // --------------------------------------------------------------- 调度 ------
 export function detectHostModelEffort(agent, { cwd, env = process.env, homes = {} } = {}) {
   try {
@@ -218,7 +254,11 @@ export function detectHostModelEffort(agent, { cwd, env = process.env, homes = {
       case 'pi': return detectPi({ piHome: homes.pi });
       case 'opencode': return detectOpenCode({ configHome: homes.opencode });
       case 'claude': return detectClaude({ claudeHome: homes.claude, env });
-      default: return null; // openclaw 与未知 agent：不检测
+      default: {
+        const profiled = detectProfile({ id: String(agent || ''), env });
+        if (profiled) return profiled;
+        return null; // openclaw 与未知 agent：不检测
+      }
     }
   } catch { return null; } // 检测绝不让引擎崩
 }

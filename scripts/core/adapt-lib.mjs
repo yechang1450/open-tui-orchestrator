@@ -5,6 +5,7 @@ import {fileURLToPath} from 'node:url';
 import {probeCli} from './host-probe.mjs';
 import {profilesDir,loadProfile} from './print-profile.mjs';
 import {detectHostAgent} from './host-cli.mjs';
+import {readProfileKey} from './host-model.mjs';
 import {readMaintenanceLock,acquireMaintenanceLock,releaseMaintenanceLock} from './maintenance-lock.mjs';
 
 // 自动适配（print-class 画像管线）：
@@ -19,6 +20,34 @@ export const APPROVE_CANDIDATES = ['--yes-always', '--dangerously-skip-permissio
 
 function run(cmd, args, opts = {}) {
   return spawnSync(cmd, args, { encoding: 'utf8', windowsHide: true, shell: false, timeout: 120000, ...opts });
+}
+
+// 精确候选发现：只读固定键名与固定候选路径，绝不猜测值。
+// 供 adapt 写入画像的 modelDetection（engine 端 host-model.detectProfile 消费）。
+export function discoverModelDetection(id, { home = process.env.USERPROFILE || process.env.HOME || '', env = process.env } = {}) {
+  const spec = {};
+  const up = String(id).toUpperCase().replace(/[^A-Z0-9]/g, '_');
+  const envHit = [up + '_MODEL', up + '_DEFAULT_MODEL'].find((n) => env[n] && String(env[n]).trim());
+  if (envHit) spec.env = [envHit];
+  const effortEnvHit = [up + '_EFFORT', up + '_THINKING'].find((n) => env[n] && String(env[n]).trim());
+  if (effortEnvHit) spec.effortEnv = [effortEnvHit];
+  const MODEL_KEYS = ['model', 'defaultModel', 'default_model'];
+  const EFFORT_KEYS = ['effort', 'defaultEffort', 'thinking', 'defaultThinkingLevel'];
+  const candidates = [
+    '.' + id + '.conf.yml', '.' + id + '.conf.yaml', '.' + id + '.json',
+    path.join('.' + id, 'settings.json'), path.join('.' + id, 'config.json'),
+    path.join('.config', id, 'config.json'), path.join('.config', id, 'config.jsonc'),
+    path.join('.config', id, 'settings.json'),
+  ];
+  if (home) for (const rel of candidates) {
+    const file = path.join(home, rel);
+    try { if (!fs.statSync(file).isFile()) continue; } catch { continue; }
+    let modelKey = '', effortKey = '';
+    for (const k of MODEL_KEYS) { try { if (readProfileKey(file, k)) { modelKey = k; break; } } catch { /* try next key */ } }
+    for (const k of EFFORT_KEYS) { try { if (readProfileKey(file, k)) { effortKey = k; break; } } catch { /* try next key */ } }
+    if (modelKey || effortKey) { spec.config = [{ file: '~/' + rel.split(path.sep).join('/'), modelKey: modelKey || undefined, effortKey: effortKey || undefined }]; break; }
+  }
+  return (spec.env || spec.effortEnv || spec.config) ? spec : null;
 }
 
 export function locateCli(id, env = process.env, explicit) {
@@ -78,6 +107,9 @@ export async function adaptAgent({ id, cli, env = process.env, live = true, comm
     adaptedAt: new Date().toISOString(),
     adaptedFrom: { cli: located.source || located.bin, version, prefixArgs: prefixArgs.length ? prefixArgs : undefined },
   };
+  const detection = discoverModelDetection(id, { env });
+  if (detection) profile.modelDetection = detection;
+  report.modelDetection = detection || null;
   report.profile = profile;
 
   const profileFile = path.join(profilesDir(env), id + '.json');
