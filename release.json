@@ -2,7 +2,7 @@
   "schema": 2,
   "coreVersion": "1.8.0",
   "files": {
-    "adapt-lib.mjs": "6c61b75584027e5d27cab0bab1930e2dbb6cdf50966d5fc9249f805dda788096",
+    "adapt-lib.mjs": "e3531e01c440531ae80ee803f6731207e58f0833428f8efe180edff2e8d70f07",
     "agent-auth-prompt.txt": "18fa9c01972cd99a2fe2b1b74a440b34921a051ba6c0d54daf2f5bf1096457b0",
     "agent.mjs": "e75eb20ebe560072f67d9e7803467eba4114fb23716b04f82147aebb17a12555",
     "checkpoint.mjs": "246de59db9a7aac48b12eea1554ff281eaf9dd897e620ecf73d954f39b3cf94a",
@@ -48,7 +48,7 @@
     "scripts/adapt.mjs": "cf2861341b13f08e5d3a17507b239d9d799fd093b722864abc3389d18d1aef7b",
     "scripts/agent-auth-prompt.txt": "18fa9c01972cd99a2fe2b1b74a440b34921a051ba6c0d54daf2f5bf1096457b0",
     "scripts/agent.mjs": "e75eb20ebe560072f67d9e7803467eba4114fb23716b04f82147aebb17a12555",
-    "scripts/core/adapt-lib.mjs": "6c61b75584027e5d27cab0bab1930e2dbb6cdf50966d5fc9249f805dda788096",
+    "scripts/core/adapt-lib.mjs": "e3531e01c440531ae80ee803f6731207e58f0833428f8efe180edff2e8d70f07",
     "scripts/core/agent-auth-prompt.txt": "18fa9c01972cd99a2fe2b1b74a440b34921a051ba6c0d54daf2f5bf1096457b0",
     "scripts/core/agent.mjs": "e75eb20ebe560072f67d9e7803467eba4114fb23716b04f82147aebb17a12555",
     "scripts/core/checkpoint.mjs": "246de59db9a7aac48b12eea1554ff281eaf9dd897e620ecf73d954f39b3cf94a",

@@ -46,7 +46,7 @@ test('a single-block request returns inline by default', () => {
     assert.equal(r.status, 0, r.stderr);
     assert.match(r.stdout, /"mode":"inline"/);
     assert.doesNotMatch(r.stdout, /spawned headless/);
-  } finally { fs.rmSync(s.ws, { recursive: true, force: true }); }
+  } finally { for (let i = 0; i < 5; i++) { try { fs.rmSync(s.ws, { recursive: true, force: true }); break; } catch { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 400); } } }
 });
 
 test('ORCH_FORCE_EXECUTE bypasses the inline gate and actually spawns a unit', () => {
@@ -63,7 +63,7 @@ test('ORCH_FORCE_EXECUTE bypasses the inline gate and actually spawns a unit', (
     assert.ok(m, 'engine must report its runId');
     const sum = JSON.parse(fs.readFileSync(path.join(s.ws, 'temp', 'orchestrator', 'runs', m[1], 'summary.json'), 'utf8'));
     assert.equal(sum.success, true);
-  } finally { fs.rmSync(s.ws, { recursive: true, force: true }); }
+  } finally { for (let i = 0; i < 5; i++) { try { fs.rmSync(s.ws, { recursive: true, force: true }); break; } catch { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 400); } } }
 });
 
 test('the maintenance lock still blocks a forced invocation', () => {
@@ -75,5 +75,5 @@ test('the maintenance lock still blocks a forced invocation', () => {
     assert.equal(r.status, 0, r.stderr);
     assert.match(r.stdout, /open-tui-orchestrator正在维护更新，本轮跳过orchestrator直接开始执行/);
     assert.doesNotMatch(r.stdout, /spawned headless/);
-  } finally { fs.rmSync(s.ws, { recursive: true, force: true }); }
+  } finally { for (let i = 0; i < 5; i++) { try { fs.rmSync(s.ws, { recursive: true, force: true }); break; } catch { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 400); } } }
 });
