@@ -23,7 +23,7 @@ open-tui-orchestrator 面向复杂、较长、包含多个可独立推进部分�
 
 Windows Terminal 是默认承载。窗口沿用发起对话的工作目录，并以失焦、脱离父进程的方式启动，尽量不抢占正在使用的窗口。启动脚本、结果、锁、拆解缓存和恢复账本统一放在发起工作区的 `temp/orchestrator`；宿主 Agent 自己的配置、会话和凭据仍由宿主管理。PowerShell 只承担 Windows 生命周期、编码和进程树管理辅助，窗口承载和 Agent 适配优先走 Node.js 与 Windows Terminal。
 
-Codex、pi、opencode、Kimi Code 和固定版本 OpenClaw 适配器（把不同宿主 CLI 的参数、输出和关闭方式转换成统一协议）已经接通。宿主由 `--agent`/`ORCH_AGENT`、宿主环境标记或 Windows 祖先进程链自动识别——哪个 agent 发起，窗口就用哪个 agent 的 CLI，且窗口继承发起窗当前使用的 model 与 thinking effort（显式 `ORCH_MODEL`/`ORCH_EFFORT` 优先；否则按宿主检测——Codex rollout、Kimi Code 会话 wire 日志、pi settings、opencode 配置——最后回退到 CLI 自身配置）。未知 Agent、未验证的 CLI 或缺失的可执行文件会直接给出诊断，不会自动安装，也不会回退到另一个 Agent。已经授权的执行上下文在 TUI 窗启动后直接执行，不插入额外人工确认；编排器只继承调用方已有权限，不扩大权限范围。
+Codex、pi、opencode、Kimi Code、Claude Code 和固定版本 OpenClaw 适配器（把不同宿主 CLI 的参数、输出和关闭方式转换成统一协议）已经接通。宿主由 `--agent`/`ORCH_AGENT`、宿主环境标记或 Windows 祖先进程链自动识别——哪个 agent 发起，窗口就用哪个 agent 的 CLI，且窗口继承发起窗当前使用的 model 与 thinking effort（显式 `ORCH_MODEL`/`ORCH_EFFORT` 优先；否则按宿主检测——Codex rollout、Kimi Code 会话 wire 日志、pi settings、opencode 与 Claude 配置，画像 agent 按其 `modelDetection` 规格——最后回退到 CLI 自身配置）。未知 Agent、未验证的 CLI 或缺失的可执行文件会直接给出诊断，不会自动安装，也不会回退到另一个 Agent。已经授权的执行上下文在 TUI 窗启动后直接执行，不插入额外人工确认；编排器只继承调用方已有权限，不扩大权限范围。
 
 ## 什么时候适合使用
 
@@ -38,6 +38,7 @@ Codex、pi、opencode、Kimi Code 和固定版本 OpenClaw 适配器（把不同
 ~~~powershell
 node cli.mjs --agent codex --doctor
 node cli.mjs --agent pi --doctor
+node cli.mjs --agent claude --doctor
 node cli.mjs --agent openclaw --doctor
 node cli.mjs --agent codex --workspace 'D:\your-project' --plan '修复项目81登录页，优化项目82购物车'
 node cli.mjs --agent codex --workspace 'D:\your-project' --run-windows '修复项目81登录页，优化项目82购物车'
@@ -120,7 +121,7 @@ node cli.mjs --agent codex --workspace 'D:\your-project' --run-windows '修复�
 
 ### 10. 以适配器隔离不同 Agent
 
-通用入口通过 `--agent` 或 `ORCH_AGENT` 选择宿主；两者都缺省时，先按宿主环境标记（`CODEX_THREAD_ID`/`CODEX_SESSION_ID`），再按 Windows 祖先进程链（kimi.exe / codex.exe / pi-coding-agent / opencode / openclaw，就近命中）自动识别发起方。Codex、pi、opencode、Kimi Code 和固定版本 OpenClaw 各自实现参数拼接、会话/结果读取、完成判定和关闭流程；通用调度器只依赖统一协议。新 Agent 必须同时通过 CLI 发现、规划、交互启动、输出解析、完成和清理验证，不能只添加一个命令名。
+通用入口通过 `--agent` 或 `ORCH_AGENT` 选择宿主；两者都缺省时，先按宿主环境标记（`CODEX_THREAD_ID`/`CODEX_SESSION_ID`），再按 Windows 祖先进程链（kimi.exe / codex.exe / claude.exe / pi-coding-agent / opencode / openclaw，就近命中）自动识别发起方。Codex、pi、opencode、Kimi Code、Claude Code 和固定版本 OpenClaw 各自实现参数拼接、会话/结果读取、完成判定和关闭流程；通用调度器只依赖统一协议。新 Agent 必须同时通过 CLI 发现、规划、交互启动、输出解析、完成和清理验证，不能只添加一个命令名。
 
 ### 11. 弱网和无二次确认执行
 
@@ -142,6 +143,9 @@ Codex 规划和窗口沿用现有 HTTPS Responses 配置，避免先等待 WebSo
 - [OpenClaw 执行与隔离说明](docs/openclaw-adapter.md)
 - [Kimi Code 适配器](docs/kimi-adapter.md)
 - [opencode 适配器](docs/opencode-adapter.md)
+- [Claude Code 适配器](docs/claude-adapter.md)
+- [新 agent CLI 自动适配（print-class 画像）](docs/adapt.md)
+- [Kimi Code 接入：看板流 → 原生 TodoList](docs/kimi-integration.md)
 - [失焦窗口验证](docs/inactive-windows.md)
 - [异常中断后自动恢复](docs/auto-recovery.md)
 - [维护锁](docs/maintenance-lock.md)
@@ -153,9 +157,10 @@ Codex CLI、pi CLI、opencode CLI、Kimi Code CLI、Claude Code CLI 和 OpenClaw
 ~~~powershell
 node cli.mjs --agent codex --doctor
 node cli.mjs --agent pi --doctor
+node cli.mjs --agent claude --doctor
 node cli.mjs --agent openclaw --doctor
 ~~~
 
-当前通用核心为 1.8.0，离线回归为 241/241 通过；覆盖无窗 headless 派发默认（`--mode window` 保留可见弹窗；launcher/身份/租约/恢复契约同构，隐藏载具不抢焦点）、执行看板（块与任务状态实时 `[board]` 行、run `events.jsonl`、只读 `--watch <runId>` 流式视图含 `--jsonl`、`--status` 活动 run 摘要）、任务不丢失、多块并行容量调度、依赖波次、同项目任务按资源键精细化拆分、全局容量租约、Windows Terminal 启动（同步拉起，弹窗可靠且不抢发起窗焦点）、失焦启动回归、进程身份、断点恢复、恢复账本加固（launcherFiles 工作区包容、验收契约哈希绑定、注册表锁老化回收）、守护进程驱动的控制器丢失自动恢复（test/guardian-live-result.json）与手动 --resume-run 收编存活窗口恢复（test/recovery-live-result.json）、发起方进程链自动识别（kimi/codex/claude/pi/opencode/openclaw）、维护锁、当前核心安全审计及修复（docs/security-audit-2026-09-09.md）、弱网配置、SDK 诊断、宿主 CLI 探测超时重试与逐候选拒绝诊断、恢复账本校验覆盖盘符根工作区和干净发行副本。测试环境要求：离线套件假定发起 agent 的 CLI（默认 `codex`）可在 PATH 解析（Windows 下前置 codex vendor bin，即回归环境约定）；缺失时依赖 agent 解析的测试文件按设计快速失败（fail-closed），其中两个运行期依赖 CLI 的用例已标注 `{skip}`。真实模型额度、不同 Windows 用户安装、长时间断网恢复和每个未来 Agent 的现场兼容性也仍需单独验收。
+当前通用核心为 1.8.0，离线回归为 252/252 通过；覆盖无窗 headless 派发默认（`--mode window` 保留可见弹窗；launcher/身份/租约/恢复契约同构，隐藏载具不抢焦点）、执行看板（块与任务状态实时 `[board]` 行、run `events.jsonl`、只读 `--watch <runId>` 流式视图含 `--jsonl`、`--status` 活动 run 摘要）、任务不丢失、多块并行容量调度、依赖波次、同项目任务按资源键精细化拆分、全局容量租约、Windows Terminal 启动（同步拉起，弹窗可靠且不抢发起窗焦点）、失焦启动回归、进程身份、断点恢复、恢复账本加固（launcherFiles 工作区包容、验收契约哈希绑定、注册表锁老化回收）、守护进程驱动的控制器丢失自动恢复（test/guardian-live-result.json）与手动 --resume-run 收编存活窗口恢复（test/recovery-live-result.json）、发起方进程链自动识别（kimi/codex/claude/pi/opencode/openclaw）、`orch` 强制编排入口、print-class 数据驱动画像适配管线（表面探测→画像→解析自检→活验守门→重封→自动提交，失败一律回滚；画像 agent 按 `modelDetection` 跟随发起窗 model/effort）、维护锁、当前核心安全审计及修复（docs/security-audit-2026-09-09.md）、弱网配置、SDK 诊断、宿主 CLI 探测超时重试与逐候选拒绝诊断、恢复账本校验覆盖盘符根工作区和干净发行副本。测试环境要求：离线套件假定发起 agent 的 CLI（默认 `codex`）可在 PATH 解析（Windows 下前置 codex vendor bin，即回归环境约定）；缺失时依赖 agent 解析的测试文件按设计快速失败（fail-closed），其中两个运行期依赖 CLI 的用例已标注 `{skip}`。真实模型额度、不同 Windows 用户安装、长时间断网恢复和每个未来 Agent 的现场兼容性也仍需单独验收。
 
 未知宿主、无可执行 CLI 或显式路径无效时，命令会直接失败并给出原因；不会自动安装、猜测替代路径或换用其它 Agent。
