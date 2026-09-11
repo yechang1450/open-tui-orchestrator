@@ -57,11 +57,12 @@ export async function adaptAgent({ id, cli, env = process.env, live = true, comm
   const help = probeCli(located.bin, [...prefixArgs, '--help'], { env });
   if (help.status !== 0) { report.reason = '--help probe failed: ' + (help.error || 'exit ' + help.status); return report; }
   const helpText = help.out;
-  const promptFlag = PROMPT_FLAG_CANDIDATES.find((f) => new RegExp('(^|[\\s,])' + f.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&') + '([\\s,]|$)').test(helpText));
+  const flagBoundary = (f) => new RegExp('(^|[\\s,|\\[\\]()])' + f.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&') + '([\\s,|\\[\\]()]|$)', 'm');
+  const promptFlag = PROMPT_FLAG_CANDIDATES.find((f) => flagBoundary(f).test(helpText));
   if (!promptFlag) { report.reason = 'no one-shot prompt flag found (candidates: ' + PROMPT_FLAG_CANDIDATES.join(' ') + '); not a print-class CLI — needs a manual adapter'; return report; }
-  const approve = APPROVE_CANDIDATES.filter((f) => helpText.includes(f));
-  const model = helpText.includes('--model') ? ['--model'] : null;
-  const effort = helpText.includes('--effort') ? ['--effort'] : null;
+  const approve = APPROVE_CANDIDATES.filter((f) => flagBoundary(f).test(helpText));
+  const model = flagBoundary('--model').test(helpText) ? ['--model'] : null;
+  const effort = flagBoundary('--effort').test(helpText) ? ['--effort'] : null;
   const probeToken = 'ADAPTOK-' + Math.random().toString(36).slice(2, 10);
   const profile = {
     schema: 1,

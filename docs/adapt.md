@@ -48,6 +48,19 @@ ORCH_AUTO_ADAPT=1 node <cli> --agent <未适配的 id> --run-windows "<请求>"
 表面探测 + 解析自检 + 活体验证三步全过即"适配成功"并自动提交。**块级真实执行的验收仍建议人工复测**
 （用 `orch` 起一两轮真实任务确认），这也是设计上的分工：自动管线保证"能接上"，人工复测保证"跑得好"。
 
+## 实弹记录（2026-09-11）
+
+- **假 CLI（离线全链）**：`test/print-profile.test.mjs` 六条全绿——探测生成、解析/argv、PowerShell
+  启动器回环（checkpoint 协议）、结果等待、`orch` 端到端 success、内置 agent 跳过。
+- **真 CLI：aider 0.86.2**（本机安装、未被适配过）：
+  - 表面探测 ✓（`--version`=0.86.2；`--message`/`--yes-always`/`--model` 词边界匹配）；
+  - 画像生成 ✓ + 解析自检 ✓；
+  - **活体验证两次实操抓到真问题**：①首轮把 `--auto-commits` 子串误配成 `--auto`，aider 报
+    `ambiguous option`——活验守门当场拒绝并回滚（零提交）；修复为词边界匹配后 ②aider 因**未配置
+    登录**弹出 OpenRouter OAuth 等待人工授权——活验按时超时、回滚、零提交（符合"未授权 CLI
+    fail-closed"的边界设计）。该机无 aider 配置也无任何 API key 环境变量，登录完成后重跑
+    `node scripts/adapt.mjs --agent aider` 即可自动完成最后一跳（活验→重封→提交）。
+
 ## 边界（明确不支持）
 
 - **纯交互 TUI 且无一次性提示词旗标的 CLI**：探测会明确报告 `not a print-class CLI`，需要手写专用适配器
