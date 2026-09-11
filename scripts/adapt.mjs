@@ -5,7 +5,7 @@
 // 任何一步失败都回滚画像，仓库保持原状；维护锁持有期间拒绝写入（--force 例外）。
 //
 //   node adapt.mjs [--agent <id>] [--cli <path>] [--profiles-dir <dir>]
-//                  [--no-live] [--no-commit] [--suite] [--force] [--json]
+//                  [--no-live] [--no-commit] [--suite] [--smoke] [--force] [--json]
 import { adaptAgent } from './core/adapt-lib.mjs';
 
 const args = process.argv.slice(2);
@@ -19,6 +19,7 @@ const report = await adaptAgent({
   live: !has('--no-live'),
   commit: !has('--no-commit'),
   suite: has('--suite'),
+  smoke: has('--smoke'),
   force: has('--force'),
 });
 
@@ -27,6 +28,7 @@ else {
   console.log('[adapt] agent=' + (report.id || '?') + ' cli=' + (report.cli || '?') + ' version=' + (report.version || '?'));
   if (report.profile) console.log('[adapt] profile: prompt=' + report.profile.args.prompt.join(' ') + ' approve=[' + report.profile.args.approve.join(' ') + '] model=' + (report.profile.args.model ? report.profile.args.model.join(' ') : '-') + ' effort=' + (report.profile.args.effort ? report.profile.args.effort.join(' ') : '-'));
   if (report.live) console.log('[adapt] live: ' + JSON.stringify(report.live).slice(0, 300));
+  if (report.smoke) console.log('[adapt] block smoke: ' + JSON.stringify(report.smoke).slice(0, 200));
   if (report.suite) console.log('[adapt] suite: exit=' + report.suite.exit);
   console.log('[adapt] committed=' + report.committed + ' passed=' + report.passed + (report.reason ? ' reason=' + report.reason : ''));
 }

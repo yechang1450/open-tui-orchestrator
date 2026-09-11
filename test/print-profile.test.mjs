@@ -116,6 +116,18 @@ test('a profiled agent runs end-to-end through orch (forced unit, acceptance ver
   }
 });
 
+test('adapt --smoke runs a real block-level orchestration with the profiled agent', () => {
+  const s = setup();
+  try {
+    const r = spawnSync(process.execPath, [path.join(root, 'scripts', 'adapt.mjs'), '--agent', 'fakeprint', '--cli', s.fake, '--profiles-dir', s.profiles, '--no-commit', '--smoke', '--json'], { env: {...process.env}, encoding: 'utf8', windowsHide: true, timeout: 300000 });
+    assert.equal(r.status, 0, r.stderr || r.stdout);
+    const report = JSON.parse(r.stdout);
+    assert.equal(report.passed, true, JSON.stringify(report).slice(0, 400));
+    assert.equal(report.smoke.success, true);
+    assert.equal(report.smoke.exit, 0);
+  } finally { fs.rmSync(s.dir, {recursive: true, force: true}); }
+});
+
 test('built-in agents are reported as already adapted and nothing is written', async () => {
   const report = await adaptAgent({id: 'kimi', live: false, commit: false});
   assert.equal(report.passed, true);

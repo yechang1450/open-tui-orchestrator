@@ -7,7 +7,7 @@ open-tui-orchestrator 对"一次性提示词 → stdout 终文本 → 自行退�
 
 ```
 node scripts/adapt.mjs [--agent <id>] [--cli <path>] [--profiles-dir <dir>]
-                       [--no-live] [--no-commit] [--suite] [--force] [--json]
+                       [--no-live] [--no-commit] [--suite] [--smoke] [--force] [--json]
 ```
 
 流程（任何一步失败都**回滚画像**，仓库保持原状）：
@@ -22,8 +22,29 @@ node scripts/adapt.mjs [--agent <id>] [--cli <path>] [--profiles-dir <dir>]
 4. **解析自检**：用画像走一遍 `resolveProfileHost`，版本必须与探测一致。
 5. **活体验证（默认开）**：真实调用一次该 CLI，要求它只回一个随机探活令牌
    （`ADAPTOK-xxxxxxxx`）；未回、超时或非零退出即失败回滚。`--no-live` 关闭（不推荐）。
-6. **重封 + 自动提交（默认开）**：`release-integrity --seal` 后，仅提交画像文件与 `release.json`
+6. **块级真实验收（可选 `--smoke`）**：用画像 agent 走一遍真实的 `orch` 单块执行
+   （checkpoint 协议 + 验收契约 + 结果文件），把"能接上"验证到"跑得通"。
+   ⚠️ 会消耗该 agent 的真实额度，且要求它已登录/有模型配置。
+7. **重封 + 自动提交（默认开）**：`release-integrity --seal` 后，仅提交画像文件与 `release.json`
    （显式路径，绝不用 `git add -A`）。`--no-commit` 关闭。
+
+## 对新 agent 的完整度对照（拿"完整功能"逐项核对）
+
+| 能力 | 画像 agent 是否自动具备 |
+|---|---|
+| 双模式派发（headless 默认 / `--mode window`） | ✅ 引擎层，与 agent 无关 |
+| 执行看板（`[board]`/events.jsonl/`--watch`/`--status`） | ✅ 引擎层 |
+| 全局租约/波次/容量/准入/错峰、恢复/守护/`--resume-run` | ✅ 引擎层（启动器契约同构） |
+| `orch` 强制入口、维护锁、验收契约、checkpoint 协议 | ✅ 引擎层 |
+| CLI 解析 / argv（批准/模型/提示词旗标）/ 启动器 / 等待 / 规划器 | ✅ 画像路径全量覆盖 |
+| 宿主识别（谁调用我） | ✅ 进程名自动（`^<id>(\.exe)?$`）；⚠️ env 标记自动探测为空，可手填 `envMarkers` |
+| **model/effort 跟随发起窗** | ❌ **缺口**：画像 agent 暂无"读发起窗当前模型"的探测器→单元用该 CLI 自身默认；用 `ORCH_MODEL/ORCH_EFFORT` 显式补齐，或后续为该 CLI 手写探测器（参考 host-model.mjs） |
+| 活体验收深度 | 默认=令牌探活；`--smoke` = 块级真实执行验收 |
+| 纯交互 TUI（无一次性提示词旗标） | ❌ 硬边界：明确拒绝，需手写专用适配器 |
+
+结论：**print-class 的 agent 经自动适配后继承引擎的全部横切功能与适配器全链路**；
+已知差异只有 model/effort 的自动继承（可显式补齐）与非 print-class 的手写边界。
+`ORCH_AUTO_ADAPT=1` 自动模式只做"令牌探活"级验证（不跑 `--smoke`，避免未经同意消耗额度）。
 
 ## 自动模式（环境检测即适配）
 

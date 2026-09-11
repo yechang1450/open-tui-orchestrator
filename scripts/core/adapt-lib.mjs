@@ -37,8 +37,8 @@ export function locateCli(id, env = process.env, explicit) {
   return { missing: id };
 }
 
-export async function adaptAgent({ id, cli, env = process.env, live = true, commit = true, suite = false, force = false, writeProfile = true } = {}) {
-  const report = { id, cli: null, version: null, profile: null, live: null, committed: false, passed: false };
+export async function adaptAgent({ id, cli, env = process.env, live = true, commit = true, suite = false, force = false, writeProfile = true, smoke = false } = {}) {
+  const report = { id, cli: null, version: null, profile: null, live: null, smoke: null, committed: false, passed: false };
   if (!id) { report.reason = 'no agent id (pass --agent or set ORCH_AGENT)'; return report; }
   if (BUILTIN.has(id)) { report.reason = id + ' already has a dedicated adapter; nothing to adapt'; report.passed = true; report.skipped = 'builtin'; return report; }
   const lock = readMaintenanceLock(env);
@@ -104,6 +104,30 @@ export async function adaptAgent({ id, cli, env = process.env, live = true, comm
     report.live = { exit: res.status, ms: Date.now() - t0, answered, tail: out.trim().slice(-400) };
     if (!answered) { report.reason = 'live probe did not return the token (exit=' + res.status + ')'; rollback(); return report; }
   } else report.live = { skipped: 'no-live' };
+
+  if (smoke) {
+    // 块级真实验收：用画像 agent 走一遍真实的 orch 单块执行（checkpoint 协议 + 验收契约），
+    // 把"能接上"验证到"跑得通"。消耗该 agent 的真实额度，需其已登录。
+    const os = await import('node:os');
+    const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'orch-adapt-smoke-'));
+    try {
+      fs.writeFileSync(path.join(ws, 'acceptance.json'), JSON.stringify({ T001: [{ type: 'json', path: 'receipt.json', equals: { ok: true } }] }));
+      const smokeEnv = {
+        ...env, ORCH_AGENT: id, ORCH_CLI: located.source || located.bin, ORCH_AGENT_PROFILES_DIR: profilesDir(env),
+        ORCH_ACCEPTANCE_FILE: path.join(ws, 'acceptance.json'), ORCH_MAINTENANCE_LOCK: path.join(ws, 'no-lock.json'),
+        ORCH_MAX_POLL_MS: '300000', WORKSPACE_DIR: ws, ORCH_STATE_DIR: path.join(ws, 'temp', 'orchestrator'),
+      };
+      delete smokeEnv.NODE_TEST_CONTEXT;
+      const t0 = Date.now();
+      const res = run(process.execPath, [path.join(REPO, 'orch.mjs'), '--run-id', 'adapt-smoke', '创建 receipt.json 内容为 {"ok":true} 并读回核验'], { env: smokeEnv, cwd: ws, timeout: 420000 });
+      let success = false;
+      try { success = JSON.parse(fs.readFileSync(path.join(ws, 'temp', 'orchestrator', 'runs', 'adapt-smoke', 'summary.json'), 'utf8')).success === true; } catch { /* no summary */ }
+      report.smoke = { exit: res.status, ms: Date.now() - t0, success };
+      if (!success) { report.reason = 'block-level smoke failed (exit=' + res.status + '); the CLI may need login/quota — rerun after configuring it'; rollback(); return report; }
+    } finally {
+      for (let i = 0; i < 5; i++) { try { fs.rmSync(ws, { recursive: true, force: true }); break; } catch { spawnSync('cmd', ['/c', 'rmdir', '/s', '/q', ws], { windowsHide: true }); } }
+    }
+  }
 
   if (suite) {
     const s = run(process.execPath, ['--test', 'test/print-profile.test.mjs'], { cwd: REPO, env: { ...env, ORCH_AGENT: 'codex', ORCH_MAINTENANCE_LOCK: path.join(REPO, 'temp', 'adapt-suite-lock-none.json') }, timeout: 300000 });
