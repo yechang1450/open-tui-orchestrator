@@ -102,7 +102,8 @@ export function cliCandidates(env = process.env, platform = process.platform, {w
       path.join(modules, 'codex-win32-x64', 'vendor'),
       path.join(modules, 'codex', 'node_modules', '@openai', 'codex-win32-arm64', 'vendor')]) {
       for (const triple of ['x86_64-pc-windows-msvc', 'aarch64-pc-windows-msvc']) {
-        found.push(path.join(base, triple, 'codex', 'codex.exe'));
+        // npm 包把原生 exe 放在 vendor/<triple>/bin/；历史版本曾放在 vendor/<triple>/codex/。
+        for (const sub of ['bin', 'codex']) found.push(path.join(base, triple, sub, 'codex.exe'));
       }
     }
   }
