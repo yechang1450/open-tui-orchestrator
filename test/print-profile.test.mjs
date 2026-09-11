@@ -7,6 +7,8 @@ import {fileURLToPath} from 'node:url';
 import {resolveProfileHost,profileArgs} from '../scripts/core/print-profile.mjs';
 import {writeProfileLauncher,waitProfileResult} from '../scripts/core/print-runtime.mjs';
 import {adaptAgent} from '../scripts/core/adapt-lib.mjs';
+import {discoverModelDetection} from '../scripts/core/adapt-lib.mjs';
+import {detectHostModelEffort} from '../scripts/core/host-model.mjs';
 const root = fileURLToPath(new URL('..', import.meta.url));
 const family = path.join(root, 'temp');
 
@@ -125,6 +127,35 @@ test('adapt --smoke runs a real block-level orchestration with the profiled agen
     assert.equal(report.passed, true, JSON.stringify(report).slice(0, 400));
     assert.equal(report.smoke.success, true);
     assert.equal(report.smoke.exit, 0);
+  } finally { fs.rmSync(s.dir, {recursive: true, force: true}); }
+});
+
+test('model/effort detection follows the initiating agent config for profiled agents', () => {
+  const s = setup();
+  try {
+    // ① 发现函数：临时 home 里的 aider 风格 yml
+    const home = fs.mkdtempSync(path.join(family, 'profile-home-'));
+    fs.writeFileSync(path.join(home, '.fakeprint.conf.yml'), 'model: fake/model-x\neffort: high\n');
+    const spec = discoverModelDetection('fakeprint', {home, env: {...process.env, FAKEPRINT_MODEL: 'fake/env-model'}});
+    assert.deepEqual(spec.env, ['FAKEPRINT_MODEL']);
+    assert.equal(spec.config[0].modelKey, 'model');
+    assert.equal(spec.config[0].effortKey, 'effort');
+
+    // ② 引擎消费：画像带 modelDetection 时 inherits host model/effort（env 优先，其次配置文件）
+    fs.mkdirSync(s.profiles, {recursive: true});
+    fs.writeFileSync(path.join(s.profiles, 'fakeprint2.json'), JSON.stringify({
+      schema: 1, id: 'fakeprint2', label: 'fakeprint2', bin: ['fakeprint2.exe'], helpFlags: ['--message'],
+      versionPattern: '(\\d+\\.\\d+\\.\\d+)', args: {approve: [], extra: [], model: ['--model'], effort: null, prompt: ['--message']},
+      modelDetection: {env: ['FAKEPRINT2_MODEL'], config: [{file: '~/.fakeprint.conf.yml', modelKey: 'model', effortKey: 'effort'}]},
+    }));
+    const env = {...process.env, ORCH_AGENT_PROFILES_DIR: s.profiles, USERPROFILE: home};
+    const fromEnv = detectHostModelEffort('fakeprint2', {env: {...env, FAKEPRINT2_MODEL: 'fake/env-model'}});
+    assert.equal(fromEnv.model, 'fake/env-model');
+    const fromFile = detectHostModelEffort('fakeprint2', {env});
+    assert.equal(fromFile.model, 'fake/model-x');
+    assert.equal(fromFile.effort, 'high');
+    const none = detectHostModelEffort('fakeprint3', {env});
+    assert.equal(none, null, 'unknown profile without detection stays null (CLI defaults apply)');
   } finally { fs.rmSync(s.dir, {recursive: true, force: true}); }
 });
 

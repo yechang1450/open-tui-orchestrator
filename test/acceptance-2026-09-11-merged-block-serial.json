@@ -1,0 +1,166 @@
+{
+  "schema": 1,
+  "date": "2026-09-11",
+  "coreVersion": "1.8.0",
+  "note": "合并块串行实跑证据：kimi 宿主的 2 块×3 任务，每块单次 attempt 内按序执行（checkpoint 时序）+ 引擎 success；headless 与 window 双模式同日各一次",
+  "runs": [
+    {
+      "runId": "kimi-real-headless2",
+      "agent": "kimi",
+      "spawnMode": "headless",
+      "success": true,
+      "workspace": "D:\\",
+      "startedAt": "2026-09-11T01:50:42.173Z",
+      "finishedAt": "2026-09-11T01:53:53.340Z",
+      "blocks": [
+        {
+          "key": "B1",
+          "taskIds": [
+            "T001",
+            "T002",
+            "T003"
+          ],
+          "attempt": {
+            "number": 1,
+            "attemptsTotal": 1,
+            "status": "verified",
+            "exitCode": 0
+          },
+          "checkpoints": [
+            {
+              "taskId": "T001",
+              "state": "completed",
+              "startedAt": "2026-09-11T01:52:02.028Z",
+              "endedAt": "2026-09-11T01:52:10.193Z"
+            },
+            {
+              "taskId": "T002",
+              "state": "completed",
+              "startedAt": "2026-09-11T01:52:11.650Z",
+              "endedAt": "2026-09-11T01:52:21.275Z"
+            },
+            {
+              "taskId": "T003",
+              "state": "completed",
+              "startedAt": "2026-09-11T01:52:23.213Z",
+              "endedAt": "2026-09-11T01:52:26.225Z"
+            }
+          ]
+        },
+        {
+          "key": "B2",
+          "taskIds": [
+            "T004",
+            "T005",
+            "T006"
+          ],
+          "attempt": {
+            "number": 1,
+            "attemptsTotal": 1,
+            "status": "verified",
+            "exitCode": 0
+          },
+          "checkpoints": [
+            {
+              "taskId": "T004",
+              "state": "completed",
+              "startedAt": "2026-09-11T01:53:09.308Z",
+              "endedAt": "2026-09-11T01:53:19.653Z"
+            },
+            {
+              "taskId": "T005",
+              "state": "completed",
+              "startedAt": "2026-09-11T01:53:27.484Z",
+              "endedAt": "2026-09-11T01:53:34.779Z"
+            },
+            {
+              "taskId": "T006",
+              "state": "completed",
+              "startedAt": "2026-09-11T01:53:37.440Z",
+              "endedAt": "2026-09-11T01:53:41.204Z"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "runId": "kimi-real-window",
+      "agent": "kimi",
+      "spawnMode": "window",
+      "success": true,
+      "workspace": "D:\\",
+      "startedAt": "2026-09-11T01:54:01.608Z",
+      "finishedAt": "2026-09-11T02:00:10.637Z",
+      "blocks": [
+        {
+          "key": "B1",
+          "taskIds": [
+            "T001",
+            "T002",
+            "T003"
+          ],
+          "attempt": {
+            "number": 1,
+            "attemptsTotal": 1,
+            "status": "verified",
+            "exitCode": 0
+          },
+          "checkpoints": [
+            {
+              "taskId": "T001",
+              "state": "completed",
+              "startedAt": "2026-09-11T01:57:16.579Z",
+              "endedAt": "2026-09-11T01:57:26.935Z"
+            },
+            {
+              "taskId": "T002",
+              "state": "completed",
+              "startedAt": "2026-09-11T01:57:35.276Z",
+              "endedAt": "2026-09-11T01:57:44.844Z"
+            },
+            {
+              "taskId": "T003",
+              "state": "completed",
+              "startedAt": "2026-09-11T01:57:47.094Z",
+              "endedAt": "2026-09-11T01:57:51.311Z"
+            }
+          ]
+        },
+        {
+          "key": "B2",
+          "taskIds": [
+            "T004",
+            "T005",
+            "T006"
+          ],
+          "attempt": {
+            "number": 1,
+            "attemptsTotal": 1,
+            "status": "verified",
+            "exitCode": 0
+          },
+          "checkpoints": [
+            {
+              "taskId": "T004",
+              "state": "completed",
+              "startedAt": "2026-09-11T01:59:13.811Z",
+              "endedAt": "2026-09-11T01:59:29.297Z"
+            },
+            {
+              "taskId": "T005",
+              "state": "completed",
+              "startedAt": "2026-09-11T01:59:29.375Z",
+              "endedAt": "2026-09-11T01:59:48.486Z"
+            },
+            {
+              "taskId": "T006",
+              "state": "completed",
+              "startedAt": "2026-09-11T01:59:48.560Z",
+              "endedAt": "2026-09-11T01:59:59.112Z"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

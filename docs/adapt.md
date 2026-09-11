@@ -38,12 +38,13 @@ node scripts/adapt.mjs [--agent <id>] [--cli <path>] [--profiles-dir <dir>]
 | `orch` 强制入口、维护锁、验收契约、checkpoint 协议 | ✅ 引擎层 |
 | CLI 解析 / argv（批准/模型/提示词旗标）/ 启动器 / 等待 / 规划器 | ✅ 画像路径全量覆盖 |
 | 宿主识别（谁调用我） | ✅ 进程名自动（`^<id>(\.exe)?$`）；⚠️ env 标记自动探测为空，可手填 `envMarkers` |
-| **model/effort 跟随发起窗** | ❌ **缺口**：画像 agent 暂无"读发起窗当前模型"的探测器→单元用该 CLI 自身默认；用 `ORCH_MODEL/ORCH_EFFORT` 显式补齐，或后续为该 CLI 手写探测器（参考 host-model.mjs） |
+| **model/effort 跟随发起窗** | ✅ 引擎按画像的 `modelDetection` 规格继承发起窗 model/effort：adapt 自动精确发现（env `<ID>_MODEL/_DEFAULT_MODEL/_EFFORT/_THINKING` 优先，其次 `~/.<id>.conf.{yml,yaml}`、`~/.<id>.json`、`~/.<id>/{settings,config}.json`、`~/.config/<id>/{config.json,config.jsonc,settings.json}`，键名限 `model/defaultModel/default_model` 与 `effort/defaultEffort/thinking/defaultThinkingLevel`）；缺失即回退该 CLI 自身默认（或显式 `ORCH_MODEL/ORCH_EFFORT`），只读不猜值 |
 | 活体验收深度 | 默认=令牌探活；`--smoke` = 块级真实执行验收 |
 | 纯交互 TUI（无一次性提示词旗标） | ❌ 硬边界：明确拒绝，需手写专用适配器 |
 
 结论：**print-class 的 agent 经自动适配后继承引擎的全部横切功能与适配器全链路**；
-已知差异只有 model/effort 的自动继承（可显式补齐）与非 print-class 的手写边界。
+已知差异只剩非 print-class 的手写边界（model/effort 跟随已由 `modelDetection` 规格覆盖：
+adapt 自动精确发现，引擎端 env 优先/配置回退/缺失回退 CLI 默认，绝不猜值）。
 `ORCH_AUTO_ADAPT=1` 自动模式只做"令牌探活"级验证（不跑 `--smoke`，避免未经同意消耗额度）。
 
 ## 自动模式（环境检测即适配）
@@ -71,8 +72,9 @@ ORCH_AUTO_ADAPT=1 node <cli> --agent <未适配的 id> --run-windows "<请求>"
 
 ## 实弹记录（2026-09-11）
 
-- **假 CLI（离线全链）**：`test/print-profile.test.mjs` 六条全绿——探测生成、解析/argv、PowerShell
-  启动器回环（checkpoint 协议）、结果等待、`orch` 端到端 success、内置 agent 跳过。
+- **假 CLI（离线全链）**：`test/print-profile.test.mjs` 八条全绿——探测生成、解析/argv、PowerShell
+  启动器回环（checkpoint 协议）、结果等待、`orch` 端到端 success、`--smoke` 块级真实验收（假 CLI）、
+  model/effort 跟随（`discoverModelDetection` 发现 + 引擎端 env 优先/配置回退/无规格回退 null）、内置 agent 跳过。
 - **真 CLI：aider 0.86.2**（本机安装、未被适配过）：
   - 表面探测 ✓（`--version`=0.86.2；`--message`/`--yes-always`/`--model` 词边界匹配）；
   - 画像生成 ✓ + 解析自检 ✓；
@@ -97,4 +99,5 @@ node --test test/print-profile.test.mjs
 
 覆盖：假 print-class CLI 的表面探测与画像生成、解析与 argv 形状、启动器 PowerShell 回环
 （引号/中文/checkpoint 协议/结果文件）、结果等待、`orch` 端到端（画像 agent 强制派发 + 验收 verified）、
-内置 agent 跳过。活体记录见 `docs/` 提交历史与本文件更新。
+`--smoke` 块级真实验收、model/effort 探测规格发现与引擎继承（env/配置/缺失三路）、内置 agent 跳过。
+活体记录见 `docs/` 提交历史与本文件更新。
