@@ -43,7 +43,7 @@ node cli.mjs --agent codex --workspace 'D:\your-project' --plan '修复项目81�
 node cli.mjs --agent codex --workspace 'D:\your-project' --run-windows '修复项目81登录页，优化项目82购物车'
 ~~~
 
-`--plan` 只规划不执行；新鲜的 `--run-windows` 只有检测到并行波次才开窗；`--resume-run <id>` 接管中断后的已保存运行；`--verify-run <id>` 只重新验收，不重跑任务；`--status --readonly` 查看窗口、租约与活动 run 看板行；`--watch <id> [--jsonl]` 只读流式查看执行看板；`orch` 命令是强制编排入口——等价于 `--run-windows` 但跳过全部 inline 回退（单块、纯串行、只读定性、自改请求都会照常派发单元），除维护锁外 100% 被调用。发起窗把看板流镜像进 Kimi Code 原生 TodoList / 后台任务的固化套路与字段映射见 `docs/kimi-integration.md`。安装依赖可运行 `npm run setup`，离线回归运行 `npm test`。
+`--plan` 只规划不执行；新鲜的 `--run-windows` 只有检测到并行波次才开窗；`--resume-run <id>` 接管中断后的已保存运行；`--verify-run <id>` 只重新验收，不重跑任务；`--status --readonly` 查看窗口、租约与活动 run 看板行；`--watch <id> [--jsonl]` 只读流式查看执行看板；`orch` 命令是强制编排入口——等价于 `--run-windows` 但跳过全部 inline 回退（单块、纯串行、只读定性、自改请求都会照常派发单元），除维护锁外 100% 被调用。发起窗把看板流镜像进 Kimi Code 原生 TodoList / 后台任务的固化套路与字段映射见 `docs/kimi-integration.md`；未适配的 print-class agent CLI 用 `node scripts/adapt.mjs`（或 `ORCH_AUTO_ADAPT=1` 自动模式）完成探测→画像→活验→重封→自动提交，见 `docs/adapt.md`。安装依赖可运行 `npm run setup`，离线回归运行 `npm test`。
 
 ## 起因：为什么要做这个工具
 

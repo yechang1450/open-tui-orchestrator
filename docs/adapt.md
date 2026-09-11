@@ -1,0 +1,66 @@
+# 自动适配（print-class 画像管线）
+
+open-tui-orchestrator 对"一次性提示词 → stdout 终文本 → 自行退出"形态的 agent CLI（如 kimi/claude/  aider）
+提供数据驱动的通用适配：**一份 JSON 画像**即可接入，不必手写专用适配器。
+
+## 命令
+
+```
+node scripts/adapt.mjs [--agent <id>] [--cli <path>] [--profiles-dir <dir>]
+                       [--no-live] [--no-commit] [--suite] [--force] [--json]
+```
+
+流程（任何一步失败都**回滚画像**，仓库保持原状）：
+
+1. **定位**：`--agent`（缺省用调用方探测结果）→ `--cli`/`ORCH_CLI` → PATH 上的 `<id>.exe`。
+   `.cmd`/shell shim 无法被直接 spawn（Windows 限制），会自动拒绝并提示指向真实可执行文件；
+   `.mjs`/`.cjs` 形态自动以 node + 脚本运行。
+2. **表面探测**：`--version` 取语义化版本；`--help` 里找一次性提示词旗标（候选
+   `-p/--print/--message/-m`）、自动批准旗标（候选 `--yes-always/--dangerously-skip-permissions/
+   --yolo/--auto/--approve/--full-auto/--dangerously-bypass-approvals-and-sandbox`）、`--model`、`--effort`。
+3. **生成画像**：`scripts/core/agent-profiles/<id>.json`（schema 见文件头注释；含 adaptedFrom 审计字段）。
+4. **解析自检**：用画像走一遍 `resolveProfileHost`，版本必须与探测一致。
+5. **活体验证（默认开）**：真实调用一次该 CLI，要求它只回一个随机探活令牌
+   （`ADAPTOK-xxxxxxxx`）；未回、超时或非零退出即失败回滚。`--no-live` 关闭（不推荐）。
+6. **重封 + 自动提交（默认开）**：`release-integrity --seal` 后，仅提交画像文件与 `release.json`
+   （显式路径，绝不用 `git add -A`）。`--no-commit` 关闭。
+
+## 自动模式（环境检测即适配）
+
+```
+ORCH_AUTO_ADAPT=1 node <cli> --agent <未适配的 id> --run-windows "<请求>"
+```
+
+薄壳 wrapper 在加载引擎**之前**检查：检测到未适配 agent 且仓库未上锁 → 直接跑完整适配管线
+（表面+活验+重封+提交）→ 成功则继续本轮调用；失败则 **fail-closed** 报
+`AUTO_ADAPT_FAILED`（不静默降级）。维护锁持有期间跳过适配，由引擎照常返回维护话术。
+
+## 安全护栏
+
+- **维护锁**：锁持有期间拒绝写入（`--force` 例外）；适配自身的写入/重封/提交窗口内也会短暂持锁。
+- **失败回滚**：画像写入后任何一步失败都会恢复原状（含旧画像的备份还原）。
+- **可审计**：画像携带 `adaptedAt/adaptedFrom{cli,version,prefixArgs}`；提交信息标注
+  `[auto-generated]`。
+- **不改核心**：适配产物只有画像 JSON 一笔；引擎代码零改动（除非该 CLI 不属于 print-class）。
+
+## 适配成功的判定
+
+表面探测 + 解析自检 + 活体验证三步全过即"适配成功"并自动提交。**块级真实执行的验收仍建议人工复测**
+（用 `orch` 起一两轮真实任务确认），这也是设计上的分工：自动管线保证"能接上"，人工复测保证"跑得好"。
+
+## 边界（明确不支持）
+
+- **纯交互 TUI 且无一次性提示词旗标的 CLI**：探测会明确报告 `not a print-class CLI`，需要手写专用适配器
+  （参考 kimi/claude 适配器的形态）。
+- 需要**交互式登录/设备码授权**的 CLI：活体验证会因未授权失败（fail-closed），请先在该 CLI 里完成登录。
+- 沙箱/审批语义：画像类 agent 只支持 `danger-full-access`（编排器已归一化授权），要求受限沙箱会被明确拒绝。
+
+## 验证入口
+
+```
+node --test test/print-profile.test.mjs
+```
+
+覆盖：假 print-class CLI 的表面探测与画像生成、解析与 argv 形状、启动器 PowerShell 回环
+（引号/中文/checkpoint 协议/结果文件）、结果等待、`orch` 端到端（画像 agent 强制派发 + 验收 verified）、
+内置 agent 跳过。活体记录见 `docs/` 提交历史与本文件更新。
