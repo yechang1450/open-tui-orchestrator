@@ -61,6 +61,7 @@
  */
 import {nativeArgumentLines} from "./native-argv.mjs";
 import {CORE_VERSION, levelWaves, keysOverlap, summaryComplete,requestTasks,bindClassifiedTasks,ledgerPlan,computeMaxWindows,powershellExe,systemToolExe} from "./contracts.mjs";
+import {effectiveUnitCarrier, ptyAvailability} from "./unit-carrier.mjs";
 // 锚定 SystemRoot 的系统工具：裸名会先按进程 cwd（=任意工作区）解析，防二进制投毒。
 const PS_EXE=powershellExe(),WHERE_EXE=systemToolExe("where.exe");
 import {runWindows,verifyRun} from "./runner.mjs";
@@ -137,6 +138,19 @@ const AGENT = (() => {
 })();
 const AGENT_ERROR = AGENT.error || null;
 function requireHost() { if (AGENT_ERROR) throw AGENT_ERROR; }
+// 单元载体分级：显式 ORCH_UNIT_CARRIER > agent 画像（registry / 调用方单元画像）> stdio。
+function unitCarrier() { return effectiveUnitCarrier(process.env, AGENT.config || {}); }
+// pty 引擎必须在任何单元启动前可解析；缺引擎时给出可操作错误，不让单元静默秒退。
+function assertUnitCarrierReady() {
+  const carrier = unitCarrier();
+  if (carrier !== 'pty') return carrier;
+  const availability = ptyAvailability();
+  if (!availability.ok) {
+    throw new Error('PTY_CARRIER_UNAVAILABLE: @lydell/node-pty not found (tried: ' + availability.tried.join(' | ')
+      + '). Run `npm run setup` (or npm install --prefix scripts), or fall back with ORCH_UNIT_CARRIER=stdio / --mode window.');
+  }
+  return carrier;
+}
 // Non-codex window completion is a launcher-written result file; each adapter owns its wait.
 const waitAdapterResult=(rf,timeout,pidf)=>AGENT.agent==='opencode'?waitOpenCodeResult(rf,timeout,pidf):AGENT.agent==='kimi'?waitKimiResult(rf,timeout,pidf):AGENT.agent==='claude'?waitClaudeResult(rf,timeout,pidf):(AGENT.config.profile||AGENT.config.unit)?waitProfileResult(rf,timeout,pidf):waitPiResult(rf,timeout,pidf);
 const CODEX = String(AGENT.config?.bin || '');
@@ -997,6 +1011,14 @@ async function spawnWindowWithRetry(lp, title, pidf, maxRetry = 3, token, reserv
 function spawnHeadlessUnit(lp, title) {
   const bn = path.basename(String(lp || ""));
   const unitName = bn.replace(/^win-launch-/, "").replace(/\.ps1$/, "");
+  // 载体分级：TUI 类 agent（画像声明 carrier=pty）走 ConPTY 伪终端宿主——真实控制台、完全不可见；
+  // print 类保持无控制台隐藏进程。同一条启动器/身份/租约/恢复契约，两条载体可互换。
+  if (assertUnitCarrierReady() === "pty") {
+    const host = spawn(process.execPath, [fileURLToPath(new URL('./pty-host.mjs', import.meta.url)), String(lp)], { cwd: WORKSPACE, env: process.env, windowsHide: true, stdio: "ignore" });
+    host.unref();
+    console.log("spawned headless " + AGENT.agent + " unit via PTY carrier: " + title + " (unit=" + unitName + ")");
+    return;
+  }
   const child = spawn(PS_EXE, ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", lp], { cwd: WORKSPACE, env: process.env, windowsHide: true, stdio: "ignore" });
   child.unref();
   console.log("spawned headless " + AGENT.agent + " unit: " + title + " (unit=" + unitName + ")");
@@ -1025,6 +1047,14 @@ async function spawnHeadlessWithRetry(lp, title, pidf, maxRetry = 3, token, rese
     console.log("  [headless] launch NOT confirmed (attempt " + attempt + "/" + maxRetry + ") for [" + title + "]");
   }
   console.log("  !! [headless] launch FAILED after " + maxRetry + " attempts for [" + title + "]");
+  // PTY 载体的失败面在自己日志里（控制器读不到被隐藏的 stdout）；补一段尾迹便于诊断。
+  try {
+    const ptyLog = path.join(path.dirname(String(pidf)), path.basename(String(lp)).replace(/\.ps1$/, '') + '.pty.log');
+    if (existsSync(ptyLog)) {
+      const tail = String(readFileSync(ptyLog, 'utf8')).replace(/\u001b\[[0-9;?]*[A-Za-z]/g, ' ').replace(/\s+/g, ' ').trim().slice(-400);
+      if (tail) console.log("  !! [headless] PTY log tail: " + tail);
+    }
+  } catch { /* diagnostics only */ }
   return false;
 }
 // 失败/未决块自动重试：窗已关但块未完成时，用全新 token 重新弹窗再跑，避免“提前结束轮询/留计划草稿”。
@@ -2205,6 +2235,8 @@ export async function main() {
       spawnMode: normalizeSpawnMode(process.env.ORCH_SPAWN_MODE) || "headless",
       unit: AGENT.config.unit ? "caller" : AGENT.config.profile ? "profile" : "adapter",
       probe: AGENT.config.unit ? "none" : "yes",
+      carrier: AGENT_ERROR ? null : unitCarrier(),
+      carrierAvailable: ptyAvailability().ok,
       hostError: AGENT_ERROR ? AGENT_ERROR.message : null,
       args: AGENT_ARGS_LIST, interactiveOutput: "inherited" }, null, 2));
     return;
@@ -2413,6 +2445,8 @@ export async function main() {
       return;
     }
     if(!checkDiskSpace()) {process.exitCode=1;return;}
+    // 载体就绪门：pty 载体的引擎必须在启动任何单元前可解析（缺失立即报错，不让单元静默秒退）。
+    if(SPAWN_MODE==='headless'){try{assertUnitCarrierReady();}catch(error){console.error(error.message);process.exitCode=1;return;}}
     let preflightPlan;
     if(!resume){
       preflightPlan=PLAN_FILE?ledgerEffectivePlan(request,planFromFile(request,loadPlanFile(PLAN_FILE),capacity),capacity):await decomposeSafely(request,capacity);
@@ -2431,7 +2465,7 @@ export async function main() {
       wait:AGENT.agent!=='codex'?(async(_session,timeout,rf,_token,pidf)=>waitAdapterResult(rf,timeout,pidf)):waitTaskComplete,exitCode:readExitCode,
       register:r=>updateWindows(ws=>[...ws,r]),commit:commitReservation,unregister:cancelReservation,close:closeWindowByPid,
       guardian:g=>ensureRunGuardian({...g,agent:AGENT.agent,env:process.env}),
-      cleanup:la=>{const wsRoot=(()=>{const r=path.resolve(WORKSPACE);return r.endsWith(path.sep)?r:r+path.sep;})();for(const f of [la.lp,la.pf,la.pidf,la.rf,la.pidf+'.self-closed',la.rf+'.self-closed'])try{const resolved=path.resolve(String(f||''));if(resolved.startsWith(wsRoot))rmSync(resolved,{force:true});}catch{}}
+      cleanup:la=>{const wsRoot=(()=>{const r=path.resolve(WORKSPACE);return r.endsWith(path.sep)?r:r+path.sep;})();for(const f of [la.lp,la.pf,la.pidf,la.rf,la.pidf+'.self-closed',la.rf+'.self-closed',String(la.lp||'').replace(/\.ps1$/,'.pty.log')])try{const resolved=path.resolve(String(f||''));if(resolved.startsWith(wsRoot))rmSync(resolved,{force:true});}catch{}}
     },{workspace:WORKSPACE,capacity,resume,agent:AGENT.agent,unitProfile:AGENT.config.unit||null,runId:process.env.ORCH_RUN_ID,acceptanceFile:process.env.ORCH_ACCEPTANCE_FILE,timeoutMs:POLL_TIMEOUT_MS,auth:readAuthPrompt(),plan:preflightPlan,spawnMode:SPAWN_MODE,spawnStaggerMs:Math.max(0,Number(process.env.ORCH_WINDOW_STAGGER_MS||0)||0),windowCap:Math.max(0,Number(process.env.ORCH_MAX_WINDOWS||0)||0)||undefined});
     process.exitCode=result.success?0:1;return;
   }

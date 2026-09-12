@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { normalizeUnitCarrier } from './unit-carrier.mjs';
 
 // 调用方自助通道（caller-driven / delegate 模式）第一半：单元命令画像的解析与展开。
 //
@@ -13,6 +14,7 @@ import path from 'node:path';
 //     promptDelivery:"file"|"arg"|"stdin",
 //     modelArgs:["--model"]|null,     // 可选：按 ORCH_MODEL 注入
 //     effortArgs:["--effort"]|null,   // 可选：按 ORCH_EFFORT 注入
+//     carrier:"pty"|"stdio"|null,     // 可选：单元载体覆盖（默认按 agent 画像；TUI 类 CLI 用 pty）
 //     timeoutMs:number|null }         // 可选：单单元超时（当前由轮询/调度统一控制）
 //
 // 规则：file=提示词落文件并把路径代入 {promptFile}；arg=提示词作为最后一个 argv 元素；

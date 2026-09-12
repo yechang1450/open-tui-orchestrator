@@ -1,0 +1,42 @@
+{
+  "schema": 1,
+  "date": "2026-09-12",
+  "core": "1.10.0",
+  "feature": "unit carrier tiering for headless mode: TUI-class agents run on a ConPTY pseudo-terminal carrier (real console, fully invisible); print-class agents keep the no-console carrier. Same launcher/identity/lease/recovery contract on both carriers.",
+  "releasedCopy": "C:/Users/yecha/.tools/releases/0.5.0/open-tui-orchestrator",
+  "rootCause": "A TUI-class agent requires a terminal on stdin. The former headless carrier spawned the launcher with windowsHide+stdio:ignore (no console at all), so the agent exited 1 within ~300ms. Reproduced directly: windowsHide+stdio:ignore -> exit 1 in 338ms with zero output; piped stdin -> 'Error: stdin is not a terminal'. Alternatives tested and rejected: Start-Process -WindowStyle Hidden (no console; instant exit), conhost.exe --headless (flag not functional on this Windows build). ConPTY via @lydell/node-pty 1.2.0-beta.15 verified: the launcher runs with a real console (probe [Console]::WindowWidth = 200), fully invisible, and keeps the pidf/launcher-identity contract.",
+  "runs": [
+    {
+      "runId": "pty-accept-1",
+      "agent": "codex",
+      "model": "gpt-6-astra / ultra (inherited from codex config)",
+      "spawnMode": "headless",
+      "carrier": "pty",
+      "blocks": 2,
+      "success": true,
+      "wall": "1m39s",
+      "note": "spawned headless codex unit via PTY carrier for both blocks; products byte-checked by acceptance (pty-a.txt=PTY_A_OK, pty-b.txt=PTY_B_OK); run through the shipped release copy",
+      "evidence": "D:/temp/orch-pty-accept/run.log"
+    },
+    {
+      "runId": "pi-standard-2",
+      "agent": "pi",
+      "model": "deepseek-flash (explicit ORCH_MODEL; see contingency below)",
+      "spawnMode": "headless",
+      "carrier": "stdio",
+      "blocks": 2,
+      "success": true,
+      "wall": "59s",
+      "note": "print-class no-console carrier unchanged and still green; products byte-checked (pi-a.txt=PI_A_OK, pi-b.txt=PI_B_OK)",
+      "evidence": "D:/temp/orch-pty-accept/pi/run2.log"
+    }
+  ],
+  "contingencyObserved": {
+    "case": "pi settings defaultModel was changed externally at 16:34 to the bare name 'deepseek-v4.1-flash', which is ambiguous across two authenticated providers; pi exits 1 instantly for non-interactive units, every pi unit fails fast.",
+    "detection": "manual reproduction with the adapter's exact argv: 'Model \"deepseek-v4.1-flash\" is ambiguous across providers ... Use --provider or provider/model.'",
+    "fallback": "ORCH_MODEL=<provider>/<model> (or a qualified defaultModel in pi settings) restores green runs without touching the orchestrator (run pi-standard-2).",
+    "verdict": "environment/config issue faithfully inherited from the host's own settings; the documented override is the escape hatch"
+  },
+  "offlineRegression": "266/266 (262 + 4 new carrier tests: normalization, engine resolution, live console probe, fail-closed on unknown carrier)",
+  "seal": "schema 2 / core 1.10.0 / 42 core + 61 runtime files (dev repo and release copy identical)"
+}
