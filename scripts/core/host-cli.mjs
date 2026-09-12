@@ -19,7 +19,9 @@ export const adapters = Object.freeze({
   opencode: Object.freeze({id:'opencode',label:'opencode',native:false,completionMarker:'__ORCH_DONE__',verified:false}),
   kimi: Object.freeze({id:'kimi',label:'Kimi Code CLI',native:true,completionMarker:'__ORCH_DONE__',verified:false}),
   claude: Object.freeze({id:'claude',label:'Claude Code CLI',native:true,completionMarker:'__ORCH_DONE__',verified:false}),
-  codex: Object.freeze({ id: 'codex', label: 'Codex CLI', native: true,
+  // carrier: TUI 类宿主需要真实终端——无头模式走 ConPTY 伪终端载体（真实控制台、完全不可见）；
+  // 其余宿主为 print 类，无控制台的隐藏进程即可。载体解析与分级见 scripts/core/unit-carrier.mjs。
+  codex: Object.freeze({ id: 'codex', label: 'Codex CLI', native: true, carrier: 'pty',
     modelEnv: 'ORCH_MODEL', effortEnv: 'ORCH_EFFORT',
     completionMarker: '__ORCH_DONE__', verified: false }),
 });
@@ -137,7 +139,7 @@ export function resolveHost({ env = process.env, agent, candidates = cliCandidat
   const unit = loadUnitProfile(env);
   if (unit) return { agent: String(env.ORCH_AGENT || unit.id || 'custom').trim().toLowerCase(), config: {
     id: unit.id, label: unit.label, bin: unit.bin, prefixArgs: [], available: true, native: true,
-    completionMarker: '__ORCH_DONE__', modelEnv: 'ORCH_MODEL', effortEnv: 'ORCH_EFFORT', unit, reusable: true,
+    completionMarker: '__ORCH_DONE__', modelEnv: 'ORCH_MODEL', effortEnv: 'ORCH_EFFORT', carrier: unit.carrier || null, unit, reusable: true,
   } };
   const id = agent || detectHostAgent(env);
   if(id==='pi')return resolvePiHost(env);
