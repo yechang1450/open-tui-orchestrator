@@ -8,7 +8,7 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 const args = process.argv.slice(2);
 if (!args.length) {
-  console.log('usage: orch [--mode headless|exec|window] [--run-id id] [--acceptance-file file] <request>');
+  console.log('usage: orch [--mode headless|exec|window] [--run-id id] [--acceptance-file file] [--plan-file f] [--unit-cmd json | --unit-cmd-file f] <request>');
   process.exit(2);
 }
 const child = spawn(process.execPath, [fileURLToPath(new URL('./cli.mjs', import.meta.url)), '--run-windows', ...args], {
