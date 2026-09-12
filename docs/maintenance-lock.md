@@ -16,7 +16,7 @@ While the lock is held, every action entry point prints exactly one line and exi
 open-tui-orchestrator正在维护更新，本轮跳过orchestrator直接开始执行
 ```
 
-Gated entries: `--run-windows`, `--spawn`, `--resume-run`, `--run`/`--exec`, `--plan`, `--selftest-close` (in `scripts/core/orchestrate-sdk.mjs`), `scripts/open-tui-orchestrator-preflight.mjs` (any kind), and `scripts/open-tui-orchestrator-force.mjs --assert/--verify`. Read-only entries (`--status`, `--doctor`, `--verify-run`, `--clear-cache`, `--enable`/`--disable`) keep working; `--status` additionally prints the lock state.
+Gated entries: `--run-windows`, `--spawn`, `--resume-run`, `--run`/`--exec`, `--plan`, `--selftest-close` (in `scripts/core/orchestrate-sdk.mjs`), `scripts/open-tui-orchestrator-preflight.mjs` (any kind), and `scripts/open-tui-orchestrator-force.mjs --assert/--verify`. Read-only entries (`--status`, `--doctor`, `--verify-run`, `--clear-cache`, `--tasks`, `--enable`/`--disable`) keep working; `--status` additionally prints the lock state.
 
 ## Properties
 

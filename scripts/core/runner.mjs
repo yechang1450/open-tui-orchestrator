@@ -121,6 +121,10 @@ export async function runWindows(request,hooks,options={}) {
       if((sum.agent||'codex')!==(options.agent||'codex'))throw new Error('Resume agent must match the saved run');
       if(path.resolve(sum.workspace)!==workspace||sum.runId!==runId)throw new Error('Run workspace/identity mismatch');
       validateRecoverySummary(sum);
+      // 调用方自助通道：保存的运行用了调用方单元命令时，resume 必须重供同一条命令（防换命令重放副作用）。
+      {const savedUnit=sum.unitProfile||null,givenUnit=options.unitProfile||null;
+       if(savedUnit&&!givenUnit)throw new Error('This run used a caller-supplied unit command; re-supply the identical --unit-cmd/--unit-cmd-file to resume');
+       if(savedUnit&&givenUnit&&JSON.stringify(savedUnit)!==JSON.stringify(givenUnit))throw new Error('Resume unit command differs from the saved run; refusing to resume');}
       if(sum.blocks.length>capacity)throw new Error('Current memory capacity is below the saved block count');
       checks=loadChecks(options.acceptanceFile||path.join(dir,'acceptance.json'));
       if(sum.acceptanceSha256&&checksHash(checks)!==sum.acceptanceSha256)throw new Error('Acceptance contract changed since run creation; refusing to resume');
@@ -142,6 +146,7 @@ export async function runWindows(request,hooks,options={}) {
         blocks:recs.map(r=>({key:r.key,title:r.title,taskIds:r.b.tasks.flatMap(t=>t.sourceIds)})),results:{},taskResults:{}};
       for(const r of recs){sum.results[r.key]={status:'pending',attempts:[]};for(const id of sum.blocks.find(b=>b.key===r.key).taskIds)sum.taskResults[id]={status:'pending'};}
       sum.acceptanceSha256=checksHash(checks);
+      if(options.unitProfile)sum.unitProfile=options.unitProfile;
     }
     sum.owner=claim.owner;sum.coordinator=coordinator;
     {

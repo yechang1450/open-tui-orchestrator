@@ -1,0 +1,102 @@
+{
+ "date": "2026-09-12",
+ "core": "1.9.0",
+ "feature": "caller-driven channel: --plan-file (zero-LLM plan file) + --unit-cmd/--unit-cmd-file (caller-supplied unit command) + read-only --tasks",
+ "workspace": "D:/temp/orch-live-caller/ws",
+ "request": "在 D:/temp/orch-live-caller/ws 下创建 a-result.json，内容严格为 {\"ok\":true,\"task\":\"A\"}（UTF-8，无多余文字）；在 D:/temp/orch-live-caller/ws 下创建 b-result.json，内容严格为 {\"ok\":true,\"task\":\"B\"}（UTF-8，无多余文字）",
+ "unitCommand": {
+  "schema": 1,
+  "id": "kimi-caller",
+  "label": "Kimi Code (caller-driven)",
+  "bin": "C:/Users/yecha/.kimi-code/bin/kimi.exe",
+  "args": [
+   "-m",
+   "deepseek/deepseek-flash",
+   "-p",
+   "{prompt}"
+  ],
+  "promptDelivery": "arg"
+ },
+ "realCli": {
+  "agent": "Kimi Code CLI",
+  "version": "0.42.0",
+  "model": "deepseek/deepseek-flash"
+ },
+ "runs": [
+  {
+   "runId": "live-caller-4",
+   "phase": "fresh (real CLI via unit command, plan file, headless)",
+   "success": true,
+   "generation": 1,
+   "attemptsPerBlock": {
+    "B1": 1,
+    "B2": 1
+   },
+   "taskStatus": {
+    "T001": "verified",
+    "T002": "verified"
+   },
+   "note": "two parallel units launched from a caller-supplied plan; both tasks verified by independent acceptance checks; no adapter and no model planner involved"
+  },
+  {
+   "runId": "live-caller-4",
+   "phase": "resume of the finalized run (identical unit command re-supplied)",
+   "success": true,
+   "generation": 2,
+   "attemptsPerBlock": {
+    "B1": 1,
+    "B2": 1
+   },
+   "taskStatus": {
+    "T001": "verified",
+    "T002": "verified"
+   },
+   "note": "no window/unit redeployed (attempts stayed 1 per block); the final ledger is still all-verified",
+   "artifactHashes": {
+    "a-result.json": "552ab21ca839c2e6677ad333e1637df9ef5e015da419d7c6702ba72aab330f76",
+    "b-result.json": "6ed06f75abfe44c883cc5496c2acd375a2813039c6b33f560ee6bec932caa8fc"
+   }
+  },
+  {
+   "runId": "live-caller-2",
+   "phase": "controller killed mid-run, guardian auto-resume",
+   "success": true,
+   "generation": 2,
+   "attemptsPerBlock": {
+    "B1": 2,
+    "B2": 2
+   },
+   "controllerKilledMidRun": true,
+   "taskStatus": {
+    "T001": "verified",
+    "T002": "verified"
+   },
+   "note": "guardian detected the lost controller and relaunched the unsettled blocks (attempt 2) — the killed attempt had produced no evidence, so nothing was duplicated; the resumed run finished success=true"
+  },
+  {
+   "runId": "live-caller-3",
+   "phase": "negative: the real CLI rejects the unit command (unknown flag, exit 1)",
+   "success": false,
+   "generation": 1,
+   "attemptsPerBlock": {
+    "B1": 2,
+    "B2": 2
+   },
+   "taskStatus": {
+    "T001": "failed",
+    "T002": "failed"
+   },
+   "note": "fail-closed: no verified task, no false success"
+  }
+ ],
+ "artifactHashesAfterAllRuns": {
+  "a-result.json": "552ab21ca839c2e6677ad333e1637df9ef5e015da419d7c6702ba72aab330f76",
+  "b-result.json": "6ed06f75abfe44c883cc5496c2acd375a2813039c6b33f560ee6bec932caa8fc"
+ },
+ "rawLogsKeptAt": [
+  "D:/temp/orch-live-caller/live-caller-1.log",
+  "D:/temp/orch-live-caller/live-caller-2-fresh.log",
+  "D:/temp/orch-live-caller/live-caller-2.log",
+  "D:/temp/orch-live-caller/live-caller-3.log"
+ ]
+}

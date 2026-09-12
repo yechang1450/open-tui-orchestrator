@@ -51,6 +51,16 @@ A lease is held before launch and records owner and launcher identity. Capacity 
 
 Windows inherit the initiating directory; do not derive cwd from a target filename. Orchestrator-owned transient files stay under that workspace/temp. Codex-owned configuration and sessions remain under CODEX_HOME. Approval stays never; there is no manual TUI approval step. When the effective policy is never + danger-full-access, the Codex TUI launcher carries `--dangerously-bypass-approvals-and-sandbox` so the project trust confirmation cannot pause an already-authorized window; restricted sandbox values remain unchanged. Existing external host restrictions still apply. The current Codex adapter uses the existing OpenAI login with HTTPS Responses and disables WebSocket probing. Network loss can still cause HTTPS retries; other model providers require a separately tested adapter policy. Windows PowerShell native argv escaping preserves JSON, quotes, Chinese and paths with spaces.
 
+## Caller-driven execution (any agent)
+
+Host identity is optional. A caller may supply both the plan and the execution surface itself:
+
+- `--plan-file <json>` replaces the model planner with the caller's own ledger or block plan: `{"tasks":[…]}` (flat classification, then the deterministic engine groups it) or `{"blocks":[…]}` (final blocks). The authoritative inventory still comes from `requestTasks(<original request>)`; the plan file must cover its `T001…` ids exactly (the read-only `--tasks` entry prints that ledger), every block task prompt must contain its original task text verbatim or the plan collapses into one serial `complete-inventory` block, and unknown/self/cyclic dependencies are refused. With a plan file the run performs no model calls at all (planner, read-only classification and the decompose cache are skipped), and `--plan --plan-file` is a deterministic dry run.
+- `--unit-cmd '<json>'` / `--unit-cmd-file <json>` replaces host resolution with the caller's own unit command (`bin` + `args` template with `{promptFile}`/`{prompt}`/`{workspace}` placeholders, one delivery mode `file|arg|stdin`, optional `modelArgs`/`effortArgs`). No `--help`/`--version` probe and no version assertion is performed — the caller vouches for the command. Execution keeps the identical contract: launcher identity, leases, run board, guardian, recovery, checkpoints, the token marker and the parent's acceptance re-check; the unit's output is never parsed for success.
+- The unit profile is persisted in the run ledger; `--resume-run` reuses it and refuses a different one. An unknown agent with neither half fails closed with a diagnostic that names both paths (supply a unit command, or adapt the CLI).
+
+Nothing else changes: capacity, waves, the inline gate, the maintenance lock and the acceptance contract stay exactly as described above.
+
 ## Regression commands
 
 Run npm test in the generic repository. Invoke test/live-codex.mjs by absolute path from the desired workspace for the opt-in 8-window/9-task real-model acceptance. ORCH_LIVE_ENTRY can select the Codex-specific scripts/orchestrate-sdk.mjs entry to run the same acceptance contract. Existing historical result files are not evidence for a changed core version; retain newly generated run IDs and summaries.

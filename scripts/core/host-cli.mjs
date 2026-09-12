@@ -8,6 +8,7 @@ import {resolveOpenCodeHost,opencodeArgs} from './opencode-host.mjs';
 import {resolveKimiHost,kimiArgs} from './kimi-host.mjs';
 import {resolveClaudeHost,claudeArgs} from './claude-host.mjs';
 import {resolveProfileHost,profileArgs,listProfiles,loadProfile} from './print-profile.mjs';
+import {loadUnitProfile,expandUnitArgs} from './unit-command.mjs';
 
 // Adapter contract: resolve a real CLI before any planner/window is started.
 // Additional adapters must implement planning, interactive argv and completion
@@ -86,7 +87,7 @@ export function detectHostAgent(env = process.env, { chain } = {}) {
       if (patterns.some((re) => re.test(name) || re.test(cmd))) return pid;
     }
   }
-  throw new Error('HOST_UNKNOWN: set ORCH_AGENT to the initiating agent; no Codex fallback.');
+  throw new Error('HOST_UNKNOWN: set ORCH_AGENT to the initiating agent; no Codex fallback. Any agent can also bypass host identity entirely by supplying its own unit command (--unit-cmd/--unit-cmd-file, see docs/caller-driven.md).');
 }
 
 export function cliCandidates(env = process.env, platform = process.platform, {where = spawnSync} = {}) {
@@ -131,6 +132,13 @@ export function resolveHost({ env = process.env, agent, candidates = cliCandidat
     });
     return result.status === 0 && /^codex-cli\s/m.test(result.stdout || '');
   } } = {}) {
+  // 调用方自助通道（caller-driven）：显式给出的单元画像最高优先——不依赖宿主识别（不查进程链/env 标记）、
+  // 不 probe、无名单限制。任何 agent（含没有适配器的）都能这样调用编排器。
+  const unit = loadUnitProfile(env);
+  if (unit) return { agent: String(env.ORCH_AGENT || unit.id || 'custom').trim().toLowerCase(), config: {
+    id: unit.id, label: unit.label, bin: unit.bin, prefixArgs: [], available: true, native: true,
+    completionMarker: '__ORCH_DONE__', modelEnv: 'ORCH_MODEL', effortEnv: 'ORCH_EFFORT', unit, reusable: true,
+  } };
   const id = agent || detectHostAgent(env);
   if(id==='pi')return resolvePiHost(env);
   if(id==='openclaw')return resolveOpenClawHost(env);
@@ -142,13 +150,15 @@ export function resolveHost({ env = process.env, agent, candidates = cliCandidat
   const profileHost = resolveProfileHost(env,id);
   if (profileHost) return profileHost;
   const adapter = adapters[id];
-  if (!adapter) throw new Error(`ADAPTER_UNSUPPORTED: ${id}; no CLI adapter implemented; no fallback or automatic install.`);
+  if (!adapter) throw new Error(`ADAPTER_UNSUPPORTED: ${id}; no CLI adapter implemented; no fallback or automatic install. Two supported paths: (1) supply your own unit command with --unit-cmd/--unit-cmd-file (any CLI, see docs/caller-driven.md); (2) node scripts/adapt.mjs --agent ${id} for print-class auto-adaptation.`);
   const bin = candidates(env).find(probe);
   if (!bin) throw new Error(`CLI_MISSING: ${id}; install its CLI yourself or set ORCH_CLI to its native executable. No fallback or automatic install.`);
   return { agent: id, config: { ...adapter, bin, available: true } };
 }
 
 export function launchArgs(config, options = {}) {
+  // 调用方自助通道：argv 完全来自单元命令模板（占位符展开），不套用任何宿主专用参数。
+  if(config?.unit)return expandUnitArgs(config.unit,{prompt:'',promptFile:'',workspace:options.cwd||process.cwd()});
   if(config?.id==='openclaw'){
     if(options.sandbox&&options.sandbox!=='danger-full-access')throw new Error('OPENCLAW_SANDBOX_UNSUPPORTED');
     return [];

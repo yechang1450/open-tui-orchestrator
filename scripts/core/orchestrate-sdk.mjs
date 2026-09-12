@@ -60,7 +60,7 @@
  * ============================================================================
  */
 import {nativeArgumentLines} from "./native-argv.mjs";
-import {CORE_VERSION, levelWaves, keysOverlap, summaryComplete,requestTasks,bindClassifiedTasks,computeMaxWindows,powershellExe,systemToolExe} from "./contracts.mjs";
+import {CORE_VERSION, levelWaves, keysOverlap, summaryComplete,requestTasks,bindClassifiedTasks,ledgerPlan,computeMaxWindows,powershellExe,systemToolExe} from "./contracts.mjs";
 // 锚定 SystemRoot 的系统工具：裸名会先按进程 cwd（=任意工作区）解析，防二进制投毒。
 const PS_EXE=powershellExe(),WHERE_EXE=systemToolExe("where.exe");
 import {runWindows,verifyRun} from "./runner.mjs";
@@ -71,6 +71,7 @@ import {runOpenCodePlanner,writeOpenCodeLauncher,waitOpenCodeResult} from './ope
 import {runKimiPlanner,writeKimiLauncher,waitKimiResult} from './kimi-runtime.mjs';
 import {runClaudePlanner,writeClaudeLauncher,waitClaudeResult} from './claude-runtime.mjs';
 import {runProfilePlanner,writeProfileLauncher,waitProfileResult} from './print-runtime.mjs';
+import {runUnitPlanner,writeUnitLauncher} from './unit-runtime.mjs';
 import {spawnInactiveWindow} from './inactive-window.mjs';
 import {ensureRunGuardian} from './run-guardian.mjs';
 import {lockedForMaintenance,readMaintenanceLock,MAINTENANCE_MESSAGE} from './maintenance-lock.mjs';
@@ -114,13 +115,31 @@ function readAuthPrompt() {
   return "\n\n（已获授权推进并执行。本窗为 open-tui-orchestrator 授权的真实执行窗：直接在本窗内用自己的工具干活，不要再发起 --run-windows、不要另开新窗、不要以「需要授权/要我修吗」等为由暂停或询问。执行结束再输出结束标记。）";
 }
 
+// 调用方自助通道参数在【模块加载期】归一化到 env：AGENT 解析（下方 resolveAgent）与工作区/状态解析
+// 都依赖它们。cli.mjs / orch.mjs 均为 argv 原样透传，因此这里同时覆盖直连 SDK 的调用方。
+let ORCH_ARG_ERROR = null;
+for (const [flag, key] of [['--plan-file', 'ORCH_PLAN_FILE'], ['--unit-cmd', 'ORCH_UNIT_CMD'], ['--unit-cmd-file', 'ORCH_UNIT_CMD_FILE']]) {
+  const index = process.argv.indexOf(flag);
+  if (index < 0) continue;
+  const value = process.argv[index + 1];
+  if (!value || value.startsWith('--')) { ORCH_ARG_ERROR = ORCH_ARG_ERROR || (flag + ' needs a value'); continue; }
+  process.env[key] = value; process.argv.splice(index, 2);
+}
+const PLAN_FILE = String(process.env.ORCH_PLAN_FILE || '').trim() || null;
 const { workspace: WORKSPACE, temp: TMP, state: STATE_DIR } = resolveRuntimeContext();
 process.env.WORKSPACE_DIR = WORKSPACE;
 process.env.ORCH_STATE_DIR = STATE_DIR;
-const AGENT = resolveAgent();
+// 宿主解析容忍化（caller-driven 通道）：只读入口（--tasks/--status/--doctor/--watch/--verify-run/--plan --plan-file）
+// 不需要宿主身份；动作入口在分发处显式 requireHost()，fail-closed 语义不变（错误对象原样抛出）。
+const AGENT = (() => {
+  try { return { ...resolveAgent(), error: null }; }
+  catch (error) { return { agent: String(process.env.ORCH_AGENT || '').trim().toLowerCase() || 'unknown', config: {}, error }; }
+})();
+const AGENT_ERROR = AGENT.error || null;
+function requireHost() { if (AGENT_ERROR) throw AGENT_ERROR; }
 // Non-codex window completion is a launcher-written result file; each adapter owns its wait.
-const waitAdapterResult=(rf,timeout,pidf)=>AGENT.agent==='opencode'?waitOpenCodeResult(rf,timeout,pidf):AGENT.agent==='kimi'?waitKimiResult(rf,timeout,pidf):AGENT.agent==='claude'?waitClaudeResult(rf,timeout,pidf):AGENT.config.profile?waitProfileResult(rf,timeout,pidf):waitPiResult(rf,timeout,pidf);
-const CODEX = AGENT.config.bin;
+const waitAdapterResult=(rf,timeout,pidf)=>AGENT.agent==='opencode'?waitOpenCodeResult(rf,timeout,pidf):AGENT.agent==='kimi'?waitKimiResult(rf,timeout,pidf):AGENT.agent==='claude'?waitClaudeResult(rf,timeout,pidf):(AGENT.config.profile||AGENT.config.unit)?waitProfileResult(rf,timeout,pidf):waitPiResult(rf,timeout,pidf);
+const CODEX = String(AGENT.config?.bin || '');
 // PowerShell 单引号字符串内嵌路径：把 ' 转义成 ''，避免路径含引号时破坏脚本/注入。
 const WORKSPACE_Q = WORKSPACE.replace(/'/g, "''");
 const CODEX_Q = CODEX.replace(/'/g, "''");
@@ -130,7 +149,7 @@ const PY_DIR = (() => { try { const p = String(process.env.PYTHON || ""); return
 // 发起窗 model/thinking 继承（同窗即同 agent，逐字透传）：显式 ORCH_MODEL/ORCH_EFFORT 优先；
 // 未显式给出时检测发起窗口当前实际值并写回 env，下游 argv 构造与 codex -m/-c 注入全部消费这两个变量。
 // node --test 下由 inheritHostModelEffort 自行豁免（NODE_TEST_CONTEXT）。
-try {
+if (!AGENT_ERROR) try {
   const inherited = inheritHostModelEffort(AGENT.agent, { cwd: WORKSPACE });
   if (inherited) console.log(`[orchestrator] inherit host model/effort (${AGENT.agent}/${inherited.source}): model=${inherited.model || '-'} effort=${inherited.effort || '-'}`);
 } catch { /* 检测失败不阻断 */ }
@@ -140,7 +159,7 @@ const EFFORT = process.env.ORCH_EFFORT || undefined;
 // A caller may pass its effective permissions; never elevate implicitly.
 const SANDBOX = process.env.ORCH_SANDBOX || "danger-full-access";
 const APPROVAL = "never";
-const AGENT_BIN = AGENT.config.bin;
+const AGENT_BIN = String(AGENT.config?.bin || '');
 const AGENT_BIN_Q = String(AGENT_BIN).replace(/'/g, "''");
 // exec 一次性模式参数：config 已含 approval_policy=never/sandbox，仅剔除交互专用 -a 并在最前加 exec。
 // 模型/推理力度透传给窗内 codex：MODEL/EFFORT 非空且值不含空格时才追加 -m / -c（-c 用 model_reasoning_effort=<EFFORT>）。
@@ -173,12 +192,13 @@ export function buildPsArrayLit(args) {
   return "@(" + a.map((x) => "'" + String(x).replace(/'/g, "''") + "'").join(",") + ")";
 }
 const AGENT_ARGS_EXEC = (() => {
+  if (AGENT_ERROR) return '';
   const raw = launchArgs(AGENT.config, { cwd: WORKSPACE, approval: APPROVAL, sandbox: SANDBOX });
   const cleaned = [];
   for (let i = 0; i < raw.length; i++) { if (raw[i] === "-a") { i++; continue; } cleaned.push(raw[i]); }
   return ["exec", ...appendModelEffortArgs(cleaned, AGENT.config)].map((aa) => "'" + String(aa).replace(/'/g, "''") + "'").join(" ");
 })();
-const AGENT_ARGS_LIST = appendModelEffortArgs(launchArgs(AGENT.config, { cwd: WORKSPACE, approval: APPROVAL, sandbox: SANDBOX }), AGENT.config);
+const AGENT_ARGS_LIST = AGENT_ERROR ? [] : appendModelEffortArgs(launchArgs(AGENT.config, { cwd: WORKSPACE, approval: APPROVAL, sandbox: SANDBOX }), AGENT.config);
 // AGENT_ARGS 保留给老式拼接（AGENT_ARGS_EXEC / 兜底），主 launcher 改用 buildPsArrayLit 生成的数组字面量。
 const AGENT_ARGS = AGENT_ARGS_LIST.map((aa) => "'" + String(aa).replace(/'/g, "''") + "'").join(" ");
 
@@ -512,6 +532,41 @@ function extractTasks(raw) {
 // (any mention of multiple distinct project-like dirs), not specific to build/80|81|82|83.
 // ---------------------------------------------------------------------------
 const DECOMPOSE_CACHE = path.join(STATE_DIR, "orchestrator-decompose-cache.json");
+// ---------------------------------------------------------------------------
+// 调用方自助通道：计划文件（caller-supplied plan）。零 LLM：不读/不写拆块缓存、不调用任何模型。
+// 两种 schema：{tasks:[...]}（等价 LLM 分类输出，随后走同一确定性分块引擎）；
+// {blocks:[...]}（等价 --plan 的 blocks 输出）。两者都受 ledgerPlan 硬校验（覆盖率/依赖/回退串行）。
+// ---------------------------------------------------------------------------
+function loadPlanFile(file) {
+  const resolved = path.resolve(String(file));
+  let raw;
+  try { raw = readFileSync(resolved, 'utf8'); }
+  catch (error) { throw new Error('PLAN_FILE_UNREADABLE: ' + resolved + ' (' + (error?.message || String(error)) + ')'); }
+  let doc;
+  try { doc = JSON.parse(String(raw).replace(/^\uFEFF/, '')); }
+  catch (error) { throw new Error('PLAN_FILE_INVALID: not valid JSON (' + (error?.message || String(error)) + ')'); }
+  const blocks = Array.isArray(doc?.blocks) ? doc.blocks : null;
+  const tasks = Array.isArray(doc?.tasks) ? doc.tasks : null;
+  if (blocks && tasks) throw new Error('PLAN_FILE_INVALID: provide either blocks or tasks, not both');
+  if (!blocks && !tasks) throw new Error('PLAN_FILE_INVALID: expected {tasks:[...]} or {blocks:[...]}');
+  if ((blocks && !blocks.length) || (tasks && !tasks.length)) throw new Error('PLAN_FILE_INVALID: the supplied list is empty');
+  return { tasks, blocks };
+}
+function planFromFile(request, doc, capacity, hints = resolveHints()) {
+  const blocks = doc.tasks
+    ? buildBlocksFromTasks(bindClassifiedTasks(request, doc.tasks), hints)
+    : structuredClone(doc.blocks);
+  if (!blocks.length) throw new Error('PLAN_FILE_INVALID: no blocks after deterministic grouping');
+  return capPlanBlocks(normalizePlan(blocks), capacity);
+}
+function ledgerEffectivePlan(request, candidate, capacity) {
+  const effective = ledgerPlan(request, candidate, capacity, capPlanBlocks).plan;
+  if (effective.length === 1 && effective[0].title === 'complete-inventory') {
+    console.warn('[orchestrator] plan file failed coverage validation; falling back to a single serial block (complete-inventory)');
+  }
+  return effective;
+}
+
 function buildBlockPrompt(body, tk) {
   return String(body || "") +
     "\n\n【TODO LIST 硬契约】开始前先列出本块完整 TODO LIST，逐项保留原始任务 ID；每项完成后立即更新状态并做现场验证，不得遗漏、跳过或凭口头汇报替代检查点。" +
@@ -627,6 +682,7 @@ async function runThreadPrompt(prompt, opts = {}) {
   if(AGENT.agent==='opencode')return runOpenCodePlanner(AGENT.config,prompt,WORKSPACE);
   if(AGENT.agent==='kimi')return runKimiPlanner(AGENT.config,prompt,WORKSPACE);
   if(AGENT.agent==='claude')return runClaudePlanner(AGENT.config,prompt,WORKSPACE);
+  if(AGENT.config.unit)return runUnitPlanner(AGENT.config,prompt,WORKSPACE);
   if(AGENT.config.profile)return runProfilePlanner(AGENT.config,prompt,WORKSPACE);
   // outputSchema 走 runStreamed 的 turn 选项（强制结构化输出 / 纯 JSON），不能混进 startThread 配置。
   const { outputSchema, ...threadOpts } = opts;
@@ -1160,6 +1216,7 @@ function writeInteractiveLauncher(title, prompt, sfx) {
   if(AGENT.agent==='opencode')return writeOpenCodeLauncher(AGENT.config,{key:title,prompt,suffix:sfx,workspace:WORKSPACE,temp:TMP});
   if(AGENT.agent==='kimi')return writeKimiLauncher(AGENT.config,{key:title,prompt,suffix:sfx,workspace:WORKSPACE,temp:TMP});
   if(AGENT.agent==='claude')return writeClaudeLauncher(AGENT.config,{key:title,prompt,suffix:sfx,workspace:WORKSPACE,temp:TMP});
+  if(AGENT.config.unit)return writeUnitLauncher(AGENT.config,{key:title,prompt,suffix:sfx,workspace:WORKSPACE,temp:TMP});
   if(AGENT.config.profile)return writeProfileLauncher(AGENT.config,{key:title,prompt,suffix:sfx,workspace:WORKSPACE,temp:TMP});
   const s = safe(title) + (sfx ? "-" + sfx : "");
   mkdirSync(TMP, { recursive: true });
@@ -2130,13 +2187,14 @@ async function classifyExecutionMode(request) {
   return "execute"; // fail-safe
 }
 export async function main() {
+  if (ORCH_ARG_ERROR) throw new Error(ORCH_ARG_ERROR);
   for(const [flag,key] of [["--run-id","ORCH_RUN_ID"],["--acceptance-file","ORCH_ACCEPTANCE_FILE"],["--acceptance","ORCH_ACCEPTANCE_FILE"]]){const index=process.argv.indexOf(flag);if(index>=0){if(!process.argv[index+1])throw new Error(flag+" needs a value");process.env[key]=process.argv[index+1];process.argv.splice(index,2);}}
   const modeArgIndex=process.argv.indexOf("--mode");if(modeArgIndex>=0){if(!process.argv[modeArgIndex+1])throw new Error("--mode needs a value");process.env.ORCH_SPAWN_MODE=process.argv[modeArgIndex+1];process.argv.splice(modeArgIndex,2);}
   const forceIdx=process.argv.indexOf("--force-exec");if(forceIdx>=0){process.env.ORCH_FORCE_EXECUTE='1';process.argv.splice(forceIdx,1);}
   const mode = process.argv[2];
   // 维护锁：上锁期间一切动作模式（--run-windows/--spawn/--resume-run/--run/--exec/--plan/
   // --selftest-close 等）只回固定话术，发起 agent 本轮跳过编排器直接执行；只读模式不受影响。
-  const MAINTENANCE_BYPASS = new Set([undefined, "--doctor", "--status", "--watch", "--verify-run", "--clear-cache"]);
+  const MAINTENANCE_BYPASS = new Set([undefined, "--doctor", "--status", "--watch", "--verify-run", "--clear-cache", "--tasks"]);
   if (lockedForMaintenance() && !MAINTENANCE_BYPASS.has(mode)) {
     console.log(MAINTENANCE_MESSAGE);
     return;
@@ -2145,12 +2203,29 @@ export async function main() {
     console.log(JSON.stringify({ agent: AGENT.agent, cli: CODEX, workspace: WORKSPACE,
       stateDir: STATE_DIR, terminal: wtAvailable() ? "wt" : "conhost",
       spawnMode: normalizeSpawnMode(process.env.ORCH_SPAWN_MODE) || "headless",
+      unit: AGENT.config.unit ? "caller" : AGENT.config.profile ? "profile" : "adapter",
+      probe: AGENT.config.unit ? "none" : "yes",
+      hostError: AGENT_ERROR ? AGENT_ERROR.message : null,
       args: AGENT_ARGS_LIST, interactiveOutput: "inherited" }, null, 2));
+    return;
+  }
+  if (mode === "--tasks") {
+    // 只读助手：打印权威账本（T001…），任何调用方据此对齐 id 后再写计划文件。
+    const request = process.argv.slice(3).join(" ");
+    console.log(JSON.stringify({ schema: 1, kind: "tasks", tasks: requestTasks(request) }, null, 2));
     return;
   }
   if (mode === "--plan") {
     const request = process.argv.slice(3).join(" ");
     checkDiskSpace({ warnOnly: true });
+    if (PLAN_FILE) {
+      // 计划文件模式：纯确定性，零 LLM（不读缓存、不写缓存、不调模型）。
+      const capacity = computeMaxWindows(os.totalmem() / 1024 ** 3);
+      const effective = ledgerEffectivePlan(request, planFromFile(request, loadPlanFile(PLAN_FILE), capacity), capacity);
+      console.log(JSON.stringify({ blocks: effective }, null, 2));
+      return;
+    }
+    requireHost();
     const plan = await decomposeSafely(request);
     console.log(JSON.stringify({ blocks: plan }, null, 2));
     return;
@@ -2161,6 +2236,7 @@ export async function main() {
     return;
   }
   if (mode === "--spawn") {
+    requireHost();
     armEnforcement();
     ensureCodexCli();
     if (!checkDiskSpace()) { process.exitCode = 1; return; }
@@ -2234,6 +2310,7 @@ export async function main() {
     // stuck "[exit code 1]" pane, and no orphan agent is left behind). closeWindow() is only a
     // fallback if the launcher is still alive after the timeout. Run by the authorized window for the
     // required "弹一个窗确认约 1 秒后自动关、无残留进程".
+    requireHost();
     armEnforcement();
     cleanStaleTransients();
     const title = process.argv[3] || "selftest-close";
@@ -2304,10 +2381,18 @@ export async function main() {
     process.exitCode=verifyRun(WORKSPACE,id,process.env.ORCH_ACCEPTANCE_FILE)?0:1;return;
   }
   if (mode === '--run-windows' || mode === '--resume-run') {
+    requireHost();
     const resume=mode==='--resume-run';
     const request=resume?'':process.argv.slice(3).join(' ');
     if(resume)process.env.ORCH_RUN_ID=process.argv[3]||process.env.ORCH_RUN_ID;
     if(resume){
+      // 调用方自助通道：单元命令必须与保存的运行一致（防止换命令重放副作用）。
+      try{
+        const savedSum=JSON.parse(readFileSync(path.join(STATE_DIR,'runs',String(process.env.ORCH_RUN_ID||''),'summary.json'),'utf8').replace(/^\uFEFF/,''));
+        const savedUnit=savedSum?.unitProfile||null, givenUnit=AGENT.config.unit||null;
+        if(savedUnit&&!givenUnit)throw new Error('This run used a caller-supplied unit command; re-supply the identical --unit-cmd/--unit-cmd-file to resume');
+        if(savedUnit&&givenUnit&&JSON.stringify(savedUnit)!==JSON.stringify(givenUnit))throw new Error('Resume unit command differs from the saved run; refusing to resume');
+      }catch(error){if(/unit command/.test(error.message||''))throw error;}
       let saved=null;try{saved=normalizeSpawnMode(JSON.parse(readFileSync(path.join(STATE_DIR,'runs',String(process.env.ORCH_RUN_ID||''),'summary.json'),'utf8')).spawnMode);}catch{}
       const requested=normalizeSpawnMode(process.env.ORCH_SPAWN_MODE);
       if(requested&&saved&&requested!==saved)console.warn('[orchestrator] spawn mode override ignored on resume (run fixed at '+saved+' mode)');
@@ -2320,7 +2405,8 @@ export async function main() {
     if(FORCE_EXECUTE)console.log('[orchestrator] force-execute: inline gates bypassed (single/serial/read-only/self-mod still spawn units); maintenance lock still applies');
     if(!resume&&!request)throw new Error('--run-windows needs a request');
     if(!FORCE_EXECUTE&&isOrchestratorSelfMod(request)){console.log(JSON.stringify({mode:'inline',reason:'Modify the orchestrator in the initiating conversation before opening windows'}));return;}
-    if(!resume&&!FORCE_EXECUTE&&await classifyExecutionMode(request)==='inline'){console.log(JSON.stringify({mode:'inline',reason:'Read-only analysis'}));return;}
+    // 计划文件模式：调用方已显式给出计划并要求编排——跳过只读定性（零模型调用）；自改文本门与容量门仍在。
+    if(!resume&&!FORCE_EXECUTE&&!PLAN_FILE&&await classifyExecutionMode(request)==='inline'){console.log(JSON.stringify({mode:'inline',reason:'Read-only analysis'}));return;}
     const capacity=computeMaxWindows(os.totalmem()/1024**3);
     if(!resume&&capacity<2&&!FORCE_EXECUTE){
       console.log(JSON.stringify({mode:'inline',reason:'capacity-below-two-windows',capacity,request,tasks:requestTasks(request),next:'在发起对话直接执行原始请求；不要再次调用 --run-windows'}));
@@ -2329,7 +2415,7 @@ export async function main() {
     if(!checkDiskSpace()) {process.exitCode=1;return;}
     let preflightPlan;
     if(!resume){
-      preflightPlan=await decomposeSafely(request,capacity);
+      preflightPlan=PLAN_FILE?ledgerEffectivePlan(request,planFromFile(request,loadPlanFile(PLAN_FILE),capacity),capacity):await decomposeSafely(request,capacity);
       const policy=windowExecutionPolicy(preflightPlan);
       if(policy.mode==='inline'&&!FORCE_EXECUTE){
         console.log(JSON.stringify({mode:'inline',reason:policy.reason,capacity,request,tasks:requestTasks(request),blocks:preflightPlan.map(b=>({title:b.title,type:b.type,dependsOn:b.dependsOn||[],tasks:b.tasks||[]})),next:'在发起对话直接执行原始请求；不要再次调用 --run-windows'}));
@@ -2346,7 +2432,7 @@ export async function main() {
       register:r=>updateWindows(ws=>[...ws,r]),commit:commitReservation,unregister:cancelReservation,close:closeWindowByPid,
       guardian:g=>ensureRunGuardian({...g,agent:AGENT.agent,env:process.env}),
       cleanup:la=>{const wsRoot=(()=>{const r=path.resolve(WORKSPACE);return r.endsWith(path.sep)?r:r+path.sep;})();for(const f of [la.lp,la.pf,la.pidf,la.rf,la.pidf+'.self-closed',la.rf+'.self-closed'])try{const resolved=path.resolve(String(f||''));if(resolved.startsWith(wsRoot))rmSync(resolved,{force:true});}catch{}}
-    },{workspace:WORKSPACE,capacity,resume,agent:AGENT.agent,runId:process.env.ORCH_RUN_ID,acceptanceFile:process.env.ORCH_ACCEPTANCE_FILE,timeoutMs:POLL_TIMEOUT_MS,auth:readAuthPrompt(),plan:preflightPlan,spawnMode:SPAWN_MODE,spawnStaggerMs:Math.max(0,Number(process.env.ORCH_WINDOW_STAGGER_MS||0)||0),windowCap:Math.max(0,Number(process.env.ORCH_MAX_WINDOWS||0)||0)||undefined});
+    },{workspace:WORKSPACE,capacity,resume,agent:AGENT.agent,unitProfile:AGENT.config.unit||null,runId:process.env.ORCH_RUN_ID,acceptanceFile:process.env.ORCH_ACCEPTANCE_FILE,timeoutMs:POLL_TIMEOUT_MS,auth:readAuthPrompt(),plan:preflightPlan,spawnMode:SPAWN_MODE,spawnStaggerMs:Math.max(0,Number(process.env.ORCH_WINDOW_STAGGER_MS||0)||0),windowCap:Math.max(0,Number(process.env.ORCH_MAX_WINDOWS||0)||0)||undefined});
     process.exitCode=result.success?0:1;return;
   }
 
@@ -2366,6 +2452,7 @@ export async function main() {
     return;
   }
   if (mode === "--run" || mode === "--exec") {
+    requireHost();
     if(AGENT.agent!=='codex')throw new Error('This agent uses --run-windows; headless execution is not implemented');
     // Enforcement: headless real execution is hard-disabled by default. The sanctioned engine for
     // REAL work is --run-windows (a real visible TUI window). Opt-in via ORCH_ALLOW_HEADLESS=1 only
@@ -2425,4 +2512,4 @@ if (isMain) main().catch((e) => {
   console.error("[orchestrator] FATAL: " + e.message);
   process.exitCode = 1;
 });
-export { classifyBlockComplexity, classifyExecutionMode, windowExecutionPolicy, appendModelEffortArgs, genericProjectSplit, trySingleBlock, conflictByKeys, loadCachedDecompose, buildBlocksFromTasks, resolveHints, extractTasks, classifyPrompt, buildBlockPrompt, levelWaves, decomposeHash, checkDiskSpace, readPidFile, pidAliveCheck, closeWindowByPid, windowGenuinelyPopped, extractResult, extractUsage, readReportFromResult, sessionDir, writeInteractiveLauncher, staleTransientFiles, pidFileOfTransient, tryReserveWindow, commitReservation, cancelReservation, computeMaxWindows, blockKeys, keysOverlap, scanTaskComplete, __setOrchHooks, isOrchestratorSelfMod, resolveCodexHome, withRegistryLock, spawnHeadlessWithRetry, normalizeSpawnMode, REG_LOCK as REGISTRY_LOCK_FILE };
+export { classifyBlockComplexity, classifyExecutionMode, windowExecutionPolicy, appendModelEffortArgs, genericProjectSplit, trySingleBlock, conflictByKeys, loadCachedDecompose, buildBlocksFromTasks, resolveHints, extractTasks, classifyPrompt, buildBlockPrompt, levelWaves, decomposeHash, loadPlanFile, planFromFile, checkDiskSpace, readPidFile, pidAliveCheck, closeWindowByPid, windowGenuinelyPopped, extractResult, extractUsage, readReportFromResult, sessionDir, writeInteractiveLauncher, staleTransientFiles, pidFileOfTransient, tryReserveWindow, commitReservation, cancelReservation, computeMaxWindows, blockKeys, keysOverlap, scanTaskComplete, __setOrchHooks, isOrchestratorSelfMod, resolveCodexHome, withRegistryLock, spawnHeadlessWithRetry, normalizeSpawnMode, REG_LOCK as REGISTRY_LOCK_FILE };
