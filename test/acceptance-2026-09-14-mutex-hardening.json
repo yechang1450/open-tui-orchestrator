@@ -24,9 +24,12 @@
     "kept": "release copies 0.4.0-0.8.0 (documented rollback snapshots) and the evidence dirs referenced by acceptance JSONs are deliberately left in place"
   },
   "levelGate": {
-    "command": "python D:/build/tools/orch-level-check.py --run --log --doctor --canary --verify-missing --consistency",
-    "note": "L4 is new this round: CORE_VERSION / seal / the three documents' hard-coded version + counts / the suite total must agree, and the coordinator directory must hold no ticket older than the TTL",
-    "evidence": "D:/temp/orch-failure-contract/gate-090*.txt"
+    "command": "python D:/build/tools/orch-level-check.py --log --doctor --canary --verify-missing --consistency",
+    "result": "ORCH_LEVEL_CHECK: PASS — L1 282/282 exit0 PASS, L2a hostError=null PASS, L2b canary red PASS, L3 unknown-run clean diagnostic PASS, L4 version/seal/doc/count cross-check PASS (coordinator directory holds no stale ticket)",
+    "L4isNew": "L4 added this round: CORE_VERSION / release.json / the three documents' hard-coded version + counts / the suite total must agree, and no ticket older than the TTL may sit in the coordinator directory",
+    "L4redCase": "D:/build/tools/orch-level-check-redcase.py replays it against a minimal copied tree: unmutated must pass, and each of README count / README-zh core version / release-policy seal count mutated must fail — measured 4/4 as expected (1 green, 3 red)",
+    "evidence": ["D:/temp/orch-failure-contract/gate-090b.txt", "D:/temp/orch-failure-contract/gate-final-090.txt", "D:/temp/orch-failure-contract/l4-redcase.txt"],
+    "note": "the L1 log was produced on the same on-disk tree that was committed minutes later (HEAD=8cf24d7, tree dirty at run time by exactly these changes); the file contents are identical to commit 94fa835"
   },
   "offlineRegression": "282/282",
   "seal": {"coreVersion": "1.14.0", "files": 43, "runtimeFiles": 62},
