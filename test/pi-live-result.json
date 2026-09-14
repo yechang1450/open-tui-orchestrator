@@ -23,13 +23,13 @@
   },
   "regressions": [
     {
-      "root": "C:/Users/yecha/.tools/open-tui-orchestrator",
+      "root": "C:/Users/<user>/.tools/open-tui-orchestrator",
       "tests": 124,
       "pass": 124,
       "fail": 0
     },
     {
-      "root": "C:/Users/yecha/.codex/plugins/codex-TUI-orchestrator",
+      "root": "C:/Users/<user>/.codex/plugins/codex-TUI-orchestrator",
       "tests": 124,
       "pass": 124,
       "fail": 0
@@ -40,7 +40,7 @@
       "agent": "pi",
       "root": "D:/temp/pi-live-dcdcdacaee",
       "runId": "acceptance-ccc49c83-5b7d-4c8e-9538-fec742357325",
-      "entry": "C:\\Users\\yecha\\.tools\\open-tui-orchestrator\\cli.mjs",
+      "entry": "C:\\Users\\<user>\\.tools\\open-tui-orchestrator\\cli.mjs",
       "passed": true,
       "liveCoreHash": "dd9d5be10b6535818ee06062782de515df471a43c4cf08ade3ee8ee24d34a39d",
       "coreUnchanged": true,
@@ -230,7 +230,7 @@
       "agent": "codex",
       "root": "D:/temp/open-live-eeddedfddfc",
       "runId": "acceptance-d65f8ab6-3733-4959-a522-dfaa4f258182",
-      "entry": "C:\\Users\\yecha\\.codex\\plugins\\cache\\personal\\codex-TUI-orchestrator\\0.4.38+codex.20260906072601\\scripts\\orchestrate-sdk.mjs",
+      "entry": "C:\\Users\\<user>\\.codex\\plugins\\cache\\personal\\codex-TUI-orchestrator\\0.4.38+codex.20260906072601\\scripts\\orchestrate-sdk.mjs",
       "passed": true,
       "liveCoreHash": "cd5b69a64e257314b6ae6f1abb3339979077e294e3358b7e5c2dfb529c84b515",
       "coreUnchanged": true,
@@ -371,7 +371,7 @@
       "agent": "pi-recovery",
       "root": "D:/temp/recovery-4b907ee1-0030-408c-ba5c-3c3ebe04a712",
       "runId": "recovery-4b907ee1-0030-408c-ba5c-3c3ebe04a712",
-      "entry": "C:\\Users\\yecha\\.tools\\open-tui-orchestrator\\scripts\\orchestrate-sdk.mjs",
+      "entry": "C:\\Users\\<user>\\.tools\\open-tui-orchestrator\\scripts\\orchestrate-sdk.mjs",
       "passed": true,
       "liveCoreHash": "cd5b69a64e257314b6ae6f1abb3339979077e294e3358b7e5c2dfb529c84b515",
       "coreUnchanged": true,

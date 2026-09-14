@@ -3,7 +3,7 @@
   "date": "2026-09-12",
   "core": "1.10.0",
   "feature": "unit carrier tiering for headless mode: TUI-class agents run on a ConPTY pseudo-terminal carrier (real console, fully invisible); print-class agents keep the no-console carrier. Same launcher/identity/lease/recovery contract on both carriers.",
-  "releasedCopy": "C:/Users/yecha/.tools/releases/0.5.0/open-tui-orchestrator",
+  "releasedCopy": "C:/Users/<user>/.tools/releases/0.5.0/open-tui-orchestrator",
   "rootCause": "A TUI-class agent requires a terminal on stdin. The former headless carrier spawned the launcher with windowsHide+stdio:ignore (no console at all), so the agent exited 1 within ~300ms. Reproduced directly: windowsHide+stdio:ignore -> exit 1 in 338ms with zero output; piped stdin -> 'Error: stdin is not a terminal'. Alternatives tested and rejected: Start-Process -WindowStyle Hidden (no console; instant exit), conhost.exe --headless (flag not functional on this Windows build). ConPTY via @lydell/node-pty 1.2.0-beta.15 verified: the launcher runs with a real console (probe [Console]::WindowWidth = 200), fully invisible, and keeps the pidf/launcher-identity contract.",
   "runs": [
     {

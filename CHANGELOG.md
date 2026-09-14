@@ -3,6 +3,35 @@
 Notable changes, newest first. Every entry pairs a package version with a core version —
 `open-tui-orchestrator --version` prints both (`open-tui-orchestrator <version> (core <core>)`).
 
+## 0.9.3 — core 1.14.3
+
+### Fixed
+
+- **`--install-deps` is now reachable exactly when you need it.** If your environment sets
+  `ORCH_AGENT=codex`, the wrapper used to run the SDK dependency check (and the engine to
+  `import` `@openai/codex-sdk` at load) *before* the bootstrap entry could run — a deadlock for
+  anyone with missing dependencies. The bootstrap now runs before the engine, and its
+  implementation lives in `scripts/install-deps.mjs`, which imports nothing but Node builtins.
+- **A successful install is no longer reported as a failure.** The dependency probe was computed
+  once before the install, so `npm ci` succeeding (exit 0) still produced
+  `FATAL: dependency install failed`. It is re-checked after the install, and the success path now
+  has a regression test (offline, with an npm stub).
+- `ORCH_NPM_BIN` (new) points at a custom or corporate npm; a missing toolchain is reported with
+  the manual fallback command instead of a Node stack.
+
+### Changed
+
+- **Publishing metadata**: `private` removed, `description` / `keywords` / `author` / `license` /
+  `repository` / `homepage` / `bugs` added, and an explicit `files` list now excludes `test/` and
+  `scripts/node_modules` (without that exclusion the tarball picked up 385 MB of dev
+  dependencies — 143 MB packed; with it, 89 files / 292 kB). `npm publish --dry-run` is green.
+- **Machine identity stripped from the repository**: 18 tracked files / 77 occurrences of the
+  authoring machine's user name are normalized to `<user>`, and the root causes are fixed so
+  future artifacts stay clean (evidence collector, profile adapter provenance, the shipped hermes
+  profile).
+- npm is invoked through `node_modules/npm/bin/npm-cli.js` when available (no `shell: true`,
+  no `DEP0190` warning, no shell-quoting of paths).
+
 ## 0.9.2 — core 1.14.2
 
 ### Added

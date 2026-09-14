@@ -1,0 +1,39 @@
+{
+  "schema": 1,
+  "kind": "acceptance",
+  "date": "2026-09-14",
+  "round": "public-release-prep-2 (identity scrub + publishing metadata + bootstrap fix)",
+  "version": { "package": "0.9.3", "core": "1.14.3" },
+  "suite": { "pass": 287, "fail": 0, "skipped": 0, "command": "node --test --test-concurrency=3 test/*.test.mjs" },
+  "identityScrub": {
+    "trackedFilesTouched": 18,
+    "occurrencesNormalized": 77,
+    "rule": "user name -> <user>; machine name -> <machine>; GitHub handle left public",
+    "verification": "git grep -c yecha  => only yechang1450 remains",
+    "rootCausesFixed": [
+      "test/collect-recovery-evidence.mjs scrubs the user-name segment on write (scrubDeep)",
+      "scripts/core/adapt-lib.mjs records path.basename(cli) instead of the absolute path",
+      "scripts/core/agent-profiles/hermes.json provenance no longer carries a machine path"
+    ]
+  },
+  "publishingMetadata": {
+    "private": false,
+    "files": ["cli.mjs", "orch.mjs", "repair.mjs", "package.json", "release.json", "README.md", "README-zh.md", "INSTALL.md", "INSTALL-zh.md", "CHANGELOG.md", "LICENSE", "docs", "scripts", "!scripts/node_modules"],
+    "packWithoutExclusion": { "note": "measured: files:[\"scripts\"] pulled in the 385 MB dev node_modules", "tarballMB": 143.2, "entries": 12658 },
+    "packWithExclusion": { "files": 89, "tarballKB": 292.2, "unpackedKB": 691.8, "nodeModulesEntries": 0 },
+    "publishDryRun": { "exit": 0, "wouldPublish": "open-tui-orchestrator@0.9.3", "tag": "latest", "warning": "requires you to be logged in to https://registry.npmjs.org/ (dry-run)" },
+    "outstanding": "npm login / token — the only step left before a real publish"
+  },
+  "bootstrapFix": {
+    "bug1": "stale `present` constant computed before the install -> a successful npm ci (exit 0) was reported as FATAL: dependency install failed",
+    "bug2": "chicken-and-egg: with ORCH_AGENT=codex in the environment the wrapper ran the SDK dependency check and the engine top-level-imported @openai/codex-sdk, so --install-deps was unreachable exactly when dependencies were missing",
+    "fix": "bootstrap --install-deps is handled before the engine loads; single implementation in scripts/install-deps.mjs (Node builtins only); dependency probe re-evaluated after the install",
+    "extras": ["ORCH_NPM_BIN for custom/enterprise npm", "npm-cli.js direct spawn (no shell:true, no DEP0190)"],
+    "newTests": ["success path via an offline npm stub", "missing toolchain via ORCH_NPM_BIN pointing at a nonexistent npm"]
+  },
+  "artifactEndToEnd": {
+    "steps": ["npm pack (89 files / 292 kB)", "npm install --prefix <fresh> <tarball>", "cli.mjs --install-deps => {\"action\":\"installed\"} in 3.1 s with ORCH_AGENT=codex set", "cli.mjs --install-deps (rerun) => {\"action\":\"already-present\"}", "cli.mjs --agent codex --doctor => full JSON", "scripts/release-integrity.mjs => schema 2, 43/63 files"],
+    "runs": ["D:/temp/orch-pubtest2 (pre-fix, caught bug1)", "D:/temp/orch-pubtest3 (caught bug2)", "D:/temp/orch-pubtest4 (caught the engine-load deadlock)", "D:/temp/orch-pubtest5 (post-fix: installed/doctor/idempotent green)", "D:/temp/orch-pubtest6 (no DEP0190)", "D:/temp/orch-pubtest7 (final: install-deps 3 s, idempotent, doctor, seal verify)"]
+  },
+  "gate": { "levels": ["L1 suite 287/0/0", "L2a", "L2b", "L3", "L4 version/seal/docs/suite-count consistency"], "result": "PASS" }
+}

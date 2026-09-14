@@ -18,19 +18,19 @@
   },
   "regressions": [
     {
-      "repo": "C:/Users/yecha/.tools/open-tui-orchestrator",
+      "repo": "C:/Users/<user>/.tools/open-tui-orchestrator",
       "tests": 106,
       "pass": 106,
       "fail": 0
     },
     {
-      "repo": "C:/Users/yecha/.codex/plugins/codex-TUI-orchestrator",
+      "repo": "C:/Users/<user>/.codex/plugins/codex-TUI-orchestrator",
       "tests": 106,
       "pass": 106,
       "fail": 0
     }
   ],
-  "sharedCore": "C:\\Users\\yecha\\.tools\\open-tui-orchestrator\\scripts\\core",
+  "sharedCore": "C:\\Users\\<user>\\.tools\\open-tui-orchestrator\\scripts\\core",
   "selfContainedPackaging": {
     "verified": true,
     "sourceFiles": 12
@@ -42,7 +42,7 @@
       "runId": "acceptance-63fb8611-1ee8-400e-91bf-e62f227ff6e0",
       "version": "1.0.0",
       "root": "D:\\temp\\open-live-cfccbbcaab",
-      "entry": "C:\\Users\\yecha\\.tools\\open-tui-orchestrator\\cli.mjs",
+      "entry": "C:\\Users\\<user>\\.tools\\open-tui-orchestrator\\cli.mjs",
       "capacity": 8,
       "peak": 8,
       "windowLaunches": 8,
@@ -239,7 +239,7 @@
       "runId": "acceptance-f3d1a34d-5d48-4c11-9eba-b96cbb139d4c",
       "version": "1.0.0",
       "root": "D:\\temp\\open-live-cebfdfcdaf",
-      "entry": "C:\\Users\\yecha\\.tools\\open-tui-orchestrator\\cli.mjs",
+      "entry": "C:\\Users\\<user>\\.tools\\open-tui-orchestrator\\cli.mjs",
       "capacity": 8,
       "peak": 8,
       "windowLaunches": 8,
@@ -435,7 +435,7 @@
       "runId": "acceptance-11fcf493-2e22-4828-a21c-cbbb79d07851",
       "version": "1.0.1",
       "root": "D:\\temp\\open-live-adfebdacabcddcce",
-      "entry": "C:\\Users\\yecha\\.codex\\plugins\\cache\\personal\\codex-TUI-orchestrator\\0.4.38+codex.20260906072601\\scripts\\orchestrate-sdk.mjs",
+      "entry": "C:\\Users\\<user>\\.codex\\plugins\\cache\\personal\\codex-TUI-orchestrator\\0.4.38+codex.20260906072601\\scripts\\orchestrate-sdk.mjs",
       "capacity": 8,
       "peak": 8,
       "windowLaunches": 8,

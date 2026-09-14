@@ -1,7 +1,7 @@
 # RC 验收项 C：open-tui-orchestrator 发行副本 安装/升级/回滚 验收证据
 
 - 日期：2026-09-10（Windows + Git Bash，node v24.21.0）
-- 被验仓库（全程只读）：`C:\Users\yecha\.tools\open-tui-orchestrator`（另一场 live 验收实跑中）
+- 被验仓库（全程只读）：`C:\Users\<user>\.tools\open-tui-orchestrator`（另一场 live 验收实跑中）
 - 产物目录：`D:\temp\orch-acceptance-C\`（原始输出见同目录 `transcript.txt`）
 - 基线：仓库封印 schema 2、coreVersion 1.7.0、31 核心文件 + 49 运行时文件，与发行政策一致
 - 政策背景：本仓库是独立私有 CLI（`"private": true`，无插件管理器清单），发行政策第 5 步中「插件管理器激活升级回滚」落地为 repair.mjs 产出发行副本后的**目录级安装/升级/回滚**
@@ -26,7 +26,7 @@
 
 ### 1. 安装 — PASS
 
-命令：`node C:/Users/yecha/.tools/open-tui-orchestrator/repair.mjs --target D:/temp/orch-acceptance-C/v1`
+命令：`node C:/Users/<user>/.tools/open-tui-orchestrator/repair.mjs --target D:/temp/orch-acceptance-C/v1`
 输出：`published 118 file(s) to D:\temp\orch-acceptance-C\v1\open-tui-orchestrator`，exit=0。发布后维护锁已释放；副本顶层无 .git/temp/coverage。
 
 ### 2. 副本复验 — PASS（含两点发现）

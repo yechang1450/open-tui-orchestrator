@@ -4,7 +4,7 @@
   "coreVersion": "1.4.1",
   "coreHash": "39eb069a4b8e3e49fc4fdaf9e86f14585d8b78fbfd305a49aad4809e73c6ca4e",
   "mode": "Windows Terminal through synchronous no-activate helper",
-  "workspace": "C:/Users/yecha/.tools/open-tui-orchestrator",
+  "workspace": "C:/Users/<user>/.tools/open-tui-orchestrator",
   "visible": true,
   "headless": false,
   "minimized": false,

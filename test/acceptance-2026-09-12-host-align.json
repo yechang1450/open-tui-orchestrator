@@ -3,7 +3,7 @@
   "date": "2026-09-12",
   "core": "1.11.0",
   "feature": "host alignment: adapter-less initiating agents become first-class auto hosts (hermes profile landed via the adapt pipeline) + model/effort traceability (summary.model/effort/modelSource/effortSource; initiator-driven inheritance for caller-driven runs; machine-readable stdout stays pure)",
-  "releasedCopy": "C:/Users/yecha/.tools/releases/0.6.0/open-tui-orchestrator",
+  "releasedCopy": "C:/Users/<user>/.tools/releases/0.6.0/open-tui-orchestrator",
   "runs": [
     {
       "runId": "hermes-auto-1",

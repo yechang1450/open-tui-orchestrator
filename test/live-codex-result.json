@@ -2,7 +2,7 @@
   "testedAt": "2026-09-06T09:27:14.455Z",
   "passed": true,
   "equivalentToCurrentCodexPlugin": true,
-  "entry": "C:\\Users\\yecha\\.tools\\open-tui-orchestrator\\cli.mjs",
+  "entry": "C:\\Users\\<user>\\.tools\\open-tui-orchestrator\\cli.mjs",
   "workspace": "D:\\",
   "stateDirectory": "D:\\temp\\orchestrator",
   "terminal": "wt",

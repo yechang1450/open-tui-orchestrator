@@ -2438,22 +2438,11 @@ export async function main() {
     // 公开安装路径的补依赖入口：npm 发行包里不带锁定 SDK 依赖（node-pty + codex-sdk），
     // 用户装完包跑这一条即可，不需要自己拼路径。只装本包自己的依赖，不动任何 agent CLI；
     // 已装则直接回报（幂等、不联网）。stdout 保持纯数据（进度与失败原因都走 stderr）。
-    const pkgRoot=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..','..');
-    const scriptsDir=path.join(pkgRoot,'scripts');
-    const shim=(name)=>path.join(scriptsDir,'node_modules',name,'package.json');
-    const present=existsSync(shim('@openai/codex-sdk'))&&existsSync(shim('@lydell/node-pty'));
-    if(present){console.log(JSON.stringify({ok:true,action:'already-present',scriptsDir}));return;}
-    if(!existsSync(path.join(scriptsDir,'package-lock.json'))){console.error('[orchestrator] FATAL: package-lock.json is missing from '+scriptsDir+'; reinstall the package');process.exitCode=1;return;}
-    console.error('[orchestrator] installing locked SDK dependencies into '+scriptsDir+' (npm ci; network required)');
-    const npm=spawnSync(process.platform==='win32'?'npm.cmd':'npm',['ci','--prefix',scriptsDir],{cwd:scriptsDir,encoding:'utf8',windowsHide:true,shell:process.platform==='win32',timeout:900000});
-    const tail=(text)=>String(text||'').trim().split(/\r?\n/).slice(-12).join('\n');
-    if(npm.status!==0||!present){
-      console.error('[orchestrator] FATAL: dependency install failed (npm exit '+(npm.status??'null')+(npm.error?', '+npm.error.message:'')+')');
-      if(tail(npm.stderr))console.error(tail(npm.stderr));
-      console.error('[orchestrator] hint: '+(npm.error&&npm.error.code==='ENOENT'?'install Node.js 22+ so npm is on PATH, or ':'')+'run it manually: npm ci --prefix "'+scriptsDir+'"');
-      process.exitCode=1;return;
-    }
-    console.log(JSON.stringify({ok:true,action:'installed',scriptsDir}));return;
+    // 实现只有一份、且在 scripts/install-deps.mjs：它不依赖引擎（引擎缺依赖时加载不起来），
+    // 壳层在缺依赖场景下也走同一份实现。
+    const { installDepsCli } = await import('../install-deps.mjs');
+    process.exitCode = installDepsCli();
+    return;
   }
   if (mode === '--run-windows' || mode === '--resume-run') {
     requireHost();

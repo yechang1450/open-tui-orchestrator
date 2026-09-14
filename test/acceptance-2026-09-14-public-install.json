@@ -3,7 +3,7 @@
   "date": "2026-09-14",
   "core": "1.14.2",
   "feature": "public-install path — --install-deps entry (idempotent, pure-data stdout, clean failure with the manual fallback), INSTALL.md / INSTALL-zh.md / README install sections / CHANGELOG.md / issue template / docs/public-readiness.md",
-  "releasedCopy": "C:/Users/yecha/.tools/releases/0.9.2/open-tui-orchestrator",
+  "releasedCopy": "C:/Users/<user>/.tools/releases/0.9.2/open-tui-orchestrator",
   "installPathVerified": {
     "pack": "npm pack -> open-tui-orchestrator-0.9.1.tgz, 403.3 kB tarball / 162 files / 1.1 MB unpacked (node_modules, temp/ and the private flags stay out of the tarball)",
     "install": "npm install --prefix D:/temp/orch-pubtest <tarball> -> added 1 package in 4s",

@@ -3,7 +3,7 @@
   "date": "2026-09-14",
   "core": "1.14.1",
   "feature": "coordinator mutex hardening + residue cleanup — the lease mutex wait is tunable (ORCH_MUTEX_WAIT_MS, default 60000 ms; was hard-coded 20 s) and the acquisition is retried with exponential + jittered backoff (ORCH_MUTEX_RETRIES, default 2); the JS side bounds each attempt by the same value plus a start/exit margin (the old 30 s flat wait reported a failure even when the helper had already exited); killed helpers no longer leave lock tickets (age-based reclamation at transaction start AND on every coordinator-directory resolution, ORCH_MUTEX_TICKET_TTL_MS default 600000 ms; the helper polls its release file every 100 ms so tickets vanish within ~300 ms instead of ~1 s); queue-backoff end-to-end failures now carry the block-level reason",
-  "releasedCopy": "C:/Users/yecha/.tools/releases/0.9.1/open-tui-orchestrator",
+  "releasedCopy": "C:/Users/<user>/.tools/releases/0.9.1/open-tui-orchestrator",
   "rootCauses": {
     "falseFailure": "scripts/core/lease-lock.ps1 WaitOne(20000) hard-coded; on a loaded machine nine contending parents legitimately queue past 20 s (observed: 2/9 'Coordinator mutex acquisition failed' during the 0.8.0 release-copy full suite, while the same file passed in isolation in 16.6 s)",
     "longTail": "the JS wait was a flat 30 s and never observed the helper's exit — a helper that gave up at 20 s still cost the caller 30 s",

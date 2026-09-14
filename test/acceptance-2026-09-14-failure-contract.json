@@ -3,8 +3,8 @@
   "date": "2026-09-14",
   "core": "1.13.0",
   "feature": "machine-caller failure contract — one-line [orchestrator] FATAL diagnostics on every public entry (Node stack only with ORCH_DEBUG=1); unknown run fails closed on --verify-run/--resume-run (Run not found: <id>, no raw ENOENT, no stack frames); --watch bounded by ORCH_WATCH_GRACE_MS instead of polling forever (plus a mid-watch lost-summary report); wrapper entry keeps module-import semantics (seal/adapt failures still throw) and only becomes one-line when run as main",
-  "releasedCopy": "C:/Users/yecha/.tools/releases/0.8.0/open-tui-orchestrator",
-  "junction": "C:/Users/yecha/.tools/node24-fresh/node_modules/open-tui-orchestrator -> releases/0.8.0/open-tui-orchestrator (verified via Get-Item .Target and fs.realpathSync)",
+  "releasedCopy": "C:/Users/<user>/.tools/releases/0.8.0/open-tui-orchestrator",
+  "junction": "C:/Users/<user>/.tools/node24-fresh/node_modules/open-tui-orchestrator -> releases/0.8.0/open-tui-orchestrator (verified via Get-Item .Target and fs.realpathSync)",
   "byteParity": "105/105 sealed entries (43 core + 62 runtime) identical between the dev repo and the published copy; both seals report coreVersion 1.13.0",
   "probes": [
     {

@@ -18,7 +18,7 @@ The existing Windows scheduled task `OpenClaw Gateway` was disabled. Both the ga
 
 Enabled that existing task and started it through `openclaw gateway start --json`. Health subsequently passed. A fresh gateway status reported the gateway running, configuration audit clean and RPC connected. No credentials, model configuration or approval policy were changed.
 
-A no-tools connectivity request returned exactly `OPENCLAW_READY`, with run ID `296ff2e0-4301-4637-8df2-3d06e50a1cdd`. Delivery was not enabled. The response reported the existing configured workspace `C:\Users\yecha\Desktop\openclaw`, although the invoking shell was in `D:\`.
+A no-tools connectivity request returned exactly `OPENCLAW_READY`, with run ID `296ff2e0-4301-4637-8df2-3d06e50a1cdd`. Delivery was not enabled. The response reported the existing configured workspace `C:\Users\<user>\Desktop\openclaw`, although the invoking shell was in `D:\`.
 
 The evidence establishes why the service could not connect; it does not establish who or what disabled the scheduled task. This failure was local service unavailability, not an observed Internet transport timeout. A generic RPC connectivity probe does not prove every operator capability or external messaging channel is usable.
 

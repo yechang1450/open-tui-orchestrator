@@ -1,7 +1,7 @@
 {
   "passed": true,
   "runId": "recovery-c0ba4828-c21c-47f7-ab79-dc322dbcbc76",
-  "entry": "C:\\Users\\yecha\\.tools\\open-tui-orchestrator\\scripts\\orchestrate-sdk.mjs",
+  "entry": "C:\\Users\\<user>\\.tools\\open-tui-orchestrator\\scripts\\orchestrate-sdk.mjs",
   "workspace": "D:\\",
   "root": "D:\\temp\\recovery-c0ba4828-c21c-47f7-ab79-dc322dbcbc76",
   "agent": "kimi",
@@ -229,7 +229,7 @@
     "owner": {
       "ProcessId": 30604,
       "Name": "node.exe",
-      "CommandLine": "C:\\Users\\yecha\\.tools\\node22-fresh\\node.exe C:\\Users\\yecha\\.tools\\open-tui-orchestrator\\scripts\\orchestrate-sdk.mjs --resume-run recovery-c0ba4828-c21c-47f7-ab79-dc322dbcbc76",
+      "CommandLine": "C:\\Users\\<user>\\.tools\\node22-fresh\\node.exe C:\\Users\\<user>\\.tools\\open-tui-orchestrator\\scripts\\orchestrate-sdk.mjs --resume-run recovery-c0ba4828-c21c-47f7-ab79-dc322dbcbc76",
       "Started": "2026-09-09T14:41:51.0995570Z"
     },
     "success": true,

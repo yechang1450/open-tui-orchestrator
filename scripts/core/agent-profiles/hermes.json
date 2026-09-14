@@ -42,7 +42,7 @@
   },
   "adaptedAt": "2026-09-14T04:33:36.746Z",
   "adaptedFrom": {
-    "cli": "C:\\Users\\yecha\\AppData\\Local\\hermes\\hermes-agent\\venv\\Scripts\\hermes.exe",
+    "cli": "hermes.exe",
     "version": "0.21.2"
   },
   "modelDetection": {

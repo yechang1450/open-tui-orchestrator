@@ -8,7 +8,7 @@
   "schema": 1,
   "id": "kimi-caller",
   "label": "Kimi Code (caller-driven)",
-  "bin": "C:/Users/yecha/.kimi-code/bin/kimi.exe",
+  "bin": "C:/Users/<user>/.kimi-code/bin/kimi.exe",
   "args": [
    "-m",
    "deepseek/deepseek-flash",
