@@ -1,6 +1,6 @@
 {
   "name": "open-tui-orchestrator",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "private": true,
   "type": "module",
   "bin": { "open-tui-orchestrator": "cli.mjs", "orch": "orch.mjs", "orch-adapt": "scripts/adapt.mjs" },

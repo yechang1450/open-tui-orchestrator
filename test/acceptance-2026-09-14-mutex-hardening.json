@@ -1,0 +1,34 @@
+{
+  "schema": 1,
+  "date": "2026-09-14",
+  "core": "1.14.0",
+  "feature": "coordinator mutex hardening + residue cleanup — the lease mutex wait is tunable (ORCH_MUTEX_WAIT_MS, default 60000 ms; was hard-coded 20 s) and the acquisition is retried with exponential + jittered backoff (ORCH_MUTEX_RETRIES, default 2); the JS side bounds each attempt by the same value plus a start/exit margin (the old 30 s flat wait reported a failure even when the helper had already exited); killed helpers no longer leak lock tickets (age-based reclamation at the start of every transaction, ORCH_MUTEX_TICKET_TTL_MS default 600000 ms); queue-backoff end-to-end failures now carry the block-level reason",
+  "releasedCopy": "C:/Users/<user>/.tools/releases/0.9.0/open-tui-orchestrator",
+  "rootCauses": {
+    "falseFailure": "scripts/core/lease-lock.ps1 WaitOne(20000) hard-coded; on a loaded machine nine contending parents legitimately queue past 20 s (observed: 2/9 'Coordinator mutex acquisition failed' during the 0.8.0 release-copy full suite, while the same file passed in isolation in 16.6 s)",
+    "longTail": "the JS wait was a flat 30 s and never observed the helper's exit — a helper that gave up at 20 s still cost the caller 30 s",
+    "ticketLeak": "a killed or timed-out PowerShell helper never runs its own finally; lock-*.ready/.release accumulated without bound in the machine-wide coordinator directory (measured: 576 files / 770 KB)"
+  },
+  "criteria": [
+    {"name": "tuned wait fails fast", "expect": "with ORCH_MUTEX_WAIT_MS=1200 and the mutex held by a fixture, the transaction fails on the tuned wait", "redIf": "a hard-coded 20 s comes back (elapsed would exceed the 15 s bound)", "measured": "5166 ms"},
+    {"name": "retries absorb transient contention", "expect": "a hold released at 3 s is waited out, transaction succeeds", "redIf": "the retry loop is removed", "measured": "6221 ms"},
+    {"name": "age-based ticket reclamation", "expect": "20-minute-old tickets reclaimed; a fresh ticket and non-ticket files untouched", "redIf": "the sweep is removed (stale kept) or over-reaches (fresh/non-ticket deleted)"},
+    {"name": "no ticket residue after a normal transaction", "expect": "no lock-* files remain", "measured": "1772 ms"},
+    {"name": "nine-way contention", "expect": "8 of 9 parents acquire, 1 capacity rejection, no lost updates", "measured": "16929-18968 ms (was 52 s with 2 false failures on the 0.8.0 copy)"}
+  ],
+  "residueCleanup": {
+    "coordinatorTickets": "576 leaked lock-*.ready/.release removed from D:/temp/orchestrator/coordinator (leases.json [] and run-owners.json kept)",
+    "repoTemp": "dev repo temp/ (caller-fake-*, profile-home-*, orchestrator/, fixtures) removed; 851 KB -> 12 KB",
+    "releaseCopyTemp": "0.8.0 copy temp/ cleanup (71 KB -> 4 KB); 0.4.0-0.7.0 copies carry no temp/",
+    "orphanProcess": "PID 55936 (codex-tui-orchestrator plugin recovery worker, started 10:31, parent gone, idle 6.5 h) terminated",
+    "kept": "release copies 0.4.0-0.8.0 (documented rollback snapshots) and the evidence dirs referenced by acceptance JSONs are deliberately left in place"
+  },
+  "levelGate": {
+    "command": "python D:/build/tools/orch-level-check.py --run --log --doctor --canary --verify-missing --consistency",
+    "note": "L4 is new this round: CORE_VERSION / seal / the three documents' hard-coded version + counts / the suite total must agree, and the coordinator directory must hold no ticket older than the TTL",
+    "evidence": "D:/temp/orch-failure-contract/gate-090*.txt"
+  },
+  "offlineRegression": "282/282",
+  "seal": {"coreVersion": "1.14.0", "files": 43, "runtimeFiles": 62},
+  "flakeNote": "One full-suite run mid-round showed 2 reds (queue-backoff end-to-end, recovery-runtime) with the machine under concurrent agent load; both files pass in isolation (5/5, 2/2) and as a pair with the new mutex tests (8/8), and no coordinator/mutex error appeared in that log — classified as load sensitivity, diagnosed further by making the end-to-end failure print its block-level reason, and the new tests were slimmed (one shared process snapshot per file) to lower the suite's added load"
+}
