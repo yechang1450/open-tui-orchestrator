@@ -91,7 +91,10 @@ export function collectVerification(sum,checks,workspace) {
   return sum;
 }
 export function verifyRun(workspace,runId,acceptanceFile) {
-  const dir=runDirectory(workspace,runId),file=path.join(dir,'summary.json'),sum=JSON.parse(fs.readFileSync(file,'utf8'));
+  const dir=runDirectory(workspace,runId),file=path.join(dir,'summary.json');
+  // 机器可调用契约：未知 run 必须 fail-closed 且只回一行可读诊断（不许裸栈帧/ENOENT 甩路径）。
+  if(!fs.existsSync(file))throw new Error('Run not found: '+runId+' (no summary.json in '+dir+')');
+  const sum=JSON.parse(fs.readFileSync(file,'utf8'));
   if(sum.runId!==runId||!sum.finishedAt)throw new Error('Run is not finalized');
   if(sum.protocol===2)validateRecoverySummary(sum);
   const checks=loadChecks(acceptanceFile||path.join(dir,'acceptance.json'));
@@ -119,6 +122,7 @@ export async function runWindows(request,hooks,options={}) {
   try {
     let checks;
     if(options.resume) {
+      if(!fs.existsSync(summaryFile))throw new Error('Run not found: '+runId+' (no summary.json in '+dir+')');
       sum=JSON.parse(fs.readFileSync(summaryFile,'utf8'));
       if(sum.protocol!==2||!Array.isArray(sum.plan))throw new Error('This run has no recoverable task checkpoints');
       if((sum.agent||'codex')!==(options.agent||'codex'))throw new Error('Resume agent must match the saved run');

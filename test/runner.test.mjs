@@ -22,7 +22,7 @@ test('failed prerequisite retains both original tasks and never starts its depen
   const manifest=JSON.parse(fs.readFileSync(path.join(runDirectory(workspace,'failure'),'manifest.json'),'utf8'));
   assert.equal(manifest.tasks.length,2);
   await assert.rejects(()=>runWindows('执行甲',hooks,{workspace,runId:'failure'}),/already exists/);
-  assert.throws(()=>verifyRun(workspace,'other-run'),/ENOENT/);
+  assert.throws(()=>verifyRun(workspace,'other-run'),/Run not found: other-run/);
  }finally{await new Promise(r=>setTimeout(r,500));fs.rmSync(workspace,{recursive:true,force:true});}
 });
 
@@ -64,4 +64,23 @@ test('windowCap throttles live-window admission below planning capacity',async()
   assert.equal(maxLive,1,'windows exceeded the admission cap');
   assert.equal(sum.blocks.length,3,'planning must keep all blocks');
  }finally{await new Promise(r=>setTimeout(r,500));fs.rmSync(workspace,{recursive:true,force:true});}
+});
+
+// 机器可调用契约：未知 run 必须 fail-closed —— 一行诊断、无栈帧、立刻返回。
+// 这条判据能红：把 verifyRun/resume 的缺件分支改回裸 readFileSync（ENOENT/栈帧）即失败。
+test('unknown run fails closed with a one-line diagnostic on verify and resume',async()=>{
+ fs.mkdirSync(family,{recursive:true});const workspace=fs.mkdtempSync(path.join(family,'runner-missing-'));
+ const hooks={plan:async()=>[{title:'A',tasks:[{prompt:'执行甲'}]}],compact:p=>p,infer:()=>[],prompt:p=>p,
+  launcher:key=>({pidf:path.join(workspace,'window-'+key+'.pid')}),register:()=>{},unregister:()=>{},cleanup:()=>{},spawn:async()=>false,readPid:()=>0};
+ try{
+  const verifyError=(()=>{try{verifyRun(workspace,'ghost-run');return null;}catch(e){return e;}})();
+  assert.ok(verifyError,'verifyRun must refuse an unknown run');
+  assert.match(verifyError.message,/Run not found: ghost-run/);
+  assert.doesNotMatch(verifyError.message,/\n/,'diagnostic must stay on one line');
+  assert.doesNotMatch(verifyError.message,/\s+at\s/,'diagnostic must not carry stack frames');
+  const resumeError=await runWindows('执行甲',hooks,{workspace,capacity:8,runId:'ghost-run',resume:true,coordinator:path.join(workspace,'temp','coordinator')}).then(()=>null,e=>e);
+  assert.ok(resumeError,'resume must refuse an unknown run');
+  assert.match(resumeError.message,/Run not found: ghost-run/);
+  assert.doesNotMatch(resumeError.message,/\s+at\s/,'resume diagnostic must not carry stack frames');
+ }finally{await new Promise(r=>setTimeout(r,200));fs.rmSync(workspace,{recursive:true,force:true});}
 });

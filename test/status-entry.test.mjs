@@ -25,3 +25,25 @@ test('public SDK status dispatch returns an actual read-only status, not usage',
   assert.doesNotMatch(inline.stdout,/win-launch-/,'single-block preflight must not create a TUI launcher');
  } finally { fs.rmSync(workspace,{recursive:true,force:true}); }
 });
+
+// 机器可调用契约（L3 翻转判据）：未知 run 从公开入口出去时，只允许一行
+// `[orchestrator] FATAL: Run not found: <id>`——退出码非 0、无栈帧、无 ENOENT 原文、不挂起。
+// 走真实入口（cli.mjs → scripts/orchestrate-sdk.mjs），所以它同时守住「入口永不甩裸栈」这条。
+test('unknown-run entries fail closed with one clean diagnostic line',{skip:CODEX_CLI_SKIP},()=>{
+ const file=fileURLToPath(new URL('../cli.mjs',import.meta.url));
+ const root=fileURLToPath(new URL('../',import.meta.url));
+ const workspace=fs.mkdtempSync(path.join(root,'temp','missing-run-'));
+ try {
+  const env={...process.env,ORCH_AGENT:'codex',WORKSPACE_DIR:workspace,ORCH_STATE_DIR:path.join(workspace,'temp','orchestrator'),
+   ORCH_WATCH_GRACE_MS:'300',ORCH_MAINTENANCE_LOCK:path.join(workspace,'no-maintenance-lock.json')};
+  for(const args of [['--verify-run','nosuch-run-entj'],['--resume-run','nosuch-run-entj'],['--watch','nosuch-run-entj']]){
+   const result=spawnSync(process.execPath,[file,...args],{cwd:workspace,env,encoding:'utf8',windowsHide:true,timeout:30000});
+   const label=args.join(' '),output=(result.stdout||'')+(result.stderr||'');
+   assert.equal(typeof result.status,'number',label+' must exit (spawnSync timeout would leave status null): '+output);
+   assert.notEqual(result.status,0,label+' must exit non-zero: '+output);
+   assert.match(output,/Run not found: nosuch-run-entj/,label+' must name the missing run: '+output);
+   assert.doesNotMatch(output,/^\s+at /m,label+' must not dump Node stack frames: '+output);
+   assert.doesNotMatch(output,/ENOENT/,label+' must not leak the raw fs error: '+output);
+  }
+ } finally { fs.rmSync(workspace,{recursive:true,force:true}); }
+});
