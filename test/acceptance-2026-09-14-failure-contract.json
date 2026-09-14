@@ -1,0 +1,59 @@
+{
+  "schema": 1,
+  "date": "2026-09-14",
+  "core": "1.13.0",
+  "feature": "machine-caller failure contract — one-line [orchestrator] FATAL diagnostics on every public entry (Node stack only with ORCH_DEBUG=1); unknown run fails closed on --verify-run/--resume-run (Run not found: <id>, no raw ENOENT, no stack frames); --watch bounded by ORCH_WATCH_GRACE_MS instead of polling forever (plus a mid-watch lost-summary report); wrapper entry keeps module-import semantics (seal/adapt failures still throw) and only becomes one-line when run as main",
+  "releasedCopy": "C:/Users/yecha/.tools/releases/0.8.0/open-tui-orchestrator",
+  "junction": "C:/Users/yecha/.tools/node24-fresh/node_modules/open-tui-orchestrator -> releases/0.8.0/open-tui-orchestrator (verified via Get-Item .Target and fs.realpathSync)",
+  "byteParity": "105/105 sealed entries (43 core + 62 runtime) identical between the dev repo and the published copy; both seals report coreVersion 1.13.0",
+  "probes": [
+    {
+      "entry": "open-tui-orchestrator --workspace <ws> --verify-run nosuch-run-entj",
+      "copy": "0.8.0 via PATH shim",
+      "exit": 1,
+      "output": "[orchestrator] FATAL: Run not found: nosuch-run-entj (no summary.json in D:\\temp\\orch-failure-contract\\ws\\temp\\orchestrator\\runs\\nosuch-run-entj)",
+      "stackFrames": 0,
+      "evidence": "D:/temp/orch-failure-contract/verify.out"
+    },
+    {
+      "entry": "open-tui-orchestrator --workspace <ws> --resume-run nosuch-run-entj",
+      "copy": "0.8.0 via PATH shim",
+      "exit": 1,
+      "output": "… [orchestrator] FATAL: Run not found: nosuch-run-entj (no summary.json in …)",
+      "stackFrames": 0,
+      "evidence": "D:/temp/orch-failure-contract/resume.out"
+    },
+    {
+      "entry": "ORCH_WATCH_GRACE_MS=300 open-tui-orchestrator --workspace <ws> --watch nosuch-run-entj",
+      "copy": "0.8.0 via PATH shim",
+      "exit": 1,
+      "elapsedMs": 1565,
+      "output": "[orchestrator] FATAL: Run not found: nosuch-run-entj (no run directory D:\\temp\\orch-failure-contract\\ws\\temp\\orchestrator\\runs\\nosuch-run-entj)",
+      "stackFrames": 0,
+      "evidence": "D:/temp/orch-failure-contract/watch.out",
+      "before": "on the previous 0.7.0 copy the same command polled forever with zero output (the stale junction made this reproducible during the round: two node processes alive, watch.out empty after 5 minutes)"
+    },
+    {
+      "entry": "open-tui-orchestrator --version / node cli.mjs --agent codex --doctor / --status --readonly (from the published copy)",
+      "copy": "0.8.0",
+      "result": "0.8.0 (core 1.13.0); hostError=null; carrier pty available; no alive windows, reservations, pending locks or active runs"
+    }
+  ],
+  "levelGate": {
+    "command": "python D:/build/tools/orch-level-check.py --run --log --doctor --canary --verify-missing",
+    "L1": "pass=278 fail=0 skipped=0 exit=0, HEAD=9a5c446, tree clean (log D:/temp/orch-level/L1-suite.log)",
+    "L2a": "doctor hostError=null",
+    "L2b": "canary fails red as required (fail==1, exit!=0)",
+    "L3": "PASS — the previously on-record gap flipped: exit=1, stack frames=0, 'Run not found' present",
+    "total": "ORCH_LEVEL_CHECK: PASS",
+    "evidence": "D:/temp/orch-failure-contract/gate-final.txt"
+  },
+  "releaseCopySuite": {
+    "result": "277/278 — the single red is test/coordinator-process.test.mjs under full-suite load: 2 of 9 contending parents exceeded the coordinator mutex wait (scripts/core/lease-lock.ps1 WaitOne(20000)) and reported 'Coordinator mutex acquisition failed'; the same file passes in isolation in 16.6 s on the same copy, and the identical code passed 278/278 twice in the dev repo",
+    "classification": "load-sensitive environment flake, not a regression of this round; ledgered as the next core round's candidate (env-tunable + retried mutex wait)",
+    "evidence": "D:/temp/orch-failure-contract/release-copy-suite.log"
+  },
+  "offlineRegression": "278/278",
+  "seal": {"coreVersion": "1.13.0", "files": 43, "runtimeFiles": 62},
+  "commit": "9a5c446"
+}
