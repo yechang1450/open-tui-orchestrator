@@ -226,6 +226,42 @@ export function readProfileKey(file, key, jsonc) {
   const m = re.exec(text);
   return m && m[1].trim() ? m[1].trim() : '';
 }
+// YAML 风格「节内键」读取：model: 节下的 default / reasoning_effort 等嵌套键（JSON 亦支持）。
+// 只读精确节点名与精确键名，绝不猜测。
+export function readSectionKey(file, section, key, jsonc) {
+  let text = fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, '');
+  const esc = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  if (/\.jsonc?$/i.test(file) || jsonc) {
+    let obj = null;
+    try { obj = JSON.parse(text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')); } catch { obj = null; }
+    const v = obj && obj[section] && obj[section][key];
+    return typeof v === 'string' && v.trim() ? v.trim() : '';
+  }
+  const lines = text.split(/\r?\n/);
+  const secRe = new RegExp('^(\\s*)' + esc(section) + '\\s*:\\s*$');
+  for (let i = 0; i < lines.length; i++) {
+    const m = secRe.exec(lines[i]);
+    if (!m) continue;
+    const indent = m[1].length;
+    for (let j = i + 1; j < lines.length; j++) {
+      const line = lines[j];
+      if (!line.trim() || /^\s*#/.test(line)) continue;
+      const ind = /^(\s*)/.exec(line)[1].length;
+      if (ind <= indent) break;
+      const hit = new RegExp('^\\s*' + esc(key) + '\\s*:\\s*["\']?([^"\'#\\r\\n]+)').exec(line);
+      if (hit && hit[1].trim()) return hit[1].trim();
+    }
+  }
+  return '';
+}
+
+// 该 agent 是否具备「档位继承探测」能力（原生适配器或带 modelDetection 的画像）。
+// 用于「无记录 → 宿主自身配置兜底」时打印明确声明（禁止静默换档）；openclaw/纯自定义单元不适用。
+export function hasModelDetector(agent, env = process.env) {
+  if (['codex', 'kimi', 'pi', 'opencode', 'claude'].includes(String(agent || ''))) return true;
+  try { return !!(loadProfile(agent, env) || {}).modelDetection; } catch { return false; }
+}
+
 function detectProfile({ id, env = process.env }) {
   const profile = loadProfile(id, env);
   const md = profile && profile.modelDetection;
@@ -236,10 +272,15 @@ function detectProfile({ id, env = process.env }) {
   for (const c of md.config || []) {
     try {
       const home = env.USERPROFILE || env.HOME || os.homedir();
-      const file = String(c.file || '').startsWith('~') ? path.join(home, String(c.file).slice(1)) : path.resolve(String(c.file || ''));
-      if (!file || !fs.existsSync(file)) continue;
-      if (!model && c.modelKey) model = readProfileKey(file, c.modelKey);
-      if (!effort && c.effortKey) effort = readProfileKey(file, c.effortKey);
+      const raw = String(c.file || '');
+      // ~ 展开 + $VAR/${VAR} 环境变量展开（如 $HERMES_HOME/config.yaml）；变量未定义时保持字面量、文件不存在即跳过。
+      const expanded = raw.startsWith('~') ? path.join(home, raw.slice(1))
+        : raw.replace(/\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?/g, (m, name) => env[name] || m);
+      const file = path.resolve(expanded);
+      if (!expanded || !fs.existsSync(file)) continue;
+      const readIn = (sec, k) => (sec ? readSectionKey(file, sec, k) : readProfileKey(file, k));
+      if (!model && c.modelKey) model = readIn(c.section, c.modelKey);
+      if (!effort && c.effortKey) effort = readIn(c.effortSection || c.section, c.effortKey);
     } catch { /* try next */ }
   }
   return model || effort ? { model: model || null, effort: effort || null, source: 'profile:' + id } : null;

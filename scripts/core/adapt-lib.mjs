@@ -5,7 +5,7 @@ import {fileURLToPath} from 'node:url';
 import {probeCli} from './host-probe.mjs';
 import {profilesDir,loadProfile} from './print-profile.mjs';
 import {detectHostAgent} from './host-cli.mjs';
-import {readProfileKey} from './host-model.mjs';
+import {readProfileKey,readSectionKey} from './host-model.mjs';
 import {readMaintenanceLock,acquireMaintenanceLock,releaseMaintenanceLock} from './maintenance-lock.mjs';
 
 // 自动适配（print-class 画像管线）：
@@ -15,7 +15,7 @@ import {readMaintenanceLock,acquireMaintenanceLock,releaseMaintenanceLock} from 
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const BUILTIN = new Set(['pi', 'openclaw', 'opencode', 'kimi', 'claude', 'codex']);
-export const PROMPT_FLAG_CANDIDATES = ['-p', '--print', '--message', '-m'];
+export const PROMPT_FLAG_CANDIDATES = ['-p', '--print', '-z', '--oneshot', '--prompt', '--message', '--ask', '--run', '--exec', '-m'];
 export const APPROVE_CANDIDATES = ['--yes-always', '--dangerously-skip-permissions', '--yolo', '--auto', '--approve', '--full-auto', '--dangerously-bypass-approvals-and-sandbox'];
 
 function run(cmd, args, opts = {}) {
@@ -46,6 +46,26 @@ export function discoverModelDetection(id, { home = process.env.USERPROFILE || p
     for (const k of MODEL_KEYS) { try { if (readProfileKey(file, k)) { modelKey = k; break; } } catch { /* try next key */ } }
     for (const k of EFFORT_KEYS) { try { if (readProfileKey(file, k)) { effortKey = k; break; } } catch { /* try next key */ } }
     if (modelKey || effortKey) { spec.config = [{ file: '~/' + rel.split(path.sep).join('/'), modelKey: modelKey || undefined, effortKey: effortKey || undefined }]; break; }
+  }
+  // <ID>_HOME / <ID>_CONFIG_DIR（如 HERMES_HOME）指向的配置目录：v0 风格 config.yaml/json 里
+  // 档位常嵌在 model 节内（model.default / model.reasoning_effort）。落成 $VAR 引用，画像机器无关。
+  if (!spec.config) {
+    const homeVar = [up + '_HOME', up + '_CONFIG_DIR'].find((n) => env[n] && String(env[n]).trim());
+    if (homeVar) {
+      const homeDir = String(env[homeVar]).trim();
+      for (const name of ['config.yaml', 'config.yml', 'config.json']) {
+        const file = path.join(homeDir, name);
+        try { if (!fs.statSync(file).isFile()) continue; } catch { continue; }
+        let modelKey = '', effortKey = '', effortSection = '';
+        for (const k of ['default', 'name', ...MODEL_KEYS]) { try { if (readSectionKey(file, 'model', k)) { modelKey = k; break; } } catch { /* next */ } }
+        // effort 不一定与 model 同节（hermes：model.default 在 model 节、reasoning_effort 在 agent 节）
+        for (const sec of ['model', 'agent']) {
+          if (effortKey) break;
+          for (const k of ['reasoning_effort', ...EFFORT_KEYS]) { try { if (readSectionKey(file, sec, k)) { effortKey = k; effortSection = sec; break; } } catch { /* next */ } }
+        }
+        if (modelKey || effortKey) { spec.config = [{ file: '$' + homeVar + '/' + name, section: 'model', modelKey: modelKey || undefined, effortKey: effortKey || undefined, effortSection: effortSection && effortSection !== 'model' ? effortSection : undefined }]; break; }
+      }
+    }
   }
   return (spec.env || spec.effortEnv || spec.config) ? spec : null;
 }
@@ -87,11 +107,15 @@ export async function adaptAgent({ id, cli, env = process.env, live = true, comm
   if (help.status !== 0) { report.reason = '--help probe failed: ' + (help.error || 'exit ' + help.status); return report; }
   const helpText = help.out;
   const flagBoundary = (f) => new RegExp('(^|[\\s,|\\[\\]()])' + f.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&') + '([\\s,|\\[\\]()]|$)', 'm');
-  const promptFlag = PROMPT_FLAG_CANDIDATES.find((f) => flagBoundary(f).test(helpText));
+  // 模型旗标的短别名（形如 "-m MODEL, --model MODEL"）：短别名绝不能被当作 prompt 旗标
+  // 误取——否则提示词会被喂给 model 参数、CLI 掉进交互模式（无终端即崩），探活与单元双失败。
+  const modelAlias = /(^|\n)\s*(-[A-Za-z])\s+[A-Z_.]+(?:\s*,\s*|\s{2,})--model\b/.exec(helpText)?.[2] || null;
+  const promptFlag = PROMPT_FLAG_CANDIDATES.find((f) => f !== modelAlias && flagBoundary(f).test(helpText));
   if (!promptFlag) { report.reason = 'no one-shot prompt flag found (candidates: ' + PROMPT_FLAG_CANDIDATES.join(' ') + '); not a print-class CLI — needs a manual adapter'; return report; }
   const approve = APPROVE_CANDIDATES.filter((f) => flagBoundary(f).test(helpText));
   const model = flagBoundary('--model').test(helpText) ? ['--model'] : null;
-  const effort = flagBoundary('--effort').test(helpText) ? ['--effort'] : null;
+  const effortFlag = ['--effort', '--reasoning', '--thinking'].find((f) => flagBoundary(f).test(helpText));
+  const effort = effortFlag ? [effortFlag] : null;
   const probeToken = 'ADAPTOK-' + Math.random().toString(36).slice(2, 10);
   const profile = {
     schema: 1,

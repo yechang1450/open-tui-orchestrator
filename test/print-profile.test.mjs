@@ -113,6 +113,18 @@ test('a profiled agent runs end-to-end through orch (forced unit, acceptance ver
     assert.match(r.stdout, /spawned headless fakeprint unit/);
     const sum = JSON.parse(fs.readFileSync(path.join(ws, 'temp', 'orchestrator', 'runs', 'profile-e2e', 'summary.json'), 'utf8'));
     assert.equal(sum.success, true, JSON.stringify(sum.results).slice(0, 400));
+    // 档位留痕（P0-3）：无显式、无继承记录时 = host-default（宿主自身配置兜底），四个字段必须都在。
+    for (const k of ['model', 'effort', 'modelSource', 'effortSource']) assert.ok(k in sum, 'summary must carry ' + k);
+    assert.equal(sum.modelSource, 'host-default');
+    // 显式档位：ORCH_MODEL/ORCH_EFFORT 优先，summary 记 explicit，日志有明确声明。
+    const env2 = {...env, ORCH_MODEL: 'fake/m1', ORCH_EFFORT: 'max'};
+    const r2 = spawnSync(process.execPath, [path.join(root, 'orch.mjs'), '--run-id', 'profile-e2e-explicit', '整理一下这个请求'], { cwd: ws, env: env2, encoding: 'utf8', windowsHide: true, timeout: 180000 });
+    assert.equal(r2.status, 0, r2.stderr || r2.stdout);
+    assert.match(r2.stdout, /model\/effort: explicit/);
+    const sum2 = JSON.parse(fs.readFileSync(path.join(ws, 'temp', 'orchestrator', 'runs', 'profile-e2e-explicit', 'summary.json'), 'utf8'));
+    assert.equal(sum2.model, 'fake/m1');
+    assert.equal(sum2.modelSource, 'explicit');
+    assert.equal(sum2.effortSource, 'explicit');
   } finally {
     for (let i = 0; i < 5; i++) { try { fs.rmSync(s.dir, {recursive: true, force: true}); } catch { /* retry */ } try { fs.rmSync(ws, {recursive: true, force: true}); } catch { /* retry */ } await new Promise((res) => setTimeout(res, 400)); }
   }
