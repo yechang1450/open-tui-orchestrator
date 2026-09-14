@@ -133,3 +133,24 @@ test('a completed transaction leaves no mutex ticket files behind',winOnly,async
   assert.deepEqual(fs.readdirSync(dir).filter(n=>/^lock-/.test(n)),[],'tickets must be reclaimed, not leaked');
  }finally{fs.rmSync(dir,{recursive:true,force:true});}
 });
+
+// 入口即回收：解析协调器目录时顺带按龄回收，保证「空闲时也不会长期积压」——被强杀的 PS 跑不到
+// 自己的清理，旧实现只能等下一次事务才收（红＝把 coordinatorDir 里的回收去掉）。
+test('resolving the coordinator directory reclaims aged tickets',async()=>{
+ const {coordinatorDir}=await import('../scripts/core/leases.mjs');
+ fs.mkdirSync(family,{recursive:true});const workspace=fs.mkdtempSync(path.join(family,'coord-sweep-'));
+ try{
+  const coord=path.join(workspace,'temp','orchestrator','coordinator');
+  fs.mkdirSync(coord,{recursive:true});
+  const stale=path.join(coord,'lock-'+randomUUID()+'.ready');
+  const fresh=path.join(coord,'lock-'+randomUUID()+'.ready');
+  const leases=path.join(coord,'leases.json');
+  for(const f of [stale,fresh,leases])fs.writeFileSync(f,'x');
+  const old=(Date.now()-20*60*1000)/1000;
+  fs.utimesSync(stale,old,old);
+  assert.equal(coordinatorDir(workspace,{NODE_TEST_CONTEXT:'child-v8'}),coord);
+  assert.ok(!fs.existsSync(stale),'aged tickets must be reclaimed when the coordinator directory is resolved');
+  assert.ok(fs.existsSync(fresh),'a fresh ticket must survive entry housekeeping');
+  assert.ok(fs.existsSync(leases),'leases.json must never be touched');
+ }finally{fs.rmSync(workspace,{recursive:true,force:true});}
+});

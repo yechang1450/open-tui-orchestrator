@@ -32,6 +32,7 @@ export function launcherIdentity(pid,pidFile,snapshot=processSnapshot()) {
 // Under `node --test` (NODE_TEST_CONTEXT is set) the machine-wide locator is
 // never touched: test workspaces keep their coordinator in their own temp.
 export function coordinatorDir(workspace,env=process.env) {
+  const resolved=(()=>{
   if(env.ORCH_COORDINATOR_DIR)return path.resolve(workspace,env.ORCH_COORDINATOR_DIR);
   const fallback=path.join(workspace,'temp','orchestrator','coordinator');
   if(process.platform!=='win32'||env.NODE_TEST_CONTEXT)return fallback;
@@ -40,6 +41,12 @@ export function coordinatorDir(workspace,env=process.env) {
   const r=spawnSync(PS_EXE,['-NoProfile','-Command',script],{encoding:'utf8',windowsHide:true,timeout:20000});
   if(r.status!==0||!r.stdout.trim())throw new Error('Unable to locate machine window coordinator');
   return path.resolve(r.stdout.trim());
+  })();
+  // 入口即回收：被强杀的 PS 不会执行自己的清理，过期锁票会一直躺在协调器目录里（本轮清理时实测
+  // 576 个）。这里每次解析协调器目录时顺手按龄回收一次（只删老旧票，绝不碰在票）——保证空闲时
+  // 也不会长期积压，而不是等到下一次事务才清。
+  if(fs.existsSync(resolved))sweepStaleMutexTickets(resolved);
+  return resolved;
 }
 // 协调器内核互斥的口径（全部可调；2026-09-14 修：旧值把等待写死 20s，满载多竞争者会假失败）：
 // - ORCH_MUTEX_WAIT_MS     PS 侧 WaitOne 时长，默认 60000ms；
