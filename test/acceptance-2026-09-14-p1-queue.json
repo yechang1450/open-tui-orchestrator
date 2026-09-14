@@ -1,0 +1,32 @@
+{
+  "schema": 1,
+  "date": "2026-09-14",
+  "core": "1.12.0",
+  "feature": "queue wait backoff (exponential + jitter for capacity/conflict waiters; ORCH_WAIT_BACKOFF_MS / ORCH_WAIT_BACKOFF_MAX_MS) + OpenClaw version-gate diagnostics (runtime tui interface probe runs before the version gate; unverified versions fail closed carrying the probe result, node-pty presence and the last-verified version) + orch-adapt shim (dev-repo first, installed-copy fallback)",
+  "releasedCopy": "C:/Users/<user>/.tools/releases/0.7.0/open-tui-orchestrator",
+  "runs": [
+    {
+      "runId": "p1-queue-1",
+      "host": "caller-supplied unit (fakeunit; zero model calls — the queue mechanism is agent-agnostic)",
+      "spawnMode": "headless",
+      "carrier": "stdio",
+      "windowCap": 1,
+      "blocks": 2,
+      "success": true,
+      "tasks": {"T001": "verified", "T002": "verified"},
+      "evidence": [
+        "D:/temp/orch-p1-accept/run.log",
+        "board: 0/2 verified 1 waiting [B1▶ B2⏳] → 1/2 verified 1 waiting → 2/2 finalized success=true"
+      ],
+      "note": "two independent blocks serialized through a single admitted window (ORCH_MAX_WINDOWS=1) with fast test backoff (60/150ms); the waiting block's state is visible on the board and clears exactly when capacity frees up"
+    }
+  ],
+  "openclawProbe": {
+    "installedVersion": "2026.9.3",
+    "lastVerified": "2026.9.2",
+    "probe": "openclaw tui --help → exit 0, --local/--session/--message present; node-pty present",
+    "gate": "fail-closed with the probe result embedded (first cold probe run can report mismatch if the 30s timeout is exceeded; reran OK)"
+  },
+  "offlineRegression": "272/272",
+  "seal": {"coreVersion": "1.12.0", "files": 43, "runtimeFiles": 62}
+}
