@@ -80,7 +80,8 @@ import { networkConfig } from "./network-policy.mjs";
 import { spawn, spawnSync } from "node:child_process";
 import {watchRun, boardSummaryLine} from "./run-board.mjs";
 import { resolveAgent, launchArgs } from "./agent.mjs";
-import { inheritHostModelEffort } from "./host-model.mjs";
+import { inheritHostModelEffort, hasModelDetector } from "./host-model.mjs";
+import { detectHostAgent } from "./host-cli.mjs";
 import { writeFileSync, mkdirSync, readFileSync, existsSync, rmSync, readdirSync, statSync, statfsSync, openSync, readSync, closeSync, renameSync } from "node:fs";
 import os from "node:os";
 import crypto from "node:crypto";
@@ -162,11 +163,32 @@ const CODEX_Q = CODEX.replace(/'/g, "''");
 const PY_DIR = (() => { try { const p = String(process.env.PYTHON || ""); return path.isAbsolute(p) && existsSync(p) ? path.dirname(p) : null; } catch { return null; } })();
 // 发起窗 model/thinking 继承（同窗即同 agent，逐字透传）：显式 ORCH_MODEL/ORCH_EFFORT 优先；
 // 未显式给出时检测发起窗口当前实际值并写回 env，下游 argv 构造与 codex -m/-c 注入全部消费这两个变量。
+// 调用方自助通道（unit）下执行者由调用方指定，档位改从「发起者」身份探测（发起者≠执行者是常态）。
+// 档位去向全部留痕（MODEL_PLAN → summary.json 的 model/effort/modelSource/effortSource）：
+// explicit / 继承来源 / host-default（宿主自身配置兜底，且打印明确声明，禁止静默换档）。
 // node --test 下由 inheritHostModelEffort 自行豁免（NODE_TEST_CONTEXT）。
+// 机器可读入口（--doctor/--tasks/--status/--watch/--verify-run 等）的 stdout 只允许纯数据：
+// 档位解读性输出一律让位——信息已进 doctor 字段与 summary 留痕。
+const MACHINE_READABLE = process.argv.slice(2).some((a) => /^--(doctor|tasks|status|watch|verify-run|version|help)$/.test(a) || a === '-h');
+const noteModel = (line) => { if (!MACHINE_READABLE) console.log(line); };
+let MODEL_PLAN = {model:null,effort:null,modelSource:'none',effortSource:'none'};
 if (!AGENT_ERROR) try {
-  const inherited = inheritHostModelEffort(AGENT.agent, { cwd: WORKSPACE });
-  if (inherited) console.log(`[orchestrator] inherit host model/effort (${AGENT.agent}/${inherited.source}): model=${inherited.model || '-'} effort=${inherited.effort || '-'}`);
-} catch { /* 检测失败不阻断 */ }
+  const explicitModel = String(process.env.ORCH_MODEL || '').trim() || null;
+  const explicitEffort = String(process.env.ORCH_EFFORT || '').trim() || null;
+  let inheritFrom = AGENT.agent;
+  if (AGENT.config.unit) {
+    try { const hostId = detectHostAgent(process.env); if (hostId && hostId !== AGENT.agent) inheritFrom = hostId; } catch { /* 发起者未知：保持执行者身份 */ }
+  }
+  const inherited = inheritHostModelEffort(inheritFrom, { cwd: WORKSPACE });
+  const model = String(process.env.ORCH_MODEL || '').trim() || null;
+  const effort = String(process.env.ORCH_EFFORT || '').trim() || null;
+  MODEL_PLAN = { model, effort,
+    modelSource: explicitModel ? 'explicit' : (inherited && inherited.model ? inherited.source : 'host-default'),
+    effortSource: explicitEffort ? 'explicit' : (inherited && inherited.effort ? inherited.source : 'host-default') };
+  if (explicitModel || explicitEffort) noteModel(`[orchestrator] model/effort: explicit (model=${model || '-'} effort=${effort || '-'})`);
+  else if (inherited) noteModel(`[orchestrator] inherit host model/effort (${inheritFrom}${inheritFrom !== AGENT.agent ? ' as initiator' : ''}/${inherited.source}): model=${inherited.model || '-'} effort=${inherited.effort || '-'}`);
+  else if (hasModelDetector(inheritFrom)) noteModel(`[orchestrator] model/effort: no initiator session record for ${inheritFrom}; using its own CLI config/default (model=${model || '-'} effort=${effort || '-'}; pin with ORCH_MODEL/ORCH_EFFORT)`);
+} catch { /* 检测失败不阻断；MODEL_PLAN 保持 none */ }
 // Leave model selection to the host CLI unless explicitly overridden.
 const MODEL = process.env.ORCH_MODEL || undefined;
 const EFFORT = process.env.ORCH_EFFORT || undefined;
@@ -2466,7 +2488,7 @@ export async function main() {
       register:r=>updateWindows(ws=>[...ws,r]),commit:commitReservation,unregister:cancelReservation,close:closeWindowByPid,
       guardian:g=>ensureRunGuardian({...g,agent:AGENT.agent,env:process.env}),
       cleanup:la=>{const wsRoot=(()=>{const r=path.resolve(WORKSPACE);return r.endsWith(path.sep)?r:r+path.sep;})();for(const f of [la.lp,la.pf,la.pidf,la.rf,la.pidf+'.self-closed',la.rf+'.self-closed',String(la.lp||'').replace(/\.ps1$/,'.pty.log')])try{const resolved=path.resolve(String(f||''));if(resolved.startsWith(wsRoot))rmSync(resolved,{force:true});}catch{}}
-    },{workspace:WORKSPACE,capacity,resume,agent:AGENT.agent,unitProfile:AGENT.config.unit||null,runId:process.env.ORCH_RUN_ID,acceptanceFile:process.env.ORCH_ACCEPTANCE_FILE,timeoutMs:POLL_TIMEOUT_MS,auth:readAuthPrompt(),plan:preflightPlan,spawnMode:SPAWN_MODE,spawnStaggerMs:Math.max(0,Number(process.env.ORCH_WINDOW_STAGGER_MS||0)||0),windowCap:Math.max(0,Number(process.env.ORCH_MAX_WINDOWS||0)||0)||undefined});
+    },{workspace:WORKSPACE,capacity,resume,agent:AGENT.agent,unitProfile:AGENT.config.unit||null,modelPlan:MODEL_PLAN,runId:process.env.ORCH_RUN_ID,acceptanceFile:process.env.ORCH_ACCEPTANCE_FILE,timeoutMs:POLL_TIMEOUT_MS,auth:readAuthPrompt(),plan:preflightPlan,spawnMode:SPAWN_MODE,spawnStaggerMs:Math.max(0,Number(process.env.ORCH_WINDOW_STAGGER_MS||0)||0),windowCap:Math.max(0,Number(process.env.ORCH_MAX_WINDOWS||0)||0)||undefined});
     process.exitCode=result.success?0:1;return;
   }
 

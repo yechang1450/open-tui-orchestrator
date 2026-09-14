@@ -143,6 +143,7 @@ export async function runWindows(request,hooks,options={}) {
       const recs=plan.map((b,i)=>({key:`B${i+1}`,title:b.title,b,dependsOn:b.dependsOn||[],keys:[...new Set([...(b.conflictKeys||[]),...b.tasks.flatMap(t=>hooks.infer(t.prompt||''))].map(k=>canonicalKey(k,workspace)))]}));
       levelWaves(recs);
       sum={protocol:2,version:CORE_VERSION,agent:options.agent||'codex',runId,workspace,request,capacity,coordinator,generation:1,history:[],startedAt:Date.now(),tasks,plan:recs,spawnMode:options.spawnMode||'window',
+        model:options.modelPlan?.model??null,effort:options.modelPlan?.effort??null,modelSource:options.modelPlan?.modelSource??null,effortSource:options.modelPlan?.effortSource??null,
         blocks:recs.map(r=>({key:r.key,title:r.title,taskIds:r.b.tasks.flatMap(t=>t.sourceIds)})),results:{},taskResults:{}};
       for(const r of recs){sum.results[r.key]={status:'pending',attempts:[]};for(const id of sum.blocks.find(b=>b.key===r.key).taskIds)sum.taskResults[id]={status:'pending'};}
       sum.acceptanceSha256=checksHash(checks);
