@@ -42,11 +42,19 @@ const snapshot=processSnapshot();
 for(const r of reports)for(const b of Object.values(r.summary.results))assert.ok(!sameProcess(b.launcher,snapshot.get(b.launcher?.ProcessId)));
 const sharedCore=fs.realpathSync(path.join(repo,'scripts','core'));
 for(const root of [peer,cache])assert.equal(fs.realpathSync(path.join(root,'scripts','core')),sharedCore);
+// 证据里不落机器用户名：写入前统一折叠 C:\Users\<who> → C:\Users\<user>（公开仓库对读者无意义，
+// 且会泄漏作者机器的用户名）。只折叠用户名段，绝对路径本体保留——证据仍是诚实的。
+const scrubString = (value) => String(value)
+  .replace(/([A-Za-z]:\\+Users\\+)[^\\]+/g, '$1<user>')
+  .replace(/([A-Za-z]:\/Users\/)[^/]+/g, '$1<user>');
+const scrubDeep = (value) => Array.isArray(value) ? value.map(scrubDeep)
+  : (value && typeof value === 'object' ? Object.fromEntries(Object.entries(value).map(([k, v]) => [k, scrubDeep(v)])) : scrubString(value));
+
 const report={testedAt:new Date().toISOString(),coreVersion:current.version,finalCoreHash:coreHash,hashes,sharedCore,regressions,
  capacity:{runId:capacity.runId,root:capacityRoot,passed:capacity.passed,coreHash:capacity.coreHashAtLaunch,coreUnchanged:capacity.coreUnchanged,peak:capacity.peak,windowLaunches:capacity.windowLaunches,tasks:capacity.results.length,ordered:capacity.ordered,overlap:capacity.overlap,overlapMs:Math.min(...capacity.results.slice(0,8).map(r=>r.finished))-Math.max(...capacity.results.slice(0,8).map(r=>r.started)),engineExit:capacity.engineResult.code,pollExit:capacity.pollResult.code,results:capacity.results},
  adoption:{runId:adoption.runId,root:adoptionRoot,passed:adoption.passed,coreHash:adoption.coreHash,coreUnchanged:adoption.coreUnchanged,windowLaunches:adoption.windowLaunches,firstTaskExecutions:adoption.firstTaskExecutions,adoptedSameLauncher:adoption.adoptedSameLauncher,closed:adoption.closed},
  rejectedScenario:{runId:fallback.runId,root:fallbackRoot,passed:false,engineSuccess:fallback.summary.success,reason:'Punctuation split the test request into unassignable fragments; complete-inventory fallback preserved all tasks but opened only one window. Not counted as capacity success.'},
  postLiveFix:{files:['runner.mjs','recovery.mjs'],description:'Preserve execution checkpoints after failed rechecks and status changes, including when the separate checkpoint file is missing.',regression:'failed rechecks preserve execution evidence so a later resume cannot repeat an uncertain task',redObserved:true,finalRegressionsPassed:true,liveFinishedRunRecheck:{runId:current.runId,generation:current.generation,success:current.success,newWindows:0,attempts:current.results.B1.attempts.length},note:'Capacity and crash-adoption live runs precede this small evidence-retention fix; final core has full regression and an actual completed-run resume check, not a repeated 8-window run.'},
  policies,allLaunchersClosed:true,cleanup:{status:'pending',retainedRunRecords:true}};
-for(const root of [repo,peer,cache]){fs.mkdirSync(path.join(root,'test'),{recursive:true});fs.writeFileSync(path.join(root,'test','recovery-live-result.json'),JSON.stringify(report,null,2));}
+for(const root of [repo,peer,cache]){fs.mkdirSync(path.join(root,'test'),{recursive:true});fs.writeFileSync(path.join(root,'test','recovery-live-result.json'),JSON.stringify(scrubDeep(report),null,2));}
 console.log(JSON.stringify({report:path.join(repo,'test','recovery-live-result.json'),regressions,policies:policies.length,peak:report.capacity.peak,overlapMs:report.capacity.overlapMs,closed:true}));

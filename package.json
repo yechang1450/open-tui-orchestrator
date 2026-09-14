@@ -1,7 +1,8 @@
 {
   "name": "open-tui-orchestrator",
-  "version": "0.9.2",
-  "private": true,
+  "version": "0.9.3",
+  "private": false,
+  "description": "Split a multi-part agent request into a verified TODO ledger, then run the parallel blocks in hidden or visible TUI windows of the agent CLI you already use (Windows).",
   "type": "module",
   "bin": { "open-tui-orchestrator": "cli.mjs", "orch": "orch.mjs", "orch-adapt": "scripts/adapt.mjs" },
   "scripts": {
@@ -9,5 +10,27 @@
     "doctor": "node cli.mjs --agent codex --doctor",
     "setup": "npm ci --prefix scripts"
   },
+  "files": [
+    "cli.mjs",
+    "orch.mjs",
+    "repair.mjs",
+    "package.json",
+    "release.json",
+    "README.md",
+    "README-zh.md",
+    "INSTALL.md",
+    "INSTALL-zh.md",
+    "CHANGELOG.md",
+    "LICENSE",
+    "docs",
+    "scripts",
+    "!scripts/node_modules"
+  ],
+  "keywords": ["agent", "orchestrator", "parallel", "multi-agent", "tui", "cli", "windows", "codex", "claude", "automation"],
+  "author": "Yang Wenchàng (yechang1450)",
+  "license": "MIT",
+  "repository": { "type": "git", "url": "git+https://github.com/yechang1450/open-tui-orchestrator.git" },
+  "homepage": "https://github.com/yechang1450/open-tui-orchestrator#readme",
+  "bugs": { "url": "https://github.com/yechang1450/open-tui-orchestrator/issues" },
   "engines": { "node": ">=22" }
 }

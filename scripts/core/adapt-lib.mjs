@@ -129,7 +129,7 @@ export async function adaptAgent({ id, cli, env = process.env, live = true, comm
     processNames: ['^' + id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(\\.exe)?$'],
     args: { approve, extra: [], model, effort, prompt: [promptFlag] },
     adaptedAt: new Date().toISOString(),
-    adaptedFrom: { cli: located.source || located.bin, version, prefixArgs: prefixArgs.length ? prefixArgs : undefined },
+    adaptedFrom: { cli: path.basename(located.source || located.bin), version, prefixArgs: prefixArgs.length ? prefixArgs : undefined },
   };
   const detection = discoverModelDetection(id, { env });
   if (detection) profile.modelDetection = detection;

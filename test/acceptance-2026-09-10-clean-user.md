@@ -6,12 +6,12 @@
 - 提权创建本地账户 `orch-test`（无任何用户级环境/配置），提权经 UAC 自动放行链路验证可用。
 - `repair.mjs --target D:/temp/orch-acceptance-B/install` 生成发行副本（120 文件，exit 0）。
 - 共享 Node：复制 `node.exe`（v24.21.0）到 `D:/temp/orch-acceptance-B/bin/`（干净用户不可达 <user> profile 里的 node）。
-- 以 **`yechang\orch-test` 身份**执行 smoke（提权 `Start-Process -Credential`，输出落 `C:\Windows\Temp\orch-smoke-out.txt`，已提权取回副本 `smoke-out-copy.txt`）。
+- 以 **`<machine>\orch-test` 身份**执行 smoke（提权 `Start-Process -Credential`，输出落 `C:\Windows\Temp\orch-smoke-out.txt`，已提权取回副本 `smoke-out-copy.txt`）。
 
 ## 结果（全部在 orch-test 身份下取得）
 | 检查 | 结果 |
 |---|---|
-| whoami | `yechang\orch-test`，USERPROFILE=`C:\Users\orch-test` |
+| whoami | `<machine>\orch-test`，USERPROFILE=`C:\Users\orch-test` |
 | 共享 node 可用 | `nodeVersion: v24.21.0` |
 | 副本封印复验 | `{"schema":2,"coreVersion":"1.7.2","files":32,"runtimeFiles":50}` exit 0 |
 | CLI 命令面 | `--help` exit 0（完整 usage） |
