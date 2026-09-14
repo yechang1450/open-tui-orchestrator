@@ -1,6 +1,6 @@
 {
   "schema": 2,
-  "coreVersion": "1.10.0",
+  "coreVersion": "1.11.0",
   "files": {
     "adapt-lib.mjs": "b7ef07efbe01ae8da11670b15e5d383de1c36f172de48748a807507ca45f99a4",
     "agent-auth-prompt.txt": "18fa9c01972cd99a2fe2b1b74a440b34921a051ba6c0d54daf2f5bf1096457b0",
@@ -9,7 +9,7 @@
     "checkpoint.mjs": "246de59db9a7aac48b12eea1554ff281eaf9dd897e620ecf73d954f39b3cf94a",
     "claude-host.mjs": "8ab7661e2b56eab07709b2a16c7f6e04dab8708edfbe672300254109c2323aaa",
     "claude-runtime.mjs": "06e7aba4a5c62a2bf0f12e09089db778c265a0aa21b31a53dbac7245586abe20",
-    "contracts.mjs": "1fa55582dd3dd471515093a9e26615b97a4bb9197a39eb8d84bb21c734b0d485",
+    "contracts.mjs": "735fd08434808c9b74a72602cd1a76b8d53b9abbff2c9e33007f35016fe70815",
     "host-cli.mjs": "67b538db32c8aa6a7c2527b2b0fe81d2fbe8b440ab062071c6e6ecff0309b949",
     "host-model.mjs": "497c5ac6a9a47cd8e42594f680c04d831f7bf1229ab1c2a8f192cacf9fe88547",
     "host-probe.mjs": "90d0831ca2775e54183145638880277f8c45fbf457a8b948d65966b6f96c378f",
@@ -48,7 +48,7 @@
   },
   "runtimeFiles": {
     "cli.mjs": "b9350981760d74cfd31cc78df698baf6ad57bdfb5312f7bfd2c6447f58e4712e",
-    "package.json": "00a2502935243b4cfd2be6eefcb6947598ebc858d03181c77bc506658dd54c80",
+    "package.json": "aba734394848ab571a2a2044b813aa3d4bf79cefb528e601f46a2bb9abc3b835",
     "repair.mjs": "5a456b42560bfa21fd1e66ccdff7416f88e82fe711db5c04279717e73275a076",
     "scripts/adapt.mjs": "20209c74212d334ea5aa1dfe35816a1b7a4b7f0415eb27c5a1975925dbbd10c5",
     "scripts/agent-auth-prompt.txt": "18fa9c01972cd99a2fe2b1b74a440b34921a051ba6c0d54daf2f5bf1096457b0",
@@ -60,7 +60,7 @@
     "scripts/core/checkpoint.mjs": "246de59db9a7aac48b12eea1554ff281eaf9dd897e620ecf73d954f39b3cf94a",
     "scripts/core/claude-host.mjs": "8ab7661e2b56eab07709b2a16c7f6e04dab8708edfbe672300254109c2323aaa",
     "scripts/core/claude-runtime.mjs": "06e7aba4a5c62a2bf0f12e09089db778c265a0aa21b31a53dbac7245586abe20",
-    "scripts/core/contracts.mjs": "1fa55582dd3dd471515093a9e26615b97a4bb9197a39eb8d84bb21c734b0d485",
+    "scripts/core/contracts.mjs": "735fd08434808c9b74a72602cd1a76b8d53b9abbff2c9e33007f35016fe70815",
     "scripts/core/host-cli.mjs": "67b538db32c8aa6a7c2527b2b0fe81d2fbe8b440ab062071c6e6ecff0309b949",
     "scripts/core/host-model.mjs": "497c5ac6a9a47cd8e42594f680c04d831f7bf1229ab1c2a8f192cacf9fe88547",
     "scripts/core/host-probe.mjs": "90d0831ca2775e54183145638880277f8c45fbf457a8b948d65966b6f96c378f",
