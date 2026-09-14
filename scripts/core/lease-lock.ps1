@@ -13,9 +13,16 @@ try {
   try {$held=$mutex.WaitOne($waitMs)} catch [Threading.AbandonedMutexException] {$held=$true}
   if(-not $held){exit 2}
   [IO.File]::WriteAllText($Ticket+'.ready','ready')
+  $poll=0
   while(-not [IO.File]::Exists($Ticket+'.release')) {
-    $p=Get-CimInstance Win32_Process -Filter ('ProcessId='+$Owner) -ErrorAction SilentlyContinue
-    if(-not $p -or $p.CreationDate.ToUniversalTime().ToString('o') -ne $Started){break}
+    # Owner liveness is a slow CIM query: check it every ~1s, but poll the release file every 100ms
+    # so the ticket files are deleted within ~100ms of the caller releasing (was ~1s, which left
+    # visible residue and cost a slow query per poll).
+    if (($poll % 10) -eq 0) {
+      $p=Get-CimInstance Win32_Process -Filter ('ProcessId='+$Owner) -ErrorAction SilentlyContinue
+      if(-not $p -or $p.CreationDate.ToUniversalTime().ToString('o') -ne $Started){break}
+    }
+    $poll++
     Start-Sleep -Milliseconds 100
   }
 } finally {

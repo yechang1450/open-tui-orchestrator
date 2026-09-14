@@ -1,9 +1,9 @@
 {
   "schema": 1,
   "date": "2026-09-14",
-  "core": "1.14.0",
-  "feature": "coordinator mutex hardening + residue cleanup — the lease mutex wait is tunable (ORCH_MUTEX_WAIT_MS, default 60000 ms; was hard-coded 20 s) and the acquisition is retried with exponential + jittered backoff (ORCH_MUTEX_RETRIES, default 2); the JS side bounds each attempt by the same value plus a start/exit margin (the old 30 s flat wait reported a failure even when the helper had already exited); killed helpers no longer leak lock tickets (age-based reclamation at the start of every transaction, ORCH_MUTEX_TICKET_TTL_MS default 600000 ms); queue-backoff end-to-end failures now carry the block-level reason",
-  "releasedCopy": "C:/Users/<user>/.tools/releases/0.9.0/open-tui-orchestrator",
+  "core": "1.14.1",
+  "feature": "coordinator mutex hardening + residue cleanup — the lease mutex wait is tunable (ORCH_MUTEX_WAIT_MS, default 60000 ms; was hard-coded 20 s) and the acquisition is retried with exponential + jittered backoff (ORCH_MUTEX_RETRIES, default 2); the JS side bounds each attempt by the same value plus a start/exit margin (the old 30 s flat wait reported a failure even when the helper had already exited); killed helpers no longer leave lock tickets (age-based reclamation at transaction start AND on every coordinator-directory resolution, ORCH_MUTEX_TICKET_TTL_MS default 600000 ms; the helper polls its release file every 100 ms so tickets vanish within ~300 ms instead of ~1 s); queue-backoff end-to-end failures now carry the block-level reason",
+  "releasedCopy": "C:/Users/<user>/.tools/releases/0.9.1/open-tui-orchestrator",
   "rootCauses": {
     "falseFailure": "scripts/core/lease-lock.ps1 WaitOne(20000) hard-coded; on a loaded machine nine contending parents legitimately queue past 20 s (observed: 2/9 'Coordinator mutex acquisition failed' during the 0.8.0 release-copy full suite, while the same file passed in isolation in 16.6 s)",
     "longTail": "the JS wait was a flat 30 s and never observed the helper's exit — a helper that gave up at 20 s still cost the caller 30 s",
@@ -31,7 +31,12 @@
     "evidence": ["D:/temp/orch-failure-contract/gate-090b.txt", "D:/temp/orch-failure-contract/gate-final-090.txt", "D:/temp/orch-failure-contract/l4-redcase.txt"],
     "note": "the L1 log was produced on the same on-disk tree that was committed minutes later (HEAD=8cf24d7, tree dirty at run time by exactly these changes); the file contents are identical to commit 94fa835"
   },
-  "offlineRegression": "282/282",
-  "seal": {"coreVersion": "1.14.0", "files": 43, "runtimeFiles": 62},
+  "offlineRegression": "283/283",
+  "seal": {"coreVersion": "1.14.1", "files": 43, "runtimeFiles": 62},
+  "followUpSameRound": {
+    "entryHousekeeping": "coordinator-directory resolution now sweeps aged tickets too (idle machines no longer keep residue until the next transaction); red-capable test: 'resolving the coordinator directory reclaims aged tickets'",
+    "helperLatency": "lease-lock.ps1 polls its release file every 100 ms and does the expensive owner-liveness CIM query only every ~1 s; measured ticket lifetime after a transaction: gone within 300 ms (was ~1 s+)",
+    "probeEvidence": "D:/temp/orch-ticketprobe.mjs (immediate / +300 ms / +600 ms / +1500 ms samples)"
+  },
   "flakeNote": "One full-suite run mid-round showed 2 reds (queue-backoff end-to-end, recovery-runtime) with the machine under concurrent agent load; both files pass in isolation (5/5, 2/2) and as a pair with the new mutex tests (8/8), and no coordinator/mutex error appeared in that log — classified as load sensitivity, diagnosed further by making the end-to-end failure print its block-level reason, and the new tests were slimmed (one shared process snapshot per file) to lower the suite's added load"
 }
