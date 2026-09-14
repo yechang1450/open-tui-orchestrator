@@ -260,12 +260,20 @@ test('a unit without checkpoints or a failing unit can never fake success', asyn
 });
 
 test('unknown agents get the two-path diagnostic; an explicit unit command bypasses host identity', () => {
-  const noHost = spawnSync(process.execPath, [CLI, '--agent', 'hermes', '--doctor'], {env: callEnv({ws: process.cwd()}), encoding: 'utf8', windowsHide: true, timeout: 60000});
+  // 真正未知的 agent：两条出路诊断（--unit-cmd / adapt 建档）原样给出。
+  const noHost = spawnSync(process.execPath, [CLI, '--agent', 'no-such-agent', '--doctor'], {env: callEnv({ws: process.cwd()}), encoding: 'utf8', windowsHide: true, timeout: 60000});
   assert.equal(noHost.status, 0, noHost.stderr);
   const doc = JSON.parse(noHost.stdout);
-  assert.match(doc.hostError, /ADAPTER_UNSUPPORTED: hermes/);
+  assert.match(doc.hostError, /ADAPTER_UNSUPPORTED: no-such-agent/);
   assert.match(doc.hostError, /--unit-cmd/);
-  assert.match(doc.hostError, /adapt\.mjs --agent hermes/);
+  assert.match(doc.hostError, /adapt\.mjs --agent no-such-agent/);
+  // 有画像的 agent（hermes 自动挡）：doctor 解析为 profile 宿主（不再报不支持）。
+  const profiled = spawnSync(process.execPath, [CLI, '--agent', 'hermes', '--doctor'], {env: callEnv({ws: process.cwd()}), encoding: 'utf8', windowsHide: true, timeout: 60000});
+  assert.equal(profiled.status, 0, profiled.stderr || profiled.stdout);
+  const pdoc = JSON.parse(profiled.stdout);
+  assert.equal(pdoc.hostError, null);
+  assert.equal(pdoc.unit, 'profile');
+  assert.equal(pdoc.agent, 'hermes');
 
   const s = setup();
   try {
