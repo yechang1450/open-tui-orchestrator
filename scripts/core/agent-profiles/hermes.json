@@ -1,0 +1,51 @@
+{
+  "schema": 1,
+  "id": "hermes",
+  "label": "hermes",
+  "bin": [
+    "hermes.exe",
+    "hermes.cmd",
+    "hermes"
+  ],
+  "helpFlags": [
+    "-z",
+    "--yolo"
+  ],
+  "versionPattern": "(\\d+\\.\\d+\\.\\d+)",
+  "probePrompt": "reply with exactly ADAPTOK-nvdry4b7 and nothing else",
+  "envMarkers": [],
+  "processNames": [
+    "^hermes(\\.exe)?$"
+  ],
+  "args": {
+    "approve": [
+      "--yolo"
+    ],
+    "extra": [],
+    "model": [
+      "--model"
+    ],
+    "effort": [
+      "--reasoning"
+    ],
+    "prompt": [
+      "-z"
+    ]
+  },
+  "adaptedAt": "2026-09-14T04:33:36.746Z",
+  "adaptedFrom": {
+    "cli": "C:\\Users\\<user>\\AppData\\Local\\hermes\\hermes-agent\\venv\\Scripts\\hermes.exe",
+    "version": "0.21.2"
+  },
+  "modelDetection": {
+    "config": [
+      {
+        "file": "$HERMES_HOME/config.yaml",
+        "section": "model",
+        "modelKey": "default",
+        "effortKey": "reasoning_effort",
+        "effortSection": "agent"
+      }
+    ]
+  }
+}
