@@ -1,0 +1,50 @@
+{
+  "schema": 1,
+  "date": "2026-09-12",
+  "core": "1.11.0",
+  "feature": "host alignment: adapter-less initiating agents become first-class auto hosts (hermes profile landed via the adapt pipeline) + model/effort traceability (summary.model/effort/modelSource/effortSource; initiator-driven inheritance for caller-driven runs; machine-readable stdout stays pure)",
+  "releasedCopy": "C:/Users/yecha/.tools/releases/0.6.0/open-tui-orchestrator",
+  "runs": [
+    {
+      "runId": "hermes-auto-1",
+      "host": "hermes (auto-detected initiator, no --agent given)",
+      "executor": "hermes CLI via the print-class profile (auto host)",
+      "spawnMode": "headless",
+      "carrier": "stdio",
+      "blocks": 2,
+      "success": true,
+      "tasks": {"T001": "verified", "T002": "verified"},
+      "wallSec": 257,
+      "evidence": [
+        "D:/temp/orch-hermes-auto/run.log",
+        "inherit host model/effort (hermes/profile:hermes): model=deepseek-flash effort=max",
+        "summary: model=deepseek-flash effort=max modelSource=profile:hermes"
+      ],
+      "note": "detection = env markers first (HERMES_AGENT/HERMES_SESSION_ID), process chain fallback (Hermes.exe). Model/effort follow the initiator's own config ($HERMES_HOME/config.yaml: model.default, agent.reasoning_effort) and are injected as --model/--reasoning; --no-restore-cwd keeps writes in the workspace (hermes -z otherwise restores the previous session cwd)."
+    },
+    {
+      "runId": "sanity-codex-1",
+      "host": "codex (explicit --agent; non-hermes regression on the same shipped copy)",
+      "spawnMode": "headless",
+      "carrier": "pty",
+      "blocks": 2,
+      "success": true,
+      "tasks": {"T001": "verified", "T002": "verified"},
+      "wallSec": 212,
+      "evidence": [
+        "D:/temp/orch-060-sanity/run.log",
+        "inherit host model/effort (codex/codex-config): model=gpt-6-astra effort=ultra",
+        "spawned headless codex unit via PTY carrier"
+      ],
+      "note": "confirms the 0.6.0 copy keeps the PTY carrier and the model trace on hosts other than hermes"
+    }
+  ],
+  "adaptLive": {
+    "agent": "hermes",
+    "cliVersion": "0.21.2",
+    "probe": "answered=true, 12.5s, token returned",
+    "profile": "scripts/core/agent-profiles/hermes.json (envMarkers + --no-restore-cwd extra + modelDetection $HERMES_HOME/config.yaml)"
+  },
+  "offlineRegression": "270/270",
+  "seal": {"coreVersion": "1.11.0", "files": 43, "runtimeFiles": 62}
+}
