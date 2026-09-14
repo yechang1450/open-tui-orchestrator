@@ -41,12 +41,47 @@ export function coordinatorDir(workspace,env=process.env) {
   if(r.status!==0||!r.stdout.trim())throw new Error('Unable to locate machine window coordinator');
   return path.resolve(r.stdout.trim());
 }
+// 协调器内核互斥的口径（全部可调；2026-09-14 修：旧值把等待写死 20s，满载多竞争者会假失败）：
+// - ORCH_MUTEX_WAIT_MS     PS 侧 WaitOne 时长，默认 60000ms；
+// - ORCH_MUTEX_RETRIES     获取失败后的重试次数，默认 2（退避复用 waitBackoffMs）；
+// - ORCH_MUTEX_TICKET_TTL_MS  锁票老化回收阈值，默认 600000ms。
+// 被强杀/超时的 PS 进程跑不到自己的清理（finally 只在本进程里），锁票会在协调器目录无界堆积
+// （2026-09-14 实测 576 个）——所以每次事务前按龄回收一次：只收老旧票，绝不碰在票。
+const sleepFor=ms=>{try{Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,ms);}catch{}};
+function mutexWaitMs(){const v=Number(process.env.ORCH_MUTEX_WAIT_MS);return Number.isFinite(v)&&v>=1000?Math.floor(v):60000;}
+function mutexRetries(){const v=Number(process.env.ORCH_MUTEX_RETRIES);return Number.isFinite(v)&&v>=0?Math.min(10,Math.floor(v)):2;}
+function mutexTicketTtlMs(){const v=Number(process.env.ORCH_MUTEX_TICKET_TTL_MS);return Number.isFinite(v)&&v>=0?Math.floor(v):600000;}
+export function sweepStaleMutexTickets(dir,{ttlMs=mutexTicketTtlMs(),now=Date.now()}={}){
+  let removed=0;
+  try{
+    for(const name of fs.readdirSync(dir)){
+      if(!/^lock-[0-9a-f-]+\.(ready|release)$/.test(name))continue;
+      const full=path.join(dir,name);
+      try{if(now-fs.statSync(full).mtimeMs>=ttlMs){fs.rmSync(full,{force:true});removed++;}}catch{}
+    }
+  }catch{}
+  return removed;
+}
+// 取一次内核互斥：PS 侧等 waitMs，JS 侧按 waitMs + 启动/退出余量设界。
+// 注意：等待是同步阻塞的（Atomics.wait），事件回调在阻塞期间不会运行——所以这里**不能**依赖
+// 'exit' 事件判早退（旧实现就是干等满 30s）。失败时按 waitMs 有界返回，由调用方决定重试。
+function acquireCoordinatorMutex(dir,owner,waitMs,script){
+  const ticket=path.join(dir,'lock-'+crypto.randomUUID());
+  const child=spawn(PS_EXE,['-NoProfile','-File',script,'-Directory',dir,'-Ticket',ticket,'-Owner',String(owner.ProcessId),'-Started',owner.Started],{windowsHide:true,stdio:'ignore'});
+  child.on('error',()=>{});child.unref();
+  const deadline=Date.now()+waitMs+2500;
+  while(!fs.existsSync(ticket+'.ready')&&Date.now()<deadline)sleepFor(25);
+  const ready=fs.existsSync(ticket+'.ready');
+  const release=()=>{try{fs.writeFileSync(ticket+'.release','release');}catch{}};
+  const discard=()=>{for(const suffix of ['.ready','.release'])try{fs.rmSync(ticket+suffix,{force:true});}catch{}};
+  return {ready,release,discard};
+}
 export function atomicJson(file,value){
   fs.mkdirSync(path.dirname(file),{recursive:true});
   const tmp=file+'.'+process.pid+'.tmp';fs.writeFileSync(tmp,JSON.stringify(value,null,2));
   // Windows: renameSync 不覆盖已存在目标，且目标被杀软/索引器瞬时占用时报 EPERM/EACCES。
   // 单次 remove+rename 仍有窗口，这里做短暂退避重试；非暂时性错误立即上抛，临时文件不残留。
-  const sleepSync=ms=>{try{Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,ms);}catch{}};
+  const sleepSync=sleepFor;
   let lastError=null;
   for(let attempt=0;attempt<6;attempt++){
     try{fs.renameSync(tmp,file);return;}
@@ -68,13 +103,21 @@ export function transaction(dir,fn,snapshot=processSnapshot) {
   // it cannot be reclaimed by two contenders or strand an empty lock forever.
   let unlock=()=>{};
   if(snapshot===processSnapshot) {
-    const ticket=path.join(dir,'lock-'+crypto.randomUUID());
-    const child=spawn(PS_EXE,['-NoProfile','-File',fileURLToPath(new URL('./lease-lock.ps1',import.meta.url)),'-Directory',dir,'-Ticket',ticket,'-Owner',String(owner.ProcessId),'-Started',owner.Started],{windowsHide:true,stdio:'ignore'});
-    child.on('error',()=>{});child.unref();
-    const deadline=Date.now()+30000;
-    while(!fs.existsSync(ticket+'.ready')&&Date.now()<deadline)Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,25);
-    unlock=()=>fs.writeFileSync(ticket+'.release','release');
-    if(!fs.existsSync(ticket+'.ready')){unlock();throw new Error('Coordinator mutex acquisition failed');}
+    sweepStaleMutexTickets(dir);
+    const waitMs=mutexWaitMs(),tries=mutexRetries();
+    const script=fileURLToPath(new URL('./lease-lock.ps1',import.meta.url));
+    let held=null;
+    for(let attempt=0;;attempt++) {
+      const candidate=acquireCoordinatorMutex(dir,owner,waitMs,script);
+      if(candidate.ready){held=candidate;break;}
+      candidate.release();
+      // 失败路径的锁票清理延后到事件循环恢复之后（阻塞等待期间 setTimeout 也不会跑）；
+      // 真正兜底的是 sweepStaleMutexTickets 的按龄回收。
+      setTimeout(candidate.discard,3000).unref?.();
+      if(attempt>=tries)throw new Error('Coordinator mutex acquisition failed (waited '+waitMs+'ms x'+(attempt+1)+'; tune ORCH_MUTEX_WAIT_MS / ORCH_MUTEX_RETRIES)');
+      sleepFor(waitBackoffMs(attempt,{base:250,max:2000}));
+    }
+    unlock=()=>held.release();
   }
   try {processes=snapshot();let leases=[];try{leases=JSON.parse(fs.readFileSync(file,'utf8'));}catch(e){if(e.code!=='ENOENT')throw e;}
     leases=leases.filter(l=>{

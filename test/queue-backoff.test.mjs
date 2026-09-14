@@ -85,8 +85,17 @@ test('capacity waiters back off: two blocks serialize through one window, run st
     env.ORCH_WAIT_BACKOFF_MS = '40';            // 测试提速（退避数学另有单测）
     env.ORCH_WAIT_BACKOFF_MAX_MS = '80';
     const r = spawnSync(process.execPath, [path.join(root, 'orch.mjs'), '--run-id', 'queue-e2e', REQUEST], {cwd: ws, env, encoding: 'utf8', windowsHide: true, timeout: 240000});
-    assert.equal(r.status, 0, r.stderr || r.stdout);
-    const sum = JSON.parse(fs.readFileSync(path.join(ws, 'temp', 'orchestrator', 'runs', 'queue-e2e', 'summary.json'), 'utf8'));
+    // 失败时必须带出真相：块级 reason 只落在 summary.json 里，而 finally 会删掉工作区（2026-09-14 加）。
+    const summaryPath = path.join(ws, 'temp', 'orchestrator', 'runs', 'queue-e2e', 'summary.json');
+    const diagnosis = () => {
+      try {
+        const s = JSON.parse(fs.readFileSync(summaryPath, 'utf8'));
+        return Object.entries(s.results || {}).map(([k, v]) => k + '=' + v.status + (v.reason ? ' (' + v.reason + ')' : '')).join(' | ')
+          + ' tasks=' + JSON.stringify(s.taskResults);
+      } catch (e) { return '(summary unreadable: ' + e.message + ')'; }
+    };
+    assert.equal(r.status, 0, (r.stderr || r.stdout) + '\n--- block truth: ' + diagnosis());
+    const sum = JSON.parse(fs.readFileSync(summaryPath, 'utf8'));
     assert.equal(sum.success, true, JSON.stringify(sum.results));
     assert.ok(Object.values(sum.taskResults).every((t) => t.status === 'verified'), JSON.stringify(sum.taskResults));
     // 排队确实发生过：看板出现过 waiting（容量 1 下两个独立块必然有一个在等）
