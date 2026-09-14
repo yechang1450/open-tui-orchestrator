@@ -4,6 +4,7 @@
   "files": {
     "adapt-lib.mjs": "b7ef07efbe01ae8da11670b15e5d383de1c36f172de48748a807507ca45f99a4",
     "agent-auth-prompt.txt": "18fa9c01972cd99a2fe2b1b74a440b34921a051ba6c0d54daf2f5bf1096457b0",
+    "agent-profiles/hermes.json": "fe0274ae2891346895ce3dff9b631ab28692c06e5d83e9051c230b52396c0654",
     "agent.mjs": "e75eb20ebe560072f67d9e7803467eba4114fb23716b04f82147aebb17a12555",
     "checkpoint.mjs": "246de59db9a7aac48b12eea1554ff281eaf9dd897e620ecf73d954f39b3cf94a",
     "claude-host.mjs": "8ab7661e2b56eab07709b2a16c7f6e04dab8708edfbe672300254109c2323aaa",
@@ -54,6 +55,7 @@
     "scripts/agent.mjs": "e75eb20ebe560072f67d9e7803467eba4114fb23716b04f82147aebb17a12555",
     "scripts/core/adapt-lib.mjs": "b7ef07efbe01ae8da11670b15e5d383de1c36f172de48748a807507ca45f99a4",
     "scripts/core/agent-auth-prompt.txt": "18fa9c01972cd99a2fe2b1b74a440b34921a051ba6c0d54daf2f5bf1096457b0",
+    "scripts/core/agent-profiles/hermes.json": "fe0274ae2891346895ce3dff9b631ab28692c06e5d83e9051c230b52396c0654",
     "scripts/core/agent.mjs": "e75eb20ebe560072f67d9e7803467eba4114fb23716b04f82147aebb17a12555",
     "scripts/core/checkpoint.mjs": "246de59db9a7aac48b12eea1554ff281eaf9dd897e620ecf73d954f39b3cf94a",
     "scripts/core/claude-host.mjs": "8ab7661e2b56eab07709b2a16c7f6e04dab8708edfbe672300254109c2323aaa",
