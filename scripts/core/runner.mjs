@@ -3,10 +3,13 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import {fileURLToPath} from 'node:url';
 import {CORE_VERSION,ledgerPlan,levelWaves,verifyChecks,summaryComplete,TERMINAL,canonicalKey,requestTasks,acceptanceKeyDiff} from './contracts.mjs';
-import {coordinatorDir,reserve,bind,release,prepare,atomicJson,launcherIdentity,processSnapshot,sameProcess,claimRun,releaseRun} from './leases.mjs';
+import {coordinatorDir,reserve,bind,release,prepare,atomicJson,launcherIdentity,processSnapshot,sameProcess,claimRun,releaseRun,waitBackoffMs} from './leases.mjs';
 import {scheduleReady,recoveryTasks,taskPolicy,validateRecoverySummary} from './recovery.mjs';
 import {readCheckpoints} from './checkpoint.mjs';
 import {boardSignature,boardJson,boardSummaryLine} from './run-board.mjs';
+// 队列退避参数（env 可调，测试提速用）：首等 base、指数 ×1.7、封顶 max（抖动上界 ×1.2）。
+const WAIT_BACKOFF={base:Math.max(50,Number(process.env.ORCH_WAIT_BACKOFF_MS||600)||600),max:0};
+WAIT_BACKOFF.max=Math.max(WAIT_BACKOFF.base,Number(process.env.ORCH_WAIT_BACKOFF_MAX_MS||5000)||5000);
 export {scheduleReady,recoveryTasks};
 const pause=ms=>new Promise(r=>setTimeout(r,ms));
 // Identity acquisition under load: a full-process snapshot can be slow or miss a
@@ -192,11 +195,14 @@ export async function runWindows(request,hooks,options={}) {
           if(recovery.uncertain.length){e.status='needs-reconciliation';e.reason='Uncertain tasks: '+recovery.uncertain.join(', ');e.endedAt=Date.now();persist();return;}
           if(attemptsThisController>=limit){mark(r,'failed','Safe recovery attempt budget exhausted');return;}
           if(attemptsThisController)await pause(Math.min(2000*attemptsThisController,Math.max(0,deadline-Date.now())));
-          let reserved=false;
+          let reserved=false,waitAttempt=0;
           while(Date.now()<deadline) {
             const result=await coordinate(()=>reserve(coordinator,{id:leaseId,runId,keys:r.keys},windowCap),deadline);
             if(result.ok){reserved=true;break;}
-            mark(r,'waiting','Waiting for '+result.reason);await pause(1000);
+            // 排队退避（指数+抖动）：不再每秒重试；等待状态仅在理由变化时重写，少刷账本。
+            const waitMsg='Waiting for '+result.reason,cur=sum.results[r.key];
+            if(!cur||cur.status!=='waiting'||cur.reason!==waitMsg)mark(r,'waiting',waitMsg);
+            await pause(Math.min(waitBackoffMs(waitAttempt++,WAIT_BACKOFF),Math.max(0,deadline-Date.now())));
           }
           if(!reserved){mark(r,'timeout','Window capacity/resource wait timed out');return;}
           attemptsThisController++;
