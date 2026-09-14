@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "id": "hermes",
-  "label": "hermes",
+  "label": "Hermes Agent CLI",
   "bin": [
     "hermes.exe",
     "hermes.cmd",
@@ -9,11 +9,17 @@
   ],
   "helpFlags": [
     "-z",
-    "--yolo"
+    "--oneshot",
+    "--reasoning",
+    "--yolo",
+    "--no-restore-cwd"
   ],
   "versionPattern": "(\\d+\\.\\d+\\.\\d+)",
   "probePrompt": "reply with exactly ADAPTOK-nvdry4b7 and nothing else",
-  "envMarkers": [],
+  "envMarkers": [
+    "HERMES_AGENT",
+    "HERMES_SESSION_ID"
+  ],
   "processNames": [
     "^hermes(\\.exe)?$"
   ],
@@ -21,7 +27,9 @@
     "approve": [
       "--yolo"
     ],
-    "extra": [],
+    "extra": [
+      "--no-restore-cwd"
+    ],
     "model": [
       "--model"
     ],
