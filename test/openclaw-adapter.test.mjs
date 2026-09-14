@@ -12,6 +12,8 @@ test('installed OpenClaw is resolved as its own versioned CLI',()=>{
   // 环境里的 openclaw 高于钉版（现状 2026.9.3）时必须 fail-closed：扩版需逐版实机验收
   // （2026-09-10 首次尝试因环境 gateway 密钥条件未闭环，见 memory/2026-09-10.md）。
   assert.match(e.message,/OPENCLAW_VERSION_UNTESTED|CLI_MISSING/);
+  // 未验证版本：拒绝文案必须带探针实测结果 + 最后验证版本（fail-closed 且可诊断）
+  if(/OPENCLAW_VERSION_UNTESTED: installed/.test(e.message)){assert.match(e.message,/tui interface probe (OK|mismatch)/);assert.match(e.message,/last fully verified 2026\.9\.2/);}
  }
 });
 test('explicit missing OpenClaw CLI cannot fall back to another agent',()=>{

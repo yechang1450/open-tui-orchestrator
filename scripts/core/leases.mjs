@@ -85,6 +85,16 @@ export function transaction(dir,fn,snapshot=processSnapshot) {
     const result=fn(leases,owner,processes);atomicJson(file,leases);return result;
   }finally{unlock();}
 }
+// 排队退避（P1）：容量/冲突等待按指数退避 + 抖动——多等待者错峰，避免每秒各打一发协调器事务的惊群。
+// attempt 从 0 起；base=首等毫秒、max=封顶（抖动上界 max×1.2）；random 可注入以保证测试确定性。
+export function waitBackoffMs(attempt, {base = 600, max = 5000, random = Math.random} = {}) {
+  const grow = Math.max(0, Math.floor(Number(attempt) || 0));
+  const cap = Math.max(1, Number(max) || 1);
+  const start = Math.min(Math.max(1, Number(base) || 1), cap);
+  const target = Math.min(cap, start * Math.pow(1.7, grow));
+  const jitter = 0.8 + (typeof random === 'function' ? Number(random()) : Math.random()) * 0.4;
+  return Math.max(1, Math.round(target * jitter));
+}
 export function reserve(dir,rec,capacity,snapshot) {
   return transaction(dir,(leases,owner)=>{
     if(leases.some(l=>l.id===rec.id))return {ok:false,reason:'existing reservation'};
