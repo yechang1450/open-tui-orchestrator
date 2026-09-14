@@ -98,3 +98,64 @@ test('taskCheckpointStates tolerates runs without attempt inventories', () => {
     assert.deepEqual(taskCheckpointStates(f.runDir, { blocks: [], results: {} }), {});
   } finally { f.cleanup(); }
 });
+
+// 机器可调用契约：--watch 不许无限挂起。未知 run 在上界（graceMs）内 fail-closed，
+// 已读到的运行中途丢 summary.json 也立刻报错；两条诊断都不许带栈帧（改回裸轮询即红）。
+test('watchRun fails closed instead of hanging when the run never materializes', async () => {
+  const f = fixtureRun({});
+  try {
+    const error = await watchRun({ workspace: f.workspace, runId: 'ghost-run', intervalMs: 10, jsonl: true, out: { isTTY: false, write: () => {} }, graceMs: 60 }).then(() => null, e => e);
+    assert.ok(error, 'watchRun must refuse an unknown run instead of polling forever');
+    assert.match(error.message, /Run not found: ghost-run/);
+    assert.match(error.message, /no run directory/);
+    assert.doesNotMatch(error.message, /\s+at\s/);
+  } finally { f.cleanup(); }
+});
+
+test('watchRun fails closed when the run directory exists but no summary is ever readable', async () => {
+  const f = fixtureRun({});
+  try {
+    fs.rmSync(path.join(f.runDir, 'summary.json'));
+    const error = await watchRun({ workspace: f.workspace, runId: 'boardrun', intervalMs: 10, out: { isTTY: false, write: () => {} }, graceMs: 60 }).then(() => null, e => e);
+    assert.ok(error, 'an unreadable summary must not be watched forever');
+    assert.match(error.message, /has no readable summary\.json/);
+    assert.doesNotMatch(error.message, /\s+at\s/);
+  } finally { f.cleanup(); }
+});
+
+test('watchRun reports a summary that disappears mid-watch instead of stopping silently', async () => {
+  const f = fixtureRun({});
+  try {
+    const chunks = [];
+    const watching = watchRun({ workspace: f.workspace, runId: 'boardrun', intervalMs: 20, out: { isTTY: false, write: s => chunks.push(s) }, graceMs: 5000 });
+    await new Promise(r => setTimeout(r, 80));
+    fs.rmSync(path.join(f.runDir, 'summary.json'));
+    const error = await watching.then(() => null, e => e);
+    assert.ok(error, 'losing the summary mid-watch must surface, not stop silently');
+    assert.match(error.message, /lost its summary\.json/);
+    assert.match(chunks.join(''), /\[board\] run=boardrun/);
+  } finally { f.cleanup(); }
+});
+
+// 反向判据：宽限不是「立刻失败」——run 目录先出现、summary.json 稍后才落盘
+// （--run-windows 规划期的真实竞态）必须照常等待并流式看完，不许提前 fail-closed。
+test('watchRun waits out the grace window while the run directory has no summary yet', async () => {
+  const f = fixtureRun({});
+  try {
+    const summaryFile = path.join(f.runDir, 'summary.json');
+    const body = fs.readFileSync(summaryFile, 'utf8');
+    fs.rmSync(summaryFile);
+    const chunks = [];
+    const out = { isTTY: false, write: s => chunks.push(s) };
+    const watching = watchRun({ workspace: f.workspace, runId: 'boardrun', intervalMs: 20, out, graceMs: 5000 });
+    await new Promise(r => setTimeout(r, 100));
+    const sum = JSON.parse(body);
+    sum.finishedAt = Date.now(); sum.success = true;
+    fs.writeFileSync(summaryFile, JSON.stringify(sum));
+    const code = await watching;
+    assert.equal(code, 0, 'a summary landing inside the grace window must be watched normally');
+    const text = chunks.join('');
+    assert.match(text, /\[board\] run=boardrun/);
+    assert.match(text, /finalized success=true/);
+  } finally { f.cleanup(); }
+});

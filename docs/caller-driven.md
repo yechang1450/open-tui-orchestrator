@@ -93,6 +93,19 @@ Watch:  --status --readonly | --watch <runId>     Result ledger:  <workspace>/te
 - a plan that covers every task of the request;
 - a unit command that can actually do the work (and is authorized in the caller's own context).
 
+## Failure contract (machine callers)
+
+Every public entry fails closed the same way — one line, no Node stack:
+
+```text
+[orchestrator] FATAL: Run not found: <id> (no summary.json in <dir>)
+```
+
+- data goes to stdout, diagnostics to stderr; a read-only entry's stdout stays pure data;
+- exit codes: `0` success · `1` refused/failed (unknown run, tampered acceptance, missing host, verification failed) · `2` usage;
+- full stacks are opt-in: `ORCH_DEBUG=1`;
+- an unknown run never hangs and never dumps `ENOENT`: `--verify-run` / `--resume-run` refuse immediately, `--watch` allows a bounded grace first (`ORCH_WATCH_GRACE_MS`, default 60000 ms — covering the window in which `--run-windows` is still planning and has not created the run directory), then refuses; a run that loses its `summary.json` mid-watch is reported instead of being watched forever.
+
 ## Boundaries
 
 - read-only entries (`--tasks`, `--status`, `--watch`, `--doctor`, `--verify-run`, `--clear-cache`) need no host identity;

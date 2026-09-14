@@ -61,6 +61,10 @@ Host identity is optional. A caller may supply both the plan and the execution s
 
 Nothing else changes: capacity, waves, the inline gate, the maintenance lock and the acceptance contract stay exactly as described above.
 
+## Failure contract
+
+The public entries answer failures the same way for every caller: one `[orchestrator] FATAL: <reason>` line on stderr, a non-zero exit code, and no Node stack (stacks only with `ORCH_DEBUG=1`). An unknown run ID never produces a raw `ENOENT` and never hangs: `--verify-run`/`--resume-run` refuse immediately with `Run not found: <id>`, and `--watch` applies a bounded grace (`ORCH_WATCH_GRACE_MS`, default 60000 ms — the run directory may legitimately not exist yet while `--run-windows` is still planning) before refusing; a run that loses its `summary.json` mid-watch is reported rather than watched forever. Exit codes: `0` success, `1` refused/failed, `2` usage.
+
 ## Regression commands
 
 Run npm test in the generic repository. Invoke test/live-codex.mjs by absolute path from the desired workspace for the opt-in 8-window/9-task real-model acceptance. ORCH_LIVE_ENTRY can select the Codex-specific scripts/orchestrate-sdk.mjs entry to run the same acceptance contract. Existing historical result files are not evidence for a changed core version; retain newly generated run IDs and summaries.

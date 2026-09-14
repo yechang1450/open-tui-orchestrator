@@ -2564,8 +2564,15 @@ export async function main() {
   );
 }
 const isMain = process.argv[1] && path.resolve(process.argv[1]).toLowerCase() === fileURLToPath(import.meta.url).toLowerCase();
+// 机器可调用契约：公开入口的失败只回一行 `[orchestrator] FATAL: <原因>`（完整栈帧仅 ORCH_DEBUG=1）。
+// 调用方管道里永远不该出现裸 Node 栈帧——数据与诊断分得开，才谈得上「任何 agent 都能调」。
+export function reportFatal(error, stream = console.error) {
+  const message = error && error.message ? error.message : String(error);
+  stream("[orchestrator] FATAL: " + message);
+  if (process.env.ORCH_DEBUG === "1" && error && error.stack) stream(error.stack);
+}
 if (isMain) main().catch((e) => {
-  console.error("[orchestrator] FATAL: " + e.message);
+  reportFatal(e);
   process.exitCode = 1;
 });
 export { classifyBlockComplexity, classifyExecutionMode, windowExecutionPolicy, appendModelEffortArgs, genericProjectSplit, trySingleBlock, conflictByKeys, loadCachedDecompose, buildBlocksFromTasks, resolveHints, extractTasks, classifyPrompt, buildBlockPrompt, levelWaves, decomposeHash, loadPlanFile, planFromFile, checkDiskSpace, readPidFile, pidAliveCheck, closeWindowByPid, windowGenuinelyPopped, extractResult, extractUsage, readReportFromResult, sessionDir, writeInteractiveLauncher, staleTransientFiles, pidFileOfTransient, tryReserveWindow, commitReservation, cancelReservation, computeMaxWindows, blockKeys, keysOverlap, scanTaskComplete, __setOrchHooks, isOrchestratorSelfMod, resolveCodexHome, withRegistryLock, spawnHeadlessWithRetry, normalizeSpawnMode, REG_LOCK as REGISTRY_LOCK_FILE };

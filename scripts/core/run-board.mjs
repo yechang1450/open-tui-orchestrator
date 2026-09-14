@@ -114,13 +114,20 @@ export function boardFinished(sum) {
 }
 
 // --watch：只读流式看板。TTY 原地重绘完整看板；管道/--jsonl 输出机器可读行。
-export async function watchRun({ workspace, runId, intervalMs = 800, jsonl = false, out = process.stdout }) {
+// 机器可调用契约：未知 run 不许无限挂起。首次读到看板前有一个上界（graceMs /
+// ORCH_WATCH_GRACE_MS，默认 60s——覆盖「--run-windows 先规划、后建 run 目录」的竞态），
+// 超时即 fail-closed 一行诊断；已读到的运行中途丢 summary.json 也立刻报错，不静默停摆。
+export async function watchRun({ workspace, runId, intervalMs = 800, jsonl = false, out = process.stdout, graceMs = Number(process.env.ORCH_WATCH_GRACE_MS ?? 60000) }) {
   const write = s => out.write(s);
   const tty = !!out.isTTY && !jsonl;
-  let lastSig = '', paintedLines = 0, announcedFinal = false;
+  const dir = runDirectory(workspace, runId);
+  const grace = Number.isFinite(graceMs) && graceMs >= 0 ? graceMs : 60000;
+  const startedAt = Date.now();
+  let lastSig = '', paintedLines = 0, announcedFinal = false, seen = false;
   for (;;) {
     const b = readBoard(workspace, runId);
     if (b) {
+      seen = true;
       const sig = boardSignature(b.sum, b.taskStates);
       if (sig !== lastSig) {
         lastSig = sig;
@@ -136,6 +143,12 @@ export async function watchRun({ workspace, runId, intervalMs = 800, jsonl = fal
         if (!jsonl && !tty && !announcedFinal) { announcedFinal = true; write('[board] run=' + runId + ' finalized success=' + (b.sum.success === true) + '\n'); }
         return b.sum.success === true ? 0 : 1;
       }
+    } else if (seen) {
+      throw new Error('Run ' + runId + ' lost its summary.json while being watched (dir: ' + dir + ')');
+    } else if (Date.now() - startedAt >= grace) {
+      throw new Error(fs.existsSync(dir)
+        ? 'Run ' + runId + ' has no readable summary.json (dir exists: ' + dir + ')'
+        : 'Run not found: ' + runId + ' (no run directory ' + dir + ')');
     }
     await new Promise(r => setTimeout(r, intervalMs));
   }
