@@ -169,7 +169,7 @@ const PY_DIR = (() => { try { const p = String(process.env.PYTHON || ""); return
 // node --test 下由 inheritHostModelEffort 自行豁免（NODE_TEST_CONTEXT）。
 // 机器可读入口（--doctor/--tasks/--status/--watch/--verify-run 等）的 stdout 只允许纯数据：
 // 档位解读性输出一律让位——信息已进 doctor 字段与 summary 留痕。
-const MACHINE_READABLE = process.argv.slice(2).some((a) => /^--(doctor|tasks|status|watch|verify-run|version|help)$/.test(a) || a === '-h');
+const MACHINE_READABLE = process.argv.slice(2).some((a) => /^--(doctor|tasks|status|watch|verify-run|version|help|install-deps)$/.test(a) || a === '-h');
 const noteModel = (line) => { if (!MACHINE_READABLE) console.log(line); };
 let MODEL_PLAN = {model:null,effort:null,modelSource:'none',effortSource:'none'};
 if (!AGENT_ERROR) try {
@@ -2246,7 +2246,7 @@ export async function main() {
   const mode = process.argv[2];
   // 维护锁：上锁期间一切动作模式（--run-windows/--spawn/--resume-run/--run/--exec/--plan/
   // --selftest-close 等）只回固定话术，发起 agent 本轮跳过编排器直接执行；只读模式不受影响。
-  const MAINTENANCE_BYPASS = new Set([undefined, "--doctor", "--status", "--watch", "--verify-run", "--clear-cache", "--tasks"]);
+  const MAINTENANCE_BYPASS = new Set([undefined, "--doctor", "--status", "--watch", "--verify-run", "--clear-cache", "--tasks", "--install-deps"]);
   if (lockedForMaintenance() && !MAINTENANCE_BYPASS.has(mode)) {
     console.log(MAINTENANCE_MESSAGE);
     return;
@@ -2433,6 +2433,27 @@ export async function main() {
   if (mode === '--verify-run') {
     const id=process.argv[3]||process.env.ORCH_RUN_ID;
     process.exitCode=verifyRun(WORKSPACE,id,process.env.ORCH_ACCEPTANCE_FILE)?0:1;return;
+  }
+  if (mode === '--install-deps') {
+    // 公开安装路径的补依赖入口：npm 发行包里不带锁定 SDK 依赖（node-pty + codex-sdk），
+    // 用户装完包跑这一条即可，不需要自己拼路径。只装本包自己的依赖，不动任何 agent CLI；
+    // 已装则直接回报（幂等、不联网）。stdout 保持纯数据（进度与失败原因都走 stderr）。
+    const pkgRoot=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..','..');
+    const scriptsDir=path.join(pkgRoot,'scripts');
+    const shim=(name)=>path.join(scriptsDir,'node_modules',name,'package.json');
+    const present=existsSync(shim('@openai/codex-sdk'))&&existsSync(shim('@lydell/node-pty'));
+    if(present){console.log(JSON.stringify({ok:true,action:'already-present',scriptsDir}));return;}
+    if(!existsSync(path.join(scriptsDir,'package-lock.json'))){console.error('[orchestrator] FATAL: package-lock.json is missing from '+scriptsDir+'; reinstall the package');process.exitCode=1;return;}
+    console.error('[orchestrator] installing locked SDK dependencies into '+scriptsDir+' (npm ci; network required)');
+    const npm=spawnSync(process.platform==='win32'?'npm.cmd':'npm',['ci','--prefix',scriptsDir],{cwd:scriptsDir,encoding:'utf8',windowsHide:true,shell:process.platform==='win32',timeout:900000});
+    const tail=(text)=>String(text||'').trim().split(/\r?\n/).slice(-12).join('\n');
+    if(npm.status!==0||!present){
+      console.error('[orchestrator] FATAL: dependency install failed (npm exit '+(npm.status??'null')+(npm.error?', '+npm.error.message:'')+')');
+      if(tail(npm.stderr))console.error(tail(npm.stderr));
+      console.error('[orchestrator] hint: '+(npm.error&&npm.error.code==='ENOENT'?'install Node.js 22+ so npm is on PATH, or ':'')+'run it manually: npm ci --prefix "'+scriptsDir+'"');
+      process.exitCode=1;return;
+    }
+    console.log(JSON.stringify({ok:true,action:'installed',scriptsDir}));return;
   }
   if (mode === '--run-windows' || mode === '--resume-run') {
     requireHost();
