@@ -1,8 +1,15 @@
 # CI — the machine gate, on a clean Windows runner.
 #
-# SHIPS DISARMED ON PURPOSE. The trigger is manual (`workflow_dispatch`) so that pushing to
-# the private repository never spends Windows runner minutes. Arming it for public use is a
-# two-line edit — replace the `on:` block below with:
+# MEASURED 2026-09-15 on the private repository: dispatching this workflow produced a job with
+# ZERO steps that failed in 3 seconds. GitHub's own annotation:
+#   "The job was not started because recent account payments have failed or your spending limit
+#    needs to be increased. Please check the 'Billing & plans' section in your settings"
+# So Actions jobs cannot start here while the repository is private. GitHub's billing docs state
+# that Actions usage is FREE for public repositories on standard GitHub-hosted runners — which
+# means arming this workflow BEFORE the visibility flip only produces red X's, and the flip
+# itself unlocks it at zero cost. Keep the manual trigger until then.
+#
+# To arm it (after the repository is public), replace the `on:` block below with:
 #
 #   on:
 #     push:
