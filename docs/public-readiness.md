@@ -24,9 +24,8 @@
 **结论（2026-09-14，core 1.14.4 / 0.9.4）：清单只剩两件事，且都不可逆、都必须用户亲手点——一、发 npm 包（需要 `npm login`/token）；二、仓转公开。其余全部就绪。**
 
 1. ~~公开前的个人路径清理~~ **完成 2026-09-14**：18 个 tracked 文件、77 处用户名归一化为 `<user>`；根因一并修掉（证据采集器、画像适配器、hermes 画像 provenance）。验证：`git grep -c <user>` 只剩公开的 GitHub 句柄 `yechang1450`。
-2. **npm 发布——只差登录**：`npm publish --dry-run` 全绿（**92 文件 / 298 kB**，本轮加 `scripts/gate.mjs`）；`private` 已去、`files` 白名单已验（不加排除会被 385 MB 的 `scripts/node_modules` 卷进去）、元数据齐备。
-   **需要你**：`npm login`（或给 token）→ `npm publish`。
-3. ~~CI~~ **完成 2026-09-14 / 实测 2026-09-15**：`.github/workflows/ci.yml`（`windows-latest` + Node 24 + 装 codex + `--install-deps` 自检 + `node scripts/gate.mjs --all`）。**实测结论**：在私有仓手动派发该工作流 → 作业零步骤、3 秒失败，GitHub 注解为「recent account payments have failed or your spending limit needs to be increased」——**私有仓的 Actions 作业起不来（与代码无关，是账户计费问题）**；而 GitHub 计费文档明确：**公开仓的标准 hosted runner 免费**。所以正确姿势是**转公开后再武装**（改文件头 2 行 `on:`），提前武装只会收获红叉。
+2. ~~**npm 发布**~~ **已发布 2026-09-15**：`open-tui-orchestrator@0.9.6` 已在 registry 上（93 文件 / 310.5 kB、shasum `4b16de76…`、`dist.tarball` 可取）。账号＝个人账号 unscoped（`npm whoami` = `yechang1450`；正名未被占）。**端到端烟测**：① 干净前缀（`D:/temp/orch-coldinstall`）`npm install open-tui-orchestrator` 345ms → `--version` = `0.9.6 (core 1.14.6)` → `--install-deps` = `{"ok":true,"action":"installed"}` → `--doctor` = `hostError=null / carrierAvailable=true`；② `npx --yes open-tui-orchestrator@latest --version` 同结论（任何 agent 从 PATH 即装的路径成立）。
+3. ~~CI~~ **弃用（用户令 2026-09-15）**：GitHub Actions 一律不用——私有仓被账户计费拦死（2026-09-15 实测：作业零步骤、3 秒失败），转公开也不再启用。**判定全部走本机等价门禁**：`node scripts/gate.mjs --all`（一条命令五判据 + 反例能红）＋ 定时巡逻（83 的 schtasks 法，需要时并入）。`.github/workflows/ci.yml` 仅作历史记录保留、不带任何触发。
 4. ~~公开文档面~~ **完成 2026-09-14**：`CHANGELOG.md`、`.github/ISSUE_TEMPLATE/bug_report.yml`、`SECURITY.md`（私密漏洞报告渠道 + 披露政策）、`CONTRIBUTING.md`（屋规：判据必须能红、封印纪律、数字对账）。
 5. ~~信任与安全声明~~ **完成 2026-09-14**：`docs/trust-and-safety.md`（隐藏 agent 以你的凭据运行、Codex 的 `--dangerously-bypass-approvals-and-sandbox`、`--unit-cmd` 属调用方自授权、写哪些文件、无遥测无后台服务、如何卸载），README/README-zh 首屏与 INSTALL 均给出一行摘要 + 链接。
 6. ~~平台声明~~ **完成 2026-09-14**：README/README-zh 首屏与 INSTALL「Requirements」均明写 **Windows-only**，其它平台直接给诊断。
@@ -34,30 +33,29 @@
    **注意（2026-09-15 环境事实）**：本机 codex 账号额度耗尽（Sep 19 恢复）——模型驱动的真跑今天做不了；编排器在该条件下退化正确（inline 明说、无假成功），调用方自助通道（零模型调用）的真机双块验收已于 2026-09-15 通过。
 8. ~~验收证据去本地化~~ **完成 2026-09-14**。
 
-### 公开前一毫米（做完这两步就是公开态）
+### 公开前一毫米（done 一件、剩一件可选）
 ```powershell
-# 一、发布（产物已验证：93 文件 / 303 kB、三步安装走通；2026-09-15 重测）
-npm login && npm publish
+# 一、发布 ✅ 2026-09-15 已完成（open-tui-orchestrator@0.9.6 已在 registry；冷装三步 + npx 实跑通过）
+#     产物基线：93 文件 / 310.5 kB、shasum 4b16de76…
 
-# 二、转公开
+# 二、转公开（可选：CI 理由已作废，只剩「让外人能看到/克隆源码」一条）
 gh repo edit yechang1450/open-tui-orchestrator --visibility public --accept-visibility-change-consequences
-# 然后按 .github/workflows/ci.yml 头部注释武装 CI（2 行）——转公开同时也解锁免费 CI：
-# 私有仓的 Actions 作业被账户计费拦截（2026-09-15 实测），公开仓的标准 runner 免费。
+# 注意：转公开后**不**武装 CI（CI 已弃用，用户令 2026-09-15）；判定走本机等价门禁 `node scripts/gate.mjs --all`。
 ```
 
 ## 三、需要你决策
 
-**当前只剩两个决定，且都是「点不点」的问题（其余我已在 2026-09-14 全部收口）：**
+**当前只剩一个决定（npm 发布账号那条已随发布定案）：**
 
-- **仓库是否转公开**（private → public）：不可逆；历史里只有作者信息（已清理机器用户名，只剩公开的 GitHub 句柄）。
-- **npm 发布账号**：用你的账号、还是开组织 scope（如 `@yechang1450/open-tui-orchestrator`）？决定后只差一次 `npm login`。
+- **仓库是否转公开**（private → public）：不可逆；历史里只有作者信息（已清理机器用户名，只剩公开的 GitHub 句柄）。CI 理由已作废（CI 弃用），现在只剩「让外人看到/克隆源码」一个动机——愿意再点。
+- ~~**npm 发布账号**~~ **已定 2026-09-15：个人账号 unscoped**（`open-tui-orchestrator@0.9.6` 已发布；正名未被占，无需 scope 退路）。
 
-已由我按「最省事且不烧钱」定完、不需要你操心的：平台路线（Windows-only 明说，不投跨平台）、CI（入仓但不带 push 触发，转公开时改 2 行武装）、信任声明与安全渠道（`docs/trust-and-safety.md` + `SECURITY.md`）。
+已由我按「最省事且不烧钱」定完、不需要你操心的：平台路线（Windows-only 明说，不投跨平台）、CI（**弃用**——判定走本机等价门禁 `node scripts/gate.mjs --all`，用户令 2026-09-15）、信任声明与安全渠道（`docs/trust-and-safety.md` + `SECURITY.md`）。
 
 ## 四、推进记录
 
 1. ~~个人路径清理 + `CHANGELOG.md` / issue 模板~~ ✅ 2026-09-14
 2. ~~`npm publish --dry-run` 预演 + 打包瘦身（`files`）~~ ✅ 2026-09-14（89 文件 / 292 kB）
-3. ~~CI 骨架 + 门禁入仓~~ ✅ 2026-09-14（`scripts/gate.mjs` + `.github/workflows/ci.yml`，有意不武装）
+3. ~~CI 骨架 + 门禁入仓~~ ✅ 2026-09-14（`scripts/gate.mjs` + `.github/workflows/ci.yml`，有意不武装）→ **2026-09-15 用户令：GitHub CI 弃用，判定走本机等价门禁**
 4. ~~信任/安全声明定稿 + `SECURITY.md` + `CONTRIBUTING.md`~~ ✅ 2026-09-14
 5. 干净环境首次验收（第 7 项）——**你的部分**，过了即可对外说「可以用」

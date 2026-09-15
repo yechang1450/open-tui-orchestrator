@@ -1,22 +1,16 @@
-# CI — the machine gate, on a clean Windows runner.
+# CI — RETIRED (owner's call, 2026-09-15). Kept as a historical record; do NOT arm it.
 #
-# MEASURED 2026-09-15 on the private repository: dispatching this workflow produced a job with
-# ZERO steps that failed in 3 seconds. GitHub's own annotation:
+# History: MEASURED 2026-09-15 on the private repository — dispatching this workflow produced a job
+# with ZERO steps that failed in 3 seconds, GitHub annotating:
 #   "The job was not started because recent account payments have failed or your spending limit
 #    needs to be increased. Please check the 'Billing & plans' section in your settings"
-# So Actions jobs cannot start here while the repository is private. GitHub's billing docs state
-# that Actions usage is FREE for public repositories on standard GitHub-hosted runners — which
-# means arming this workflow BEFORE the visibility flip only produces red X's, and the flip
-# itself unlocks it at zero cost. Keep the manual trigger until then.
+# GitHub-hosted runners are free for public repositories, so arming after a visibility flip was the
+# earlier plan. The owner has since retired GitHub Actions for this project entirely.
 #
-# To arm it (after the repository is public), replace the `on:` block below with:
-#
-#   on:
-#     push:
-#       branches: [master]
-#     pull_request:
-#
-# (and keep `workflow_dispatch:` if you also want manual runs). Nothing else needs to change.
+# Decision (2026-09-15): judging runs on the equivalent LOCAL gate instead —
+#   node scripts/gate.mjs --all    # one command, five criteria, red-capable, command/expected/actual
+#   plus a scheduled patrol (the schtasks pattern the 83 line uses) when a project wants it.
+# See docs/public-readiness.md item 3.
 name: CI
 
 on:
