@@ -3,6 +3,34 @@
 Notable changes, newest first. Every entry pairs a package version with a core version —
 `open-tui-orchestrator --version` prints both (`open-tui-orchestrator <version> (core <core>)`).
 
+## 0.9.4 — core 1.14.4
+
+### Added
+
+- **`scripts/gate.mjs` — the machine gate now lives in the repository** and anyone can run it:
+  `node scripts/gate.mjs --all` runs L1 the offline regression suite, L2a host resolution,
+  L2b a deliberately failing test (proof that the criteria can still go red), L3 the unknown-run
+  diagnostic and L4 the version / seal / documentation / suite-total cross-check plus a stale
+  mutex-ticket sweep. Every criterion prints command, expectation and actual; a value that cannot
+  be read counts as a failure.
+- **`.github/workflows/ci.yml`** — the same gate on a clean `windows-latest` runner, including the
+  codex install and the `--install-deps` bootstrap self-test. It ships **disarmed** (manual
+  trigger only) so that pushing to a private repository never spends Windows runner minutes;
+  the header comment names the two lines that arm it.
+- **`docs/trust-and-safety.md`** — a plain statement of what this tool does on your machine:
+  hidden agents running with your credentials, the Codex approval bypass, what `--unit-cmd` means,
+  every file it writes, and the fact that there is no telemetry, daemon or auto-update.
+- **`SECURITY.md`** — private vulnerability reporting, scope, disclosure timeline.
+- **`CONTRIBUTING.md`** — the house rules (criteria must be able to go red, seal discipline,
+  single-source numbers).
+
+### Changed
+
+- README / README-zh lead with the **Windows-only** statement and link the trust statement,
+  security policy and contributing guide.
+- `INSTALL.md` documents `node scripts/gate.mjs --all`, `node scripts/release-integrity.mjs`
+  and `ORCH_NPM_BIN`.
+
 ## 0.9.3 — core 1.14.3
 
 ### Fixed

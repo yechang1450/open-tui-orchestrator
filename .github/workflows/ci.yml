@@ -1,0 +1,51 @@
+# CI — the machine gate, on a clean Windows runner.
+#
+# SHIPS DISARMED ON PURPOSE. The trigger is manual (`workflow_dispatch`) so that pushing to
+# the private repository never spends Windows runner minutes. Arming it for public use is a
+# two-line edit — replace the `on:` block below with:
+#
+#   on:
+#     push:
+#       branches: [master]
+#     pull_request:
+#
+# (and keep `workflow_dispatch:` if you also want manual runs). Nothing else needs to change.
+name: CI
+
+on:
+  workflow_dispatch:
+
+jobs:
+  gate:
+    # The tool is Windows-only today: PowerShell launchers, ConPTY carriers, registry-based
+    # coordinator discovery. The gate therefore runs on a Windows runner.
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Install the host CLI the offline suite resolves (codex)
+        run: npm install -g @openai/codex
+
+      - name: Put the codex vendor bin on PATH (documented regression convention)
+        shell: pwsh
+        run: |
+          $globalRoot = (npm root -g).Trim()
+          $vendor = Get-ChildItem -Path (Join-Path $globalRoot '@openai\codex') -Recurse -Filter 'codex.exe' -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+          if (-not $vendor) { throw "codex.exe not found under $globalRoot" }
+          $bin = $vendor.DirectoryName
+          Write-Host "codex vendor bin: $bin"
+          $bin | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          'ORCH_AGENT=codex' | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Bootstrap this package's own locked SDK dependencies
+        # Also a self-test of the bootstrap entry: it must work before the engine can load.
+        run: node cli.mjs --install-deps
+
+      - name: Machine gate (L1 suite, L2a doctor, L2b red canary, L3 unknown run, L4 consistency)
+        run: node scripts/gate.mjs --all

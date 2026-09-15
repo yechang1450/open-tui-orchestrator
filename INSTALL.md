@@ -32,6 +32,8 @@ git clone <this repository>
 cd open-tui-orchestrator
 npm run setup                                  # = npm ci --prefix scripts
 npm test                                       # offline regression (see the test-env note in README.md)
+node scripts/gate.mjs --all                    # the machine gate: suite + doctor + red canary + unknown run + version/seal/docs cross-check
+node scripts/release-integrity.mjs             # seal verify for the checkout you are about to run
 node cli.mjs --agent codex --doctor
 ```
 
@@ -82,11 +84,13 @@ Per-workspace state stays under `<workspace>\temp\orchestrator`; delete it if yo
 | `HOST_UNKNOWN` / `CLI_MISSING` | install and log in the CLI you pass to `--agent`, or point `ORCH_CLI` at its absolute path |
 | `--watch` prints `Run not found: <id>` | wrong run id, or the run belongs to a different `--workspace` |
 | Nothing pops up | that is the default (headless); pass `--mode window` |
-| `--install-deps` fails | it prints the manual fallback `npm ci --prefix "<pkg>\scripts"`; make sure Node 22+ (with npm) is on PATH |
+| `--install-deps` fails | it prints the manual fallback `npm ci --prefix "<pkg>\scripts"`; make sure Node 22+ (with npm) is on PATH, or point `ORCH_NPM_BIN` at your own npm (corporate mirror, alternate install) |
 
 ## What it does on your machine (short version)
 
+The full statement, including what is *not* sandboxed, is [docs/trust-and-safety.md](docs/trust-and-safety.md). In short:
+
 - drives the agent CLI you already have and carries your existing permissions — for Codex under the never-approval + full-access policy the launcher passes `--dangerously-bypass-approvals-and-sandbox` so an already-authorized window cannot stall on a project-trust prompt;
 - writes run state **only** under `<workspace>\temp\orchestrator`;
-- never installs, upgrades or substitutes an agent CLI, and never transmits your credentials anywhere;
+- never installs, upgrades or substitutes an agent CLI, and never transmits your credentials anywhere; the only network access it initiates is fetching its own locked dependencies (`--install-deps`);
 - `--unit-cmd` runs commands **you** supply: that is your own authorization, not an escalation.

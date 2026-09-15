@@ -7,9 +7,10 @@
 | 项 | 证据 |
 | --- | --- |
 | MIT 许可 + 作者署名 | `LICENSE` |
-| 离线回归全绿 | 287/287（本轮补 1 条：`--install-deps` 成功路径判据——真机回归抓到的洞） |
-| 发行封印 + 副本流程 | `release.json`（43 核心 + 62 运行时）、`repair.mjs`、`docs/release-policy.md` |
+| 离线回归全绿 | 289/289（本轮补 2 条：`scripts/gate.mjs` 自身可红判据——真仓必绿、口径被篡改的副本必红并指名） |
+| 发行封印 + 副本流程 | `release.json`（43 核心 + 64 运行时）、`repair.mjs`、`docs/release-policy.md` |
 | 机器可调用失败契约 | 一行 `[orchestrator] FATAL: …`、退出码 0/1/2、未知 run 不挂起（1.13.0 起） |
+| 机判门禁（在仓里，任何人可跑） | **本轮新增** `node scripts/gate.mjs --all`：L1 套件 / L2a doctor / L2b 反例能红 / L3 未知 run / L4 版本·封印·文档·套件总数对账 + 锁票巡检 |
 | 安全审计（当前核心） | `docs/security-audit-2026-09-09.md`（无 Critical/High；Medium/Low 已修或登记） |
 | 一键补依赖 | **本轮新增** `--install-deps`：幂等、失败干净、stdout 纯数据、从不碰 agent CLI |
 | 安装路径实测 | `npm pack`（403 kB / 162 文件）→ 装进独立前缀 → `--install-deps`（3 s，npm 缓存）→ `--doctor` `hostError=null` `carrierAvailable=true` |
@@ -18,28 +19,41 @@
 
 ## 二、待补（按我的排序；1–3 是硬门槛）
 
-1. ~~公开前的个人路径清理~~ **已完成（2026-09-14）**：18 个 tracked 文件、77 处用户名归一化为 `<user>`；根因一并修掉——证据采集器写入前自动折叠用户名段、画像适配器改记 basename、`hermes.json` 的 provenance 字段去绝对路径。验证：`git grep -c yecha` 只剩公开的 GitHub 句柄 `yechang1450`。
-2. npm 发布——**预演已通过**（`npm publish --dry-run`：89 文件 / 292 kB，只差登录警告）；本轮已就位：去 `private`、补 `files`（排除 `test/` 与 385 MB 的 `scripts/node_modules`；曾实测不加排除会被整包卷进去）、`description`/`keywords`/`author`/`license`/`repository`/`homepage`/`bugs` 齐备。
-   还需要你：`npm login`（或给我 token）→ 真发一次 `npm publish`。
-3. **CI（GitHub Actions, `windows-latest`）**——跑离线套件（前置 `npm i -g @openai/codex`，套件的环境约定会自解释）+ 机器门禁入仓（现在门禁在 `D:\build\tools\orch-level-check.py`，对公开仓库不存在）。
-   验证：CI 上 `ℹ pass 287 / ℹ fail 0`，并把门禁的 L1/L2a/L2b/L3/L4 做成可跑的 job。
-4. **公开文档面**——`CHANGELOG.md` ✅、`.github/ISSUE_TEMPLATE` ✅；仍缺 `SECURITY.md`（漏洞报告渠道 + 披露政策）、`CONTRIBUTING.md`、supported-hosts 矩阵（哪个 CLI 哪一版验证过）。
-5. **信任与安全声明**——把「默认 headless 隐藏窗 / Codex 带 `--dangerously-bypass-approvals-and-sandbox` / `--unit-cmd` 是调用方自授权 / 只写 `<workspace>\temp\orchestrator` / 无后台服务」写成公开可见的一节（INSTALL 已有简版，建议独立章节 + SECURITY.md 交叉引用）。
-6. **平台声明**——当前 Windows-only（代码有硬门 + PowerShell 启动器 + ConPTY）。公开首页要写清；是否做 Linux/macOS 需要你定方向（我的评估：属大工程，建议先不做，明说即可）。
-7. **外部首次验收**——在一台**干净的 Windows 用户/机器**上走一遍：装 Node → 装包 → `--install-deps` → doctor → 一个双块真跑 → 看板与 `summary.json`。`docs/release-policy.md` 已把「不同 Windows 用户安装」列为发行门槛。
-8. ~~验收证据去本地化~~ **已完成（2026-09-14）**：验收 JSON/证据里的用户名统一为 `<user>`（绝对路径本体保留——证据仍诚实，只是不含身份）。
+**结论（2026-09-14，core 1.14.4 / 0.9.4）：清单只剩两件事，且都不可逆、都必须用户亲手点——一、发 npm 包（需要 `npm login`/token）；二、仓转公开。其余全部就绪。**
+
+1. ~~公开前的个人路径清理~~ **完成 2026-09-14**：18 个 tracked 文件、77 处用户名归一化为 `<user>`；根因一并修掉（证据采集器、画像适配器、hermes 画像 provenance）。验证：`git grep -c yecha` 只剩公开的 GitHub 句柄 `yechang1450`。
+2. **npm 发布——只差登录**：`npm publish --dry-run` 全绿（**92 文件 / 298 kB**，本轮加 `scripts/gate.mjs`）；`private` 已去、`files` 白名单已验（不加排除会被 385 MB 的 `scripts/node_modules` 卷进去）、元数据齐备。
+   **需要你**：`npm login`（或给 token）→ `npm publish`。
+3. ~~CI~~ **完成 2026-09-14**：`.github/workflows/ci.yml`（`windows-latest` + Node 24 + 装 codex + `--install-deps` 自检 + `node scripts/gate.mjs --all`）。**有意不带 push 触发**（私有仓不吃 Windows runner 分钟数）；转公开时按文件头部注释改 2 行 `on:` 即武装。
+4. ~~公开文档面~~ **完成 2026-09-14**：`CHANGELOG.md`、`.github/ISSUE_TEMPLATE/bug_report.yml`、`SECURITY.md`（私密漏洞报告渠道 + 披露政策）、`CONTRIBUTING.md`（屋规：判据必须能红、封印纪律、数字对账）。
+5. ~~信任与安全声明~~ **完成 2026-09-14**：`docs/trust-and-safety.md`（隐藏 agent 以你的凭据运行、Codex 的 `--dangerously-bypass-approvals-and-sandbox`、`--unit-cmd` 属调用方自授权、写哪些文件、无遥测无后台服务、如何卸载），README/README-zh 首屏与 INSTALL 均给出一行摘要 + 链接。
+6. ~~平台声明~~ **完成 2026-09-14**：README/README-zh 首屏与 INSTALL「Requirements」均明写 **Windows-only**，其它平台直接给诊断。
+7. **外部首次验收——你的部分**：在一台干净的 Windows 机器/用户上走一遍（装 Node → 装包 → `--install-deps` → doctor → 双块真跑）。`docs/release-policy.md` 已把「不同 Windows 用户安装」列为发行门槛。
+8. ~~验收证据去本地化~~ **完成 2026-09-14**。
+
+### 公开前一毫米（做完这两步就是公开态）
+```powershell
+# 一、发布（产物已验证：92 文件 / 298 kB、三步安装走通）
+npm login && npm publish
+
+# 二、转公开
+gh repo edit yechang1450/open-tui-orchestrator --visibility public --accept-visibility-change-consequences
+# 然后按 .github/workflows/ci.yml 头部注释武装 CI（2 行）
+```
 
 ## 三、需要你决策
 
-- **仓库是否转公开**（private → public）：影响面最大、不可逆（历史里已有作者信息，属正常）。
-- **npm 发布账号**：用你的账号，还是开组织 scope（如 `@yechang1450/open-tui-orchestrator`）？
-- **平台路线**：Windows-only 明说，还是要投入做跨平台？（我建议：先明说，不投。）
-- **要不要 CI**：公开后 CI 分钟数在私有仓要计费；Windows runner 尤其贵。可以先只在 push 到 tag 时跑。
+**当前只剩两个决定，且都是「点不点」的问题（其余我已在 2026-09-14 全部收口）：**
 
-## 四、我的推进顺序（建议）
+- **仓库是否转公开**（private → public）：不可逆；历史里只有作者信息（已清理机器用户名，只剩公开的 GitHub 句柄）。
+- **npm 发布账号**：用你的账号、还是开组织 scope（如 `@yechang1450/open-tui-orchestrator`）？决定后只差一次 `npm login`。
 
-1. 个人路径清理 + `CHANGELOG.md` / issue 模板（**今天就能做完、零风险**）
-2. `npm publish --dry-run` 预演 + 打包瘦身（`files` 字段），拿到你的 npm 账号后真发
-3. CI 骨架（先私有仓跑通，再随转公开）
-4. 信任/安全声明定稿（结合 SECURITY.md）
-5. 干净环境首次验收（第 7 项），过了再对外说「可以用」
+已由我按「最省事且不烧钱」定完、不需要你操心的：平台路线（Windows-only 明说，不投跨平台）、CI（入仓但不带 push 触发，转公开时改 2 行武装）、信任声明与安全渠道（`docs/trust-and-safety.md` + `SECURITY.md`）。
+
+## 四、推进记录
+
+1. ~~个人路径清理 + `CHANGELOG.md` / issue 模板~~ ✅ 2026-09-14
+2. ~~`npm publish --dry-run` 预演 + 打包瘦身（`files`）~~ ✅ 2026-09-14（89 文件 / 292 kB）
+3. ~~CI 骨架 + 门禁入仓~~ ✅ 2026-09-14（`scripts/gate.mjs` + `.github/workflows/ci.yml`，有意不武装）
+4. ~~信任/安全声明定稿 + `SECURITY.md` + `CONTRIBUTING.md`~~ ✅ 2026-09-14
+5. 干净环境首次验收（第 7 项）——**你的部分**，过了即可对外说「可以用」
