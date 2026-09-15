@@ -64,7 +64,7 @@ Hard rules (the existing core, unchanged):
 - argv is built element-by-element (`shell:false`); the PowerShell launcher keeps quotes, Chinese and spaces intact.
 - No probe, no version assertion: the caller vouches for the command.
 - Completion uses the same contract as every host: the unit writes its checkpoints, prints `__ORCH_DONE__ <token>` as its last line, and the parent re-checks the real results with its own acceptance file. Output text is never parsed for success.
-- `unitProfile` is stored in the run ledger; `--resume-run` reuses it, and re-supplying a different one is refused.
+- `unitProfile` is stored in the run ledger. The **guardian** resume passes it from the ledger automatically; a **manual** `--resume-run` must re-supply the same unit command (`--unit-cmd`/`--unit-cmd-file`) — omitting it is refused with `re-supply the identical --unit-cmd/--unit-cmd-file to resume`, and supplying a different one is refused as well (measured 2026-09-15 in the L5 recovery drill).
 
 ## 3. Run
 

@@ -8,12 +8,30 @@ import {keysOverlap,powershellExe} from './contracts.mjs';
 // 锚定 SystemRoot 的 powershell.exe：裸名会先按进程 cwd（任意工作区）解析，防二进制投毒。
 const PS_EXE=powershellExe();
 
-export function processSnapshot(timeoutMs=15000) {
+export function processSnapshotTimeoutMs(override) {
+  // 身份枚举的预算（2026-09-15）：慢机上 PowerShell/WMI 可能几十秒不返回。默认 15000 ms，
+  // 可用 ORCH_PS_TIMEOUT_MS 调（上限 120000 ms）。失败话术必须带耗时与原因——裸话术
+  // 「Cannot verify process identities」既不说耗时也不说原因，慢机上无法排障。
+  const raw=Number.isFinite(override)?override:Number(process.env.ORCH_PS_TIMEOUT_MS);
+  const value=Number.isFinite(raw)&&raw>0?raw:15000;
+  return Math.max(1,Math.min(120000,Math.ceil(value)));
+}
+export function processSnapshot(timeoutMs) {
   if(process.platform!=='win32')throw new Error('Visible TUI runtime currently requires Windows');
+  const budget=processSnapshotTimeoutMs(timeoutMs);
+  const started=Date.now();
   const result=spawnSync(PS_EXE,['-NoProfile','-Command',
     '$ErrorActionPreference="Stop"; Get-CimInstance Win32_Process | Select-Object ProcessId,Name,CommandLine,@{n="Started";e={$_.CreationDate.ToUniversalTime().ToString("o")}} | ConvertTo-Json -Compress'],
-    {encoding:'utf8',windowsHide:true,timeout:Math.max(1,Math.min(15000,Math.ceil(timeoutMs)))});
-  if(result.status!==0)throw new Error('Cannot verify process identities');
+    {encoding:'utf8',windowsHide:true,timeout:budget});
+  const elapsed=Date.now()-started;
+  if(result.status!==0){
+    const timedOut=(result.error&&result.error.code==='ETIMEDOUT')||(result.status===null);
+    const stderr=String(result.stderr||'').trim().split('\n').filter(Boolean).slice(-1)[0]||'';
+    const detail=timedOut
+      ?`the process snapshot did not return within ${budget} ms (elapsed ${elapsed} ms; the machine may be under heavy load)`
+      :`powershell exited with status ${result.status} after ${elapsed} ms`;
+    throw new Error(`Cannot verify process identities: ${detail}${stderr?'; '+stderr.slice(0,200):''}; retry, or raise ORCH_PS_TIMEOUT_MS (budget ${budget} ms, cap 120000)`);
+  }
   return new Map(JSON.parse(result.stdout).map(p=>[p.ProcessId,p]));
 }
 export function sameProcess(expected,actual) {
