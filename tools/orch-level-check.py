@@ -19,6 +19,7 @@
   L2b：反例必须能红 —— 见 --canary（放临时坏用例，要求 fail==1 且退出码非 0，跑完删除）
   L3：未知 run 必须 fail-closed 且只回一行（含「Run not found」、无栈帧、退出码非 0）
   L4：CORE_VERSION / 封印 / 三处文档写死的版本与数字 / 套件总数互相对账；协调器目录无过期锁票
+      （超龄票先按引擎同一语义回收，只对「回收后仍残留」的判红）
 未知即失败：日志里缺 pass/fail/exit 任一项 ⇒ FAIL。
 """
 from __future__ import annotations
@@ -223,17 +224,41 @@ def consistency(log_path: Path = DEFAULT_LOG, log_explicit: bool = False) -> int
     if coordinator.is_dir():
         # 先按引擎同一套语义回收一次：判据只对「回收后仍残留」判红，
         # 免得把「等着下次入口回收」的票当成泄漏（2026-09-15 修：此前会假红）。
+        # 2026-09-16 再修两处（当日实测假红）：
+        # ① 回收调用固定从判据自己的常驻仓导入 leases.mjs，不再从被检查树 REPO 导入——
+        #    红例复跑用最小树（只含文档/数据文件，没有 scripts/core/leases.mjs），
+        #    import 必失败、调用结果被丢弃 ⇒ 回收静默 no-op，任何超龄票都被当残留判红。
+        # ② 「超龄资格」在回收前定案、只认「回收后仍在」的票——回收是子进程调用（有 ~0.2s 间隔），
+        #    资格与残留分两次取样会让恰好跨过 TTL 边界的票被误判。
         import json as _json
+        canonical = Path(__file__).resolve().parent.parent  # 判据常驻仓（红例里仍指向真仓）
+        try:
+            ttl_ms = float(os.environ.get("ORCH_MUTEX_TICKET_TTL_MS", "600000"))
+        except ValueError:
+            ttl_ms = 600000.0
+        if not ttl_ms >= 0:
+            ttl_ms = 600000.0
+        cutoff = time.time() - ttl_ms / 1000.0
+        eligible = [p for p in coordinator.glob("lock-*") if p.stat().st_mtime < cutoff]
         sweep = (
-            "import('file:///" + REPO.as_posix() + "/scripts/core/leases.mjs')"
+            "import('file:///" + canonical.as_posix() + "/scripts/core/leases.mjs')"
             ".then(m => m.sweepStaleMutexTickets(" + _json.dumps(coordinator.as_posix()) + "))"
             ".catch(e => { console.error(e.message); process.exit(1); })"
         )
-        subprocess.run(["node", "-e", sweep], capture_output=True, text=True, timeout=60)
-        cutoff = time.time() - 600
-        stale = [p.name for p in coordinator.glob("lock-*") if p.stat().st_mtime < cutoff]
+        try:
+            sweep_rc = subprocess.run(["node", "-e", sweep], capture_output=True, text=True, timeout=60).returncode
+        except OSError:
+            sweep_rc = None
+        if sweep_rc != 0:
+            print(f"    （引擎按龄回收不可用 rc={sweep_rc}，回退本地按龄回收）")
+            for p in eligible:
+                try:
+                    p.unlink()
+                except OSError:
+                    pass
+        stale = [p.name for p in eligible if p.exists()]
     if stale:
-        print(f"    协调器目录有过期锁票 {len(stale)} 个（>10 分钟，按龄回收复用后仍残留）⇒ FAIL: {stale[:5]}")
+        print(f"    协调器目录有过期锁票 {len(stale)} 个（超龄（>{ttl_ms / 60000:g} 分钟），按龄回收后仍残留）⇒ FAIL: {stale[:5]}")
         ok = False
     else:
         print("    协调器目录无过期锁票（先按龄回收，再核对残留）")
@@ -256,7 +281,12 @@ def main() -> int:
         LOG_EXPLICIT = bool(nxt and not nxt.startswith("--"))
         LOG_PATH = Path(nxt) if LOG_EXPLICIT else DEFAULT_LOG
         print(f"读日志: {LOG_PATH}")
-        rc |= verdict(parse_log(LOG_PATH))
+        if not LOG_PATH.exists():
+            # 显式点名的日志不存在：干净判 FAIL（判据工具的失败也要可读，不许抛栈帧）（2026-09-16 修）
+            print(f"    MISSING_LOG: 日志不存在 `{LOG_PATH}`（显式点名必判；先 `--run` 生成再判）⇒ FAIL")
+            rc |= 1
+        else:
+            rc |= verdict(parse_log(LOG_PATH))
     if "--doctor" in args:
         rc |= doctor()
     if "--canary" in args:
