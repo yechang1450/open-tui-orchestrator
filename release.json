@@ -1,6 +1,6 @@
 {
   "schema": 2,
-  "coreVersion": "1.14.4",
+  "coreVersion": "1.14.5",
   "files": {
     "adapt-lib.mjs": "4704cb4dbcfb557f78b098008b3f54de2f41b6254d26dabd89e1cbea002d1854",
     "agent-auth-prompt.txt": "18fa9c01972cd99a2fe2b1b74a440b34921a051ba6c0d54daf2f5bf1096457b0",
@@ -9,7 +9,7 @@
     "checkpoint.mjs": "246de59db9a7aac48b12eea1554ff281eaf9dd897e620ecf73d954f39b3cf94a",
     "claude-host.mjs": "8ab7661e2b56eab07709b2a16c7f6e04dab8708edfbe672300254109c2323aaa",
     "claude-runtime.mjs": "06e7aba4a5c62a2bf0f12e09089db778c265a0aa21b31a53dbac7245586abe20",
-    "contracts.mjs": "f44f9dd479558913a9739c345032c3bf04cbaa2b5e9f8b45632311203d356932",
+    "contracts.mjs": "e8a7c4cc2eeeeb2e358e03390090e3516f2033f29849662321b1bd84e9bc6064",
     "host-cli.mjs": "67b538db32c8aa6a7c2527b2b0fe81d2fbe8b440ab062071c6e6ecff0309b949",
     "host-model.mjs": "497c5ac6a9a47cd8e42594f680c04d831f7bf1229ab1c2a8f192cacf9fe88547",
     "host-probe.mjs": "90d0831ca2775e54183145638880277f8c45fbf457a8b948d65966b6f96c378f",
@@ -47,8 +47,8 @@
     "unit-runtime.mjs": "21a7a287e59c068c6d277281d4fb092852cfe21f4bb2df62d6695106f4f20665"
   },
   "runtimeFiles": {
-    "cli.mjs": "5bdfb766e3ae1e1b42fa663dd68fbd4bcc449afb41ea0829b7a337c272222138",
-    "package.json": "c0c3ad95f61210e6eb4ebbdd9363942e478fae6d261ac927f2466ccd31d67b00",
+    "cli.mjs": "8b6817604286769142d0620ed8da96d433596e84362cee66594e099c88f1a1c4",
+    "package.json": "8d43855b5bd4119713a7475364bfd5e6bf800f5a03fe1088857f0748ddce8094",
     "repair.mjs": "5a456b42560bfa21fd1e66ccdff7416f88e82fe711db5c04279717e73275a076",
     "scripts/adapt.mjs": "20209c74212d334ea5aa1dfe35816a1b7a4b7f0415eb27c5a1975925dbbd10c5",
     "scripts/agent-auth-prompt.txt": "18fa9c01972cd99a2fe2b1b74a440b34921a051ba6c0d54daf2f5bf1096457b0",
@@ -60,7 +60,7 @@
     "scripts/core/checkpoint.mjs": "246de59db9a7aac48b12eea1554ff281eaf9dd897e620ecf73d954f39b3cf94a",
     "scripts/core/claude-host.mjs": "8ab7661e2b56eab07709b2a16c7f6e04dab8708edfbe672300254109c2323aaa",
     "scripts/core/claude-runtime.mjs": "06e7aba4a5c62a2bf0f12e09089db778c265a0aa21b31a53dbac7245586abe20",
-    "scripts/core/contracts.mjs": "f44f9dd479558913a9739c345032c3bf04cbaa2b5e9f8b45632311203d356932",
+    "scripts/core/contracts.mjs": "e8a7c4cc2eeeeb2e358e03390090e3516f2033f29849662321b1bd84e9bc6064",
     "scripts/core/host-cli.mjs": "67b538db32c8aa6a7c2527b2b0fe81d2fbe8b440ab062071c6e6ecff0309b949",
     "scripts/core/host-model.mjs": "497c5ac6a9a47cd8e42594f680c04d831f7bf1229ab1c2a8f192cacf9fe88547",
     "scripts/core/host-probe.mjs": "90d0831ca2775e54183145638880277f8c45fbf457a8b948d65966b6f96c378f",
@@ -103,9 +103,10 @@
     "scripts/network-policy.mjs": "3a2b09ad0555475fa31d8e926da951aacd9a8997e33d80e1d46712432438d15a",
     "scripts/open-tui-orchestrator-force.mjs": "d343662f3856c02231222cdae35b75ced0f46747e96b8b3fa7b5aecc07f6d91e",
     "scripts/open-tui-orchestrator-preflight.mjs": "cec145e4dd1bfcc1ec6462a3c1d29eeda0f9c0e155792a8a98ab98530c2dcda3",
-    "scripts/orchestrate-sdk.mjs": "a68cbbc79c3a70c7a9667069162da99bba213b41f0e95dc54ad473dc6b51de9a",
+    "scripts/orchestrate-sdk.mjs": "cc5107d7c720956d5d81c4ce706547f89c17db3143d6f890f27868a37570eb04",
     "scripts/package-lock.json": "a74e3fa808ddd67d8de21278e1d4dc318bc4d238334ef00030c7d6104d5cf995",
     "scripts/package.json": "a6b02f2ff7d3f0d6dd28a1cd7882277dcb51957feb199574dbc8e0927f0a5663",
+    "scripts/platform-guard.mjs": "3b0996ebf972bca764b6ee758f2501eaaf45531395521e0fd920abf0f1e5f80f",
     "scripts/poll-windows.mjs": "f6a629e4af5b5ab108464962af469359200c841e2546f2c071f0d3eaac48397c",
     "scripts/release-integrity.mjs": "841d1aa73a4b1bb3346e17348240540156fe59717521da1c1c4db0479822c6bd",
     "scripts/runtime-context.mjs": "deb2671a6f36e428e452c9dc03b1add6f94ccbb4533c0018efc8e3c778a55045",

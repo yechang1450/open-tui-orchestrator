@@ -1,0 +1,50 @@
+{
+  "schema": 1,
+  "kind": "acceptance",
+  "date": "2026-09-15",
+  "round": "windows-only guard enforced at every entry + released-artifact two-block run",
+  "version": { "package": "0.9.5", "core": "1.14.5" },
+  "suite": { "pass": 291, "fail": 0, "skipped": 0, "files": 46 },
+  "finding": {
+    "claim": "README/README-zh/INSTALL told users that other platforms 'get a diagnostic instead of a half-working install'",
+    "measured": "with no guard, a simulated Linux platform reported a healthy `--doctor` (exit 0, \"terminal\": \"wt\") and `--run-windows` went on to make a real classify call",
+    "verdict": "the headline promise was false — a claim without a criterion",
+    "method": "node --import <preload that redefines process.platform> cli.mjs … (deterministic, offline; the preload only affects the first process, which is why the guard had to move to the entry that the user actually invokes)"
+  },
+  "fix": {
+    "sharedModule": "scripts/platform-guard.mjs",
+    "enforcedAt": ["cli.mjs (the npm bin entry)", "orch.mjs (the force-execute entry)", "scripts/orchestrate-sdk.mjs (direct wrapper invocations)"],
+    "neutralEntries": ["--version", "--help", "-h", "--install-deps"],
+    "contract": "one `[orchestrator] FATAL: Windows-only: …` line, exit 1, no Node stack, before host resolution / model calls / any state",
+    "docs": "INSTALL.md / INSTALL-zh.md now state the exact scope of the refusal"
+  },
+  "criteria": {
+    "file": "test/windows-only.test.mjs",
+    "cases": [
+      "a non-Windows platform is refused at the entry with one diagnostic line (and must not look like a healthy doctor report)",
+      "the platform-neutral entries still work on a non-Windows platform (--version prints the version pair; --install-deps reports already-present)"
+    ],
+    "redCase": "guard removed from a copy AND the copy resealed, then run under the fake platform ⇒ healthy --doctor exit 0, i.e. case 1 would fail. Real proof, not a claim."
+  },
+  "releasedArtifactRun": {
+    "copy": "C:/Users/<user>/.tools/releases/0.9.4/open-tui-orchestrator",
+    "channel": "caller-driven (--plan-file + --unit-cmd-file + --acceptance-file): zero model calls, so it does not depend on any model account",
+    "request": "在项目81创建文件 alpha.txt 内容 ALPHA_OK；在项目84创建文件 beta.txt 内容 BETA_OK",
+    "ledger": "T001/T002 (deterministic split, no host identity needed)",
+    "board": ["0/2 verified 1 waiting [B1… B2·]", "spawned headless caller-script unit: proj-81", "spawned headless caller-script unit: proj-84", "0/2 verified [B1▶ B2…]", "1/2 verified [B1✓ B2…]", "1/2 verified [B1✓ B2▶]", "2/2 verified [B1✓ B2✓] finalized success=true"],
+    "products": { "alpha.txt": "ALPHA_OK", "beta.txt": "BETA_OK" },
+    "evidence": {
+      "T001": { "status": "verified", "sha256": "5b59da964685d6c01cad12c216a305f5cddd95dfb66f3bbebd19111d0f7abe10", "checkpoint": "completed" },
+      "T002": { "status": "verified", "sha256": "d76be855e11b10cd389106bf9b825791f1f46049f925d50547640fc28b04c8b6", "checkpoint": "completed" }
+    },
+    "summary": { "success": true, "agent": "caller-script", "spawnMode": "headless" },
+    "wall": "~60 s (11:46:16 → 11:47:16)",
+    "workspace": "D:/temp/orch-accept-094b/ws"
+  },
+  "environmentFindings": [
+    "the codex account behind this machine is out of quota ('You've hit your usage limit … try again at Sep 19th, 2026'), so a model-driven two-block run could not be executed today",
+    "the orchestrator degraded correctly under that condition: classify failed twice, it fell back to `{\"mode\":\"inline\",\"reason\":\"single-block\",…}` and told the caller to execute inline — no fake success, no silent half-run",
+    "the opencode host (deepseek-flash) answered a probe, but the deterministic splitter still judged the English two-file request as one linked block, so the caller-driven channel was used instead"
+  ],
+  "gate": { "inRepo": "node scripts/gate.mjs --all", "levels": "L1–L4 PASS", "numbers": { "coreFiles": 43, "runtimeFiles": 65 } }
+}

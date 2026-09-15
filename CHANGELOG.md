@@ -3,6 +3,36 @@
 Notable changes, newest first. Every entry pairs a package version with a core version —
 `open-tui-orchestrator --version` prints both (`open-tui-orchestrator <version> (core <core>)`).
 
+## 0.9.5 — core 1.14.5
+
+### Fixed
+
+- **The Windows-only promise is now enforced, not just documented.** Measured: with no guard, a
+  simulated non-Windows platform reported a *healthy* `--doctor` (exit 0, `"terminal": "wt"`) and
+  `--run-windows` proceeded to a real classify call — the front page claimed "other platforms get
+  a diagnostic instead of a half-working install", and that claim was false. The refusal now
+  happens in `scripts/platform-guard.mjs`, called by `cli.mjs`, `orch.mjs` and the SDK wrapper
+  before host resolution, before any model call and before any state: one
+  `[orchestrator] FATAL: Windows-only: …` line, exit 1, no stack. `--version`, `--help` and
+  `--install-deps` stay available because they are platform-neutral and are what you need when
+  debugging a platform issue (they are what the criterion pins as still working).
+
+### Added
+
+- `test/windows-only.test.mjs` — two criteria, red-capable in both directions (remove the guard →
+  case 1 fails; widen it to every entry → case 2 fails). The red case was demonstrated for real:
+  guard removed from a copy, copy resealed, fake platform → healthy `--doctor`.
+
+### Verified
+
+- A live two-block run against the **released** copy (0.9.4) through the caller-driven channel
+  (`--plan-file` + `--unit-cmd-file` + `--acceptance-file`, zero model calls): board reached
+  `2/2 verified … finalized success=true`, products `alpha.txt=ALPHA_OK` / `beta.txt=BETA_OK`
+  written and hash-recorded, both tasks `verified` with `completed` checkpoints, ~60 s.
+- Environment note recorded in the evidence file: the codex account on this machine is out of
+  quota until 2026-09-19, so a model-driven run could not be executed today; the orchestrator
+  degraded correctly (inline fallback, no fake success) instead of pretending to run.
+
 ## 0.9.4 — core 1.14.4
 
 ### Added

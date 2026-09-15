@@ -6,11 +6,13 @@
 // 用法: orch [--mode headless|exec|window] [--run-id id] [--acceptance-file f] <请求...>
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { enforceWindowsOnly } from './scripts/platform-guard.mjs';
 const args = process.argv.slice(2);
 if (!args.length) {
   console.log('usage: orch [--mode headless|exec|window] [--run-id id] [--acceptance-file file] [--plan-file f] [--unit-cmd json | --unit-cmd-file f] <request>');
   process.exit(2);
 }
+if (enforceWindowsOnly(args)) process.exit(1);
 const child = spawn(process.execPath, [fileURLToPath(new URL('./cli.mjs', import.meta.url)), '--run-windows', ...args], {
   stdio: 'inherit', windowsHide: true, env: { ...process.env, ORCH_FORCE_EXECUTE: '1' },
 });
