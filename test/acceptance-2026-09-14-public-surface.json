@@ -1,0 +1,35 @@
+{
+  "schema": 1,
+  "kind": "acceptance",
+  "date": "2026-09-14",
+  "round": "public-release-prep-3 (gate moved in-repo + CI + public documentation surface)",
+  "version": { "package": "0.9.4", "core": "1.14.4" },
+  "suite": { "pass": 289, "fail": 0, "skipped": 0, "files": 45, "command": "node scripts/gate.mjs --suite" },
+  "inRepoGate": {
+    "path": "scripts/gate.mjs",
+    "criteria": ["L1 offline regression suite", "L2a host resolution (--doctor, hostError null)", "L2b red-capability canary", "L3 unknown run fails closed, one line, no stack", "L4 version/seal/docs/suite-total cross-check + stale mutex tickets"],
+    "why": "the gate used to live outside the repository, which made it unusable for anyone else; a public release needs it runnable from the checkout",
+    "selfEvidence": [
+      "L2b keeps the criteria honest: a deliberately failing test must exit non-zero with `fail 1`",
+      "L4 caught the stale documentation in this very round: after the 1.14.4 bump it reported `README.md: core 1.14.3 != 1.14.4 ⇒ FAIL` until the three documents were updated",
+      "adding gate.mjs broke the seal and the CLI refused to run with RELEASE_INTEGRITY_FAILED until it was resealed — observed, not asserted"
+    ],
+    "redCases": [
+      "test/gate.test.mjs case 2: a copy whose README regression total is tampered must exit 1 and name README.md",
+      "the same test file case 1 pins the real repository green"
+    ]
+  },
+  "ci": {
+    "workflow": ".github/workflows/ci.yml",
+    "runner": "windows-latest, Node 24",
+    "steps": ["checkout", "setup-node", "npm install -g @openai/codex", "resolve the codex vendor bin onto PATH", "node cli.mjs --install-deps (bootstrap self-test)", "node scripts/gate.mjs --all"],
+    "arming": "ships disarmed on purpose (workflow_dispatch only) so a private repository never spends Windows runner minutes; the header comment names the two lines to add for push/PR triggers"
+  },
+  "publicSurface": {
+    "added": ["SECURITY.md", "CONTRIBUTING.md", "docs/trust-and-safety.md", ".github/workflows/ci.yml"],
+    "platformDisclosure": "README.md / README-zh.md lead with Windows-only and link the trust statement; INSTALL.md Requirements already stated it",
+    "trustStatementCovers": ["hidden agents launched with the caller's credentials", "Codex runs pass --dangerously-bypass-approvals-and-sandbox", "--unit-cmd is the caller's own authorization", "every file written (workspace temp/orchestrator + HKCU\\Software\\TuiOrchestrator\\CoordinatorRoot)", "no telemetry, no daemon, no auto-update", "network only for its own locked dependencies; ORCH_NPM_BIN override", "uninstall/removal steps"]
+  },
+  "ledger": { "file": "docs/public-readiness.md", "remaining": ["npm publish (owner's npm login/token)", "repository visibility (owner's decision)"], "ownerPart": "clean-machine first-run acceptance" },
+  "numbers": { "coreFiles": 43, "runtimeFiles": 64, "tarballFiles": 92, "tarballKB": 298.3, "nodeModulesEntries": 0, "note": "tarball grew from 89/292.2 kB in 0.9.3 by adding scripts/gate.mjs and docs/trust-and-safety.md" }
+}

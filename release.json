@@ -1,6 +1,6 @@
 {
   "schema": 2,
-  "coreVersion": "1.14.3",
+  "coreVersion": "1.14.4",
   "files": {
     "adapt-lib.mjs": "4704cb4dbcfb557f78b098008b3f54de2f41b6254d26dabd89e1cbea002d1854",
     "agent-auth-prompt.txt": "18fa9c01972cd99a2fe2b1b74a440b34921a051ba6c0d54daf2f5bf1096457b0",
@@ -9,7 +9,7 @@
     "checkpoint.mjs": "246de59db9a7aac48b12eea1554ff281eaf9dd897e620ecf73d954f39b3cf94a",
     "claude-host.mjs": "8ab7661e2b56eab07709b2a16c7f6e04dab8708edfbe672300254109c2323aaa",
     "claude-runtime.mjs": "06e7aba4a5c62a2bf0f12e09089db778c265a0aa21b31a53dbac7245586abe20",
-    "contracts.mjs": "75999bfb4bfa8af4dcb2aa9f3b92fde0404535e9f13aa26a1fa44a7bb2b43873",
+    "contracts.mjs": "f44f9dd479558913a9739c345032c3bf04cbaa2b5e9f8b45632311203d356932",
     "host-cli.mjs": "67b538db32c8aa6a7c2527b2b0fe81d2fbe8b440ab062071c6e6ecff0309b949",
     "host-model.mjs": "497c5ac6a9a47cd8e42594f680c04d831f7bf1229ab1c2a8f192cacf9fe88547",
     "host-probe.mjs": "90d0831ca2775e54183145638880277f8c45fbf457a8b948d65966b6f96c378f",
@@ -48,7 +48,7 @@
   },
   "runtimeFiles": {
     "cli.mjs": "5bdfb766e3ae1e1b42fa663dd68fbd4bcc449afb41ea0829b7a337c272222138",
-    "package.json": "85d70c041d4da6168cf799310fec11ac14f91ba3a5571058c373afd923afa2e2",
+    "package.json": "c0c3ad95f61210e6eb4ebbdd9363942e478fae6d261ac927f2466ccd31d67b00",
     "repair.mjs": "5a456b42560bfa21fd1e66ccdff7416f88e82fe711db5c04279717e73275a076",
     "scripts/adapt.mjs": "20209c74212d334ea5aa1dfe35816a1b7a4b7f0415eb27c5a1975925dbbd10c5",
     "scripts/agent-auth-prompt.txt": "18fa9c01972cd99a2fe2b1b74a440b34921a051ba6c0d54daf2f5bf1096457b0",
@@ -60,7 +60,7 @@
     "scripts/core/checkpoint.mjs": "246de59db9a7aac48b12eea1554ff281eaf9dd897e620ecf73d954f39b3cf94a",
     "scripts/core/claude-host.mjs": "8ab7661e2b56eab07709b2a16c7f6e04dab8708edfbe672300254109c2323aaa",
     "scripts/core/claude-runtime.mjs": "06e7aba4a5c62a2bf0f12e09089db778c265a0aa21b31a53dbac7245586abe20",
-    "scripts/core/contracts.mjs": "75999bfb4bfa8af4dcb2aa9f3b92fde0404535e9f13aa26a1fa44a7bb2b43873",
+    "scripts/core/contracts.mjs": "f44f9dd479558913a9739c345032c3bf04cbaa2b5e9f8b45632311203d356932",
     "scripts/core/host-cli.mjs": "67b538db32c8aa6a7c2527b2b0fe81d2fbe8b440ab062071c6e6ecff0309b949",
     "scripts/core/host-model.mjs": "497c5ac6a9a47cd8e42594f680c04d831f7bf1229ab1c2a8f192cacf9fe88547",
     "scripts/core/host-probe.mjs": "90d0831ca2775e54183145638880277f8c45fbf457a8b948d65966b6f96c378f",
@@ -96,6 +96,7 @@
     "scripts/core/unit-carrier.mjs": "462b4512910a458815a1d5f7c1bce2e0e43e53e0511f5be3e13f118c879aeb48",
     "scripts/core/unit-command.mjs": "93791c8e1d5ce7ccd87a9eb2a78438961faa723cb445535cadfef1254f1168ff",
     "scripts/core/unit-runtime.mjs": "21a7a287e59c068c6d277281d4fb092852cfe21f4bb2df62d6695106f4f20665",
+    "scripts/gate.mjs": "8b3f12eaf2f1099a050cee8d29c7a715fd19532981c00c7115d8c40908f4e108",
     "scripts/host-cli.mjs": "994448626766f53883a29d17a5af547dcb67f6d2b9e7e5b6b6ff60f28582978c",
     "scripts/install-deps.mjs": "49873cecfb7af52148e2d7d06e225e6fa1501fb852ef199f016914bcf8a810de",
     "scripts/maintenance-lock.mjs": "888d99a00ed90eb7b8650ef8ab56abcfd43b992e448c66a158acf876446f79a3",

@@ -32,6 +32,8 @@ git clone <本仓库>
 cd open-tui-orchestrator
 npm run setup                                  # = npm ci --prefix scripts
 npm test                                       # 离线回归（测试环境约定见 README-zh.md）
+node scripts/gate.mjs --all                    # 机判门禁：套件 + doctor + 反例能红 + 未知 run + 版本·封印·文档口径对账
+node scripts/release-integrity.mjs             # 封印校验（跑之前先确认这份检出没被动过）
 node cli.mjs --agent codex --doctor
 ```
 
@@ -85,6 +87,8 @@ npm uninstall -g open-tui-orchestrator
 | `--install-deps` 失败 | 它会打印手工兜底命令 `npm ci --prefix "<包>\scripts"`；确认 Node 22+（含 npm）在 PATH 上 |
 
 ## 它在你的机器上做什么（简版）
+
+完整声明（包括**没有**沙箱化的部分）见 [docs/trust-and-safety.md](docs/trust-and-safety.md)。简版：
 
 - 只驱动你已有的 agent CLI，并沿用你现有的授权——Codex 在「never 审批 + full access」策略下会带 `--dangerously-bypass-approvals-and-sandbox`，以免已授权的窗口卡在项目信任提示上；
 - 运行状态**只写** `<工作区>\temp\orchestrator`；
