@@ -24,6 +24,7 @@ node scripts/adapt.mjs [--agent <id>] [--cli <path>] [--profiles-dir <dir>]
    （`ADAPTOK-xxxxxxxx`）；未回、超时或非零退出即失败回滚。`--no-live` 关闭（不推荐）。
 6. **块级真实验收（可选 `--smoke`）**：用画像 agent 走一遍真实的 `orch` 单块执行
    （checkpoint 协议 + 验收契约 + 结果文件），把"能接上"验证到"跑得通"。
+   内部显式钉 `headless`（非交互自动化不弹窗，不受本机 `ORCH_SPAWN_MODE` 影响）。
    ⚠️ 会消耗该 agent 的真实额度，且要求它已登录/有模型配置。
 7. **重封 + 自动提交（默认开）**：`release-integrity --seal` 后，仅提交画像文件与 `release.json`
    （显式路径，绝不用 `git add -A`）。`--no-commit` 关闭。

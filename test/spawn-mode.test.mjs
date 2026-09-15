@@ -35,7 +35,12 @@ test('runWindows persists the chosen spawn mode into the ledger', async () => {
 
 test('run-windows reports its spawn mode and rejects unknown modes', { skip: CODEX_CLI_SKIP }, () => {
   const cli = path.join(root, 'cli.mjs');
-  const run = args => spawnSync(process.execPath, [cli, ...args], { cwd: root, env: { ...process.env, ORCH_AGENT: 'codex', ORCH_MAINTENANCE_LOCK: path.join(root, 'temp', 'spawn-mode-lock-none.json') }, encoding: 'utf8', windowsHide: true, timeout: 90000 });
+  const run = args => {
+    const env = { ...process.env, ORCH_AGENT: 'codex', ORCH_MAINTENANCE_LOCK: path.join(root, 'temp', 'spawn-mode-lock-none.json') };
+    // 默认断言必须测「没有变量时的默认」：本机导出用户级 ORCH_SPAWN_MODE 时判据不得随壳变色。
+    delete env.ORCH_SPAWN_MODE;
+    return spawnSync(process.execPath, [cli, ...args], { cwd: root, env, encoding: 'utf8', windowsHide: true, timeout: 90000 });
+  };
   const def = run(['--run-windows', '修复项目81登录页']);
   assert.equal(def.status, 0, def.stderr);
   assert.match(def.stdout, /\[orchestrator\] spawn mode: headless/);
