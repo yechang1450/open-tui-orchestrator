@@ -3,6 +3,7 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { resolveRuntimeContext } from './scripts/runtime-context.mjs';
+import { enforceWindowsOnly } from './scripts/platform-guard.mjs';
 const args = process.argv.slice(2);
 // 只读版本面：纯元数据，不解析 agent CLI、不落任何状态（发行副本验收的版本痕迹检查用）。
 if (args.includes('--version')) {
@@ -11,6 +12,8 @@ if (args.includes('--version')) {
   console.log(`open-tui-orchestrator ${pkg.version} (core ${core})`);
   process.exit(0);
 }
+// Windows-only 承诺在入口强制（见 scripts/platform-guard.mjs）：拒绝要发生在解析宿主、调用模型、落任何状态之前。
+if (enforceWindowsOnly(args)) process.exit(1);
 const env = { ...process.env };
 for (const [flag, key] of [['--agent', 'ORCH_AGENT'], ['--cli', 'ORCH_CLI'], ['--workspace', 'WORKSPACE_DIR']]) {
   const index = args.indexOf(flag);

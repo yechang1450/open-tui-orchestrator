@@ -2,7 +2,7 @@
 
 ## 环境要求
 
-- **Windows 10/11（x64）**——当前发行是 Windows 优先；其它平台会被运行时直接拒绝并给出诊断。
+- **Windows 10/11（x64）**——当前仅支持 Windows：除 `--version`、`--help`、`--install-deps` 外，其它入口在别的平台上都会以一行诊断直接拒绝（不留「半能用」、不静默降级）。
 - **Node.js 22 或更高**（`node --version`）。
 - **Windows Terminal**（推荐；`--doctor` 会报 `terminal: "wt"`，缺失时回退 `conhost`）。
 - **一个已安装并已登录的宿主 agent CLI**：Codex、pi、opencode、Kimi Code、Claude Code，或版本锁定的 OpenClaw。编排器只驱动你已有的 CLI，**不会**安装、升级或替换任何 agent CLI。

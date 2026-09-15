@@ -2,6 +2,7 @@
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {verifyRelease} from './release-integrity.mjs';
+import {enforceWindowsOnly} from './platform-guard.mjs';
 
 // 机器可调用契约：**作为主入口时，任何失败只回一行** `[orchestrator] FATAL: <原因>`
 // （完整栈帧仅 ORCH_DEBUG=1 时才打）——调用方的管道里永远不该出现裸 Node 栈帧。
@@ -16,6 +17,9 @@ function fatal(error) {
 // 它要装的东西，而引擎在 ORCH_AGENT=codex 时会顶层 import SDK——先要求「依赖已装/引擎可加载」
 // 会让缺依赖的用户永远够不着这个入口（2026-09-14 真机回归抓到的鸡生蛋问题）。
 const bootstrapInstallDeps = IS_MAIN && process.argv.slice(2).includes('--install-deps');
+// Windows-only 是首页承诺，就要在入口强制（共享实现见 scripts/platform-guard.mjs；cli.mjs / orch.mjs
+// 也在入口调用同一份）。这里覆盖直接跑 scripts/orchestrate-sdk.mjs 的调用方。
+if (IS_MAIN && enforceWindowsOnly(process.argv.slice(2))) process.exit(1);
 try {
   if (!bootstrapInstallDeps) {
     verifyRelease();

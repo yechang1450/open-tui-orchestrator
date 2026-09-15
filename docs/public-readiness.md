@@ -7,10 +7,12 @@
 | 项 | 证据 |
 | --- | --- |
 | MIT 许可 + 作者署名 | `LICENSE` |
-| 离线回归全绿 | 289/289（本轮补 2 条：`scripts/gate.mjs` 自身可红判据——真仓必绿、口径被篡改的副本必红并指名） |
-| 发行封印 + 副本流程 | `release.json`（43 核心 + 64 运行时）、`repair.mjs`、`docs/release-policy.md` |
+| 离线回归全绿 | 291/291（本轮补 2 条：`scripts/gate.mjs` 自身可红判据；Windows-only 入口拒绝判据——判据本身已用「去守卫 + 重封副本」验证能红） |
+| 发行封印 + 副本流程 | `release.json`（43 核心 + 65 运行时）、`repair.mjs`、`docs/release-policy.md` |
 | 机器可调用失败契约 | 一行 `[orchestrator] FATAL: …`、退出码 0/1/2、未知 run 不挂起（1.13.0 起） |
-| 机判门禁（在仓里，任何人可跑） | **本轮新增** `node scripts/gate.mjs --all`：L1 套件 / L2a doctor / L2b 反例能红 / L3 未知 run / L4 版本·封印·文档·套件总数对账 + 锁票巡检 |
+| 机判门禁（在仓里，任何人可跑） | `node scripts/gate.mjs --all`：L1 套件 / L2a doctor / L2b 反例能红 / L3 未知 run / L4 版本·封印·文档·套件总数对账 + 锁票巡检 |
+| Windows-only 承诺**已强制** | **2026-09-15 新增** `scripts/platform-guard.mjs`（`cli.mjs`/`orch.mjs`/壳层三入口，早于解析宿主/调模型/落状态）；判据 `test/windows-only.test.mjs` 且红例真做（副本去守卫+重封 → 假平台健康 exit 0） |
+| 发布件真机执行验收 | **2026-09-15 实测** 0.9.4 副本经调用方自助通道双块并行：`2/2 verified finalized success=true`、产物落盘并记 sha256、检查点 completed，~60 秒（零模型调用） |
 | 安全审计（当前核心） | `docs/security-audit-2026-09-09.md`（无 Critical/High；Medium/Low 已修或登记） |
 | 一键补依赖 | **本轮新增** `--install-deps`：幂等、失败干净、stdout 纯数据、从不碰 agent CLI |
 | 安装路径实测 | `npm pack`（403 kB / 162 文件）→ 装进独立前缀 → `--install-deps`（3 s，npm 缓存）→ `--doctor` `hostError=null` `carrierAvailable=true` |
@@ -29,6 +31,7 @@
 5. ~~信任与安全声明~~ **完成 2026-09-14**：`docs/trust-and-safety.md`（隐藏 agent 以你的凭据运行、Codex 的 `--dangerously-bypass-approvals-and-sandbox`、`--unit-cmd` 属调用方自授权、写哪些文件、无遥测无后台服务、如何卸载），README/README-zh 首屏与 INSTALL 均给出一行摘要 + 链接。
 6. ~~平台声明~~ **完成 2026-09-14**：README/README-zh 首屏与 INSTALL「Requirements」均明写 **Windows-only**，其它平台直接给诊断。
 7. **外部首次验收——你的部分**：在一台干净的 Windows 机器/用户上走一遍（装 Node → 装包 → `--install-deps` → doctor → 双块真跑）。`docs/release-policy.md` 已把「不同 Windows 用户安装」列为发行门槛。
+   **注意（2026-09-15 环境事实）**：本机 codex 账号额度耗尽（Sep 19 恢复）——模型驱动的真跑今天做不了；编排器在该条件下退化正确（inline 明说、无假成功），调用方自助通道（零模型调用）的真机双块验收已于 2026-09-15 通过。
 8. ~~验收证据去本地化~~ **完成 2026-09-14**。
 
 ### 公开前一毫米（做完这两步就是公开态）
