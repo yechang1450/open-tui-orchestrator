@@ -47,3 +47,20 @@ test('gate: --consistency goes red on a tampered copy and names the file', () =>
     fs.rmSync(dir, {recursive: true, force: true});
   }
 });
+
+// 判据不得随壳变色（2026-09-16 裁定）：gate 必须报告本壳 ORCH_SPAWN_MODE，且它自己的子进程一律钉
+// headless（用户级 ORCH_SPAWN_MODE 保留给手动跑，不得让判据或弹窗行为变色）。红例：改动前没有这条
+// 报告行 ⇒ 本用例必红；且本壳设 window 时旧版四条默认断言实测真红（套件日志在案）。
+test('gate: reports the shell spawn mode and pins its children to headless', () => {
+  const run = (env) => spawnSync(process.execPath, [path.join(root, 'scripts', 'gate.mjs'), '--consistency'], {cwd: root, env, encoding: 'utf8', windowsHide: true, timeout: 120000});
+  const withWindow = run({...process.env, ORCH_SPAWN_MODE: 'window'});
+  const out1 = (withWindow.stdout || '') + (withWindow.stderr || '');
+  assert.equal(withWindow.status, 0, out1);
+  assert.match(out1, /\[gate\] shell ORCH_SPAWN_MODE=window; children pinned to headless/, out1);
+  const bare = {...process.env};
+  delete bare.ORCH_SPAWN_MODE;
+  const unset = run(bare);
+  const out2 = (unset.stdout || '') + (unset.stderr || '');
+  assert.equal(unset.status, 0, out2);
+  assert.match(out2, /\[gate\] shell ORCH_SPAWN_MODE=\(unset\); children pinned to headless/, out2);
+});

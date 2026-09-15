@@ -13,7 +13,10 @@
  *   - every criterion prints command / expectation / actual;
  *   - a value that cannot be read counts as failure ("unknown is failure");
  *   - exit 0 only if every requested criterion passed; any failure exits 1;
- *   - L2b keeps the criteria themselves honest: it proves a red case still goes red.
+ *   - L2b keeps the criteria themselves honest: it proves a red case still goes red;
+ *   - the shell's user-level `ORCH_SPAWN_MODE` (kept for manual runs) is reported, never
+ *     inherited: children are pinned to headless, so criteria cannot change with the shell
+ *     and nothing pops up (2026-09-16 ruling: 判据随壳变色不可接受).
  *
  * Environment: the suite follows the documented convention (`ORCH_AGENT` defaults to
  * `codex` here; the codex CLI must be resolvable — see README "Test-env requirement").
@@ -29,6 +32,9 @@ const AGENT = String(process.env.ORCH_GATE_AGENT || 'codex').trim();
 const args = new Set(process.argv.slice(2));
 const wants = (flag) => args.has(flag) || args.has('--all') || args.size === 0;
 const results = [];
+// 判据不得随壳变色：本壳的用户级 ORCH_SPAWN_MODE 只报告、不继承；子进程一律显式钉 headless。
+const SHELL_SPAWN_MODE = String(process.env.ORCH_SPAWN_MODE || '').trim() || '(unset)';
+console.log(`  [gate] shell ORCH_SPAWN_MODE=${SHELL_SPAWN_MODE}; children pinned to headless (zero popups)`);
 
 function check(id, title, ok, lines) {
   results.push({id, ok});
@@ -38,7 +44,9 @@ function check(id, title, ok, lines) {
 }
 
 function node(argsArr, opts = {}) {
-  const r = spawnSync(process.execPath, argsArr, {cwd: REPO, encoding: 'utf8', windowsHide: true, timeout: opts.timeout || 900000, env: opts.env || process.env});
+  // 非交互自动化一律显式 headless：gate 的子进程绝不继承本壳 ORCH_SPAWN_MODE（零弹窗）。
+  const env = {...(opts.env || process.env), ORCH_SPAWN_MODE: 'headless'};
+  const r = spawnSync(process.execPath, argsArr, {cwd: REPO, encoding: 'utf8', windowsHide: true, timeout: opts.timeout || 900000, env});
   return {status: r.status, out: (r.stdout || '') + (r.stderr || '')};
 }
 

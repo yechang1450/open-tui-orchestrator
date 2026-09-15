@@ -79,6 +79,7 @@ def run_suite(out_log: Path) -> int:
     out_log.parent.mkdir(parents=True, exist_ok=True)
     env = dict(os.environ)
     env["ORCH_AGENT"] = "codex"
+    env["ORCH_SPAWN_MODE"] = "headless"  # 非交互自动化显式钉 headless：判据不得随本壳变色（零弹窗）
     env["PATH"] = str(NODE_BIN) + os.pathsep + env.get("PATH", "")
     node = str(NODE_BIN / "node.exe") if os.name == "nt" else "node"
     files = [str(p) for p in sorted(REPO.glob("test/*.test.mjs"))]
@@ -109,6 +110,7 @@ def canary() -> int:
 def doctor() -> int:
     node = str(NODE_BIN / "node.exe") if os.name == "nt" else "node"
     env = dict(os.environ)
+    env["ORCH_SPAWN_MODE"] = "headless"  # 非交互自动化显式钉 headless：判据不得随本壳变色（零弹窗）
     env["PATH"] = str(NODE_BIN) + os.pathsep + env.get("PATH", "")
     p = subprocess.run([node, "cli.mjs", "--agent", "codex", "--doctor"], capture_output=True, text=True, env=env, cwd=str(REPO))
     body = p.stdout + p.stderr
@@ -128,6 +130,7 @@ def verify_missing() -> int:
     红 = 记在案，不是脚本坏了。"""
     node = str(NODE_BIN / "node.exe") if os.name == "nt" else "node"
     env = dict(os.environ)
+    env["ORCH_SPAWN_MODE"] = "headless"  # 非交互自动化显式钉 headless：判据不得随本壳变色（零弹窗）
     env["PATH"] = str(NODE_BIN) + os.pathsep + env.get("PATH", "")
     p = subprocess.run([node, "cli.mjs", "--verify-run", "nosuch-run-entj"], capture_output=True, text=True, env=env, cwd=str(REPO))
     out = p.stdout + p.stderr
@@ -242,6 +245,8 @@ def main() -> int:
     global LOG_PATH, LOG_EXPLICIT
     args = [_native(a) for a in sys.argv[1:]]
     rc = 0
+    # 判据不得随壳变色：本壳的用户级 ORCH_SPAWN_MODE 只报告、不继承（子进程一律钉 headless）。
+    print(f"  本壳 ORCH_SPAWN_MODE={os.environ.get('ORCH_SPAWN_MODE') or '(unset)'} ⇒ 子进程钉 headless、零弹窗")
     if "--run" in args:
         out = DEFAULT_LOG
         rc |= 1 if run_suite(out) != 0 else 0

@@ -172,6 +172,8 @@ export async function adaptAgent({ id, cli, env = process.env, live = true, comm
         ...env, ORCH_AGENT: id, ORCH_CLI: located.source || located.bin, ORCH_AGENT_PROFILES_DIR: profilesDir(env),
         ORCH_ACCEPTANCE_FILE: path.join(ws, 'acceptance.json'), ORCH_MAINTENANCE_LOCK: path.join(ws, 'no-lock.json'),
         ORCH_MAX_POLL_MS: '300000', WORKSPACE_DIR: ws, ORCH_STATE_DIR: path.join(ws, 'temp', 'orchestrator'),
+        // 块级验收是非交互自动化：显式钉 headless，绝不继承本壳 ORCH_SPAWN_MODE（不弹窗、判据不随壳变色）。
+        ORCH_SPAWN_MODE: 'headless',
       };
       delete smokeEnv.NODE_TEST_CONTEXT;
       const t0 = Date.now();
@@ -186,7 +188,7 @@ export async function adaptAgent({ id, cli, env = process.env, live = true, comm
   }
 
   if (suite) {
-    const s = run(process.execPath, ['--test', 'test/print-profile.test.mjs'], { cwd: REPO, env: { ...env, ORCH_AGENT: 'codex', ORCH_MAINTENANCE_LOCK: path.join(REPO, 'temp', 'adapt-suite-lock-none.json') }, timeout: 300000 });
+    const s = run(process.execPath, ['--test', 'test/print-profile.test.mjs'], { cwd: REPO, env: { ...env, ORCH_AGENT: 'codex', ORCH_MAINTENANCE_LOCK: path.join(REPO, 'temp', 'adapt-suite-lock-none.json'), ORCH_SPAWN_MODE: 'headless' }, timeout: 300000 });
     report.suite = { exit: s.status };
     if (s.status !== 0) { report.reason = 'print-profile suite failed'; rollback(); return report; }
   }

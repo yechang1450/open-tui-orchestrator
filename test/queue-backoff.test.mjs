@@ -74,6 +74,8 @@ test('capacity waiters back off: two blocks serialize through one window, run st
     const env = {...process.env};
     for (const k of ['ORCH_AGENT', 'ORCH_UNIT_CMD', 'ORCH_CLI', 'ORCH_MODEL', 'ORCH_EFFORT']) delete env[k];
     delete env.NODE_TEST_CONTEXT;
+    // 非交互自动化显式钉 headless：本机用户级 ORCH_SPAWN_MODE 不得让套件弹窗或变色。
+    env.ORCH_SPAWN_MODE = 'headless';
     env.WORKSPACE_DIR = ws;
     env.ORCH_STATE_DIR = path.join(ws, 'temp', 'orchestrator');
     env.ORCH_MAINTENANCE_LOCK = path.join(ws, 'no-lock.json');

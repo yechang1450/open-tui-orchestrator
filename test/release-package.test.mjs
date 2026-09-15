@@ -22,7 +22,9 @@ test('published generic package keeps polling usable and diagnoses missing SDK',
     const poll=spawnSync(process.execPath,[path.join(pkg,'scripts','poll-windows.mjs'),'--run-id','package-test','--timeoutMs','0'],{cwd:source,encoding:'utf8',windowsHide:true,timeout:30000});
     assert.equal(poll.status,1,poll.stderr);
     assert.match(poll.stderr,/timeout runId=package-test/);
-    const doctor=spawnSync(process.execPath,[path.join(pkg,'scripts','orchestrate-sdk.mjs'),'--doctor'],{cwd:source,encoding:'utf8',windowsHide:true,timeout:30000});
+    // SDK 缺失诊断只在 codex 宿主请求时触发：显式钉住，判据不得随本壳 ORCH_AGENT 变色（2026-09-16）。
+    const doctorEnv={...process.env,ORCH_AGENT:'codex'};
+    const doctor=spawnSync(process.execPath,[path.join(pkg,'scripts','orchestrate-sdk.mjs'),'--doctor'],{cwd:source,env:doctorEnv,encoding:'utf8',windowsHide:true,timeout:30000});
     assert.notEqual(doctor.status,0);
     assert.match(doctor.stderr,/RELEASE_DEPENDENCY_MISSING.*npm ci/);
   }finally{fs.rmSync(root,{recursive:true,force:true});}

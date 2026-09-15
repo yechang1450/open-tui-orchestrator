@@ -3,6 +3,29 @@
 Notable changes, newest first. Every entry pairs a package version with a core version —
 `open-tui-orchestrator --version` prints both (`open-tui-orchestrator <version> (core <core>)`).
 
+## 0.9.8 — core 1.14.8
+
+### Fixed
+
+- **The regression and the gate no longer change with the shell's `ORCH_SPAWN_MODE`.** Measured
+  2026-09-16: on a machine whose user-level `ORCH_SPAWN_MODE=window` (kept on purpose so manual runs
+  show windows), `gate.mjs --all` went rc=1 and the suite went 289/294 — *and really popped visible
+  windows*. Four headless-default assertions (`caller-driven` / `orch-force` / `print-profile` /
+  `spawn-mode`) inherited the variable from the shell, `queue-backoff` silently ran on the window
+  carrier, and `release-package` flipped green/red with the shell's `ORCH_AGENT` (a published copy's
+  `--doctor` only diagnoses the missing SDK when a codex host is requested — `gate.mjs` forces
+  `ORCH_AGENT=codex`, a bare suite run inherits the shell). The user-level variable stays; the fix is
+  on the consumer side: `scripts/gate.mjs` pins every child to `headless` and reports the initiating
+  shell's value (`[gate] shell ORCH_SPAWN_MODE=…; children pinned to headless`), the unit-spawning
+  tests (`caller-driven`, `orch-force`, `print-profile`, `queue-backoff`), the `adapt --smoke` block
+  acceptance and `tools/orch-level-check.py` pin `headless` explicitly, the spawn-mode default
+  assertions strip the variable, the `--mode window` case passes the flag, and `release-package`
+  pins `ORCH_AGENT=codex`. Acceptance 2026-09-16: `gate.mjs --all` green with the variable set in the
+  shell and again without it, zero popups, logs filed
+  (`D:/temp/orch-L5-gate-fix-window-20260916.log`, `D:/temp/orch-L5-gate-fix-novar-20260916.log`).
+  New red-capable criterion: `test/gate.test.mjs` (the gate must report the shell value and stay
+  green; before the change the line does not exist ⇒ red). Regression 295/295.
+
 ## 0.9.7 — core 1.14.7
 
 ### Fixed

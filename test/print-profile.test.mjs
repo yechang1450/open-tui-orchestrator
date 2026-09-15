@@ -106,7 +106,9 @@ test('a profiled agent runs end-to-end through orch (forced unit, acceptance ver
   try {
     spawnSync(process.execPath, [path.join(root, 'scripts', 'adapt.mjs'), '--agent', 'fakeprint', '--cli', s.fake, '--profiles-dir', s.profiles, '--no-commit'], { encoding: 'utf8', windowsHide: true, timeout: 120000 });
     fs.writeFileSync(path.join(ws, 'acceptance.json'), JSON.stringify({T001: [{type: 'json', path: 'receipt.json', equals: {ok: true}}]}));
-    const env = {...process.env, ORCH_AGENT: 'fakeprint', ORCH_CLI: s.fake, ORCH_AGENT_PROFILES_DIR: s.profiles, ORCH_ACCEPTANCE_FILE: path.join(ws, 'acceptance.json'), ORCH_MAINTENANCE_LOCK: path.join(ws, 'no-lock.json'), ORCH_MAX_POLL_MS: '120000', WORKSPACE_DIR: ws, ORCH_STATE_DIR: path.join(ws, 'temp', 'orchestrator')};
+    const env = {...process.env, ORCH_AGENT: 'fakeprint', ORCH_CLI: s.fake, ORCH_AGENT_PROFILES_DIR: s.profiles, ORCH_ACCEPTANCE_FILE: path.join(ws, 'acceptance.json'), ORCH_MAINTENANCE_LOCK: path.join(ws, 'no-lock.json'), ORCH_MAX_POLL_MS: '120000', WORKSPACE_DIR: ws, ORCH_STATE_DIR: path.join(ws, 'temp', 'orchestrator'),
+      // 非交互自动化显式钉 headless：本机用户级 ORCH_SPAWN_MODE 不得让套件弹窗或变色。
+      ORCH_SPAWN_MODE: 'headless'};
     delete env.NODE_TEST_CONTEXT;
     const r = spawnSync(process.execPath, [path.join(root, 'orch.mjs'), '--run-id', 'profile-e2e', '整理一下这个请求'], { cwd: ws, env, encoding: 'utf8', windowsHide: true, timeout: 180000 });
     assert.equal(r.status, 0, r.stderr || r.stdout);

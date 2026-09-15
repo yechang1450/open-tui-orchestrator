@@ -31,7 +31,9 @@ function setup() {
   const acceptance = path.join(ws, 'acceptance.json');
   fs.writeFileSync(acceptance, JSON.stringify({ T001: [{ type: 'json', path: 'receipt.json', equals: { ok: true } }] }));
   const lockFile = path.join(ws, 'no-lock.json');
-  const base = { ...process.env, ORCH_AGENT: 'kimi', ORCH_CLI: fake, ORCH_ACCEPTANCE_FILE: acceptance, ORCH_MAINTENANCE_LOCK: lockFile, ORCH_MAX_POLL_MS: '120000' };
+  const base = { ...process.env, ORCH_AGENT: 'kimi', ORCH_CLI: fake, ORCH_ACCEPTANCE_FILE: acceptance, ORCH_MAINTENANCE_LOCK: lockFile, ORCH_MAX_POLL_MS: '120000',
+    // 非交互自动化显式钉 headless：本机用户级 ORCH_SPAWN_MODE 不得让套件弹窗或变色。
+    ORCH_SPAWN_MODE: 'headless' };
   delete base.WORKSPACE_DIR; delete base.ORCH_STATE_DIR; delete base.NODE_TEST_CONTEXT;
   return { ws, acceptance, lockFile, env: base };
 }
