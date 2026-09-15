@@ -510,6 +510,13 @@ async function decomposeSafely(request, maxWindows = computeMaxWindows(os.totalm
     try {
       const res = await runThreadPrompt(classifyPrompt(request, hints) +
         `\nMaximum execution blocks: ${maxWindows}. Return ALL tasks; overflow tasks will be merged into serial blocks. Never omit tasks to meet the window budget.`, { sandboxMode: "read-only" });
+      // 模型侧失败（额度用尽/未登录/弱网）以前会被吞掉：只留下「no JSON in classify output: (no valid JSON)」，
+      // 读起来像解析 bug，而真正的原因在 runThreadPrompt 的 errored/warnings 里。把它带出来
+      // （一行、有界），调用方与操作者才可能自己排障——2026-09-15 真机（codex 额度耗尽）实测缺这一口。
+      const modelTrouble = String(res.errored || "").trim() || (Array.isArray(res.warnings) ? res.warnings.map((w) => String(w).trim()).filter(Boolean).slice(-2).join(" | ") : "");
+      if (!String(res.final || "").trim() && modelTrouble) {
+        throw new Error("classify model call failed: " + modelTrouble.slice(0, 300));
+      }
       let plan;
       try {
         const tasks = bindClassifiedTasks(request,extractTasks(res.final || ""));

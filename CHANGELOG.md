@@ -3,6 +3,33 @@
 Notable changes, newest first. Every entry pairs a package version with a core version —
 `open-tui-orchestrator --version` prints both (`open-tui-orchestrator <version> (core <core>)`).
 
+## 0.9.6 — core 1.14.6
+
+### Fixed
+
+- **A dead model account no longer hides behind a parser-sounding message.** When the classify
+  call returned nothing because the account was out of quota (or not logged in, or the network
+  failed), the failure line read `no JSON in classify output: (no valid JSON) -> fallback to
+  single serial block` — which looks like a parsing bug. `runThreadPrompt`'s `errored`/`warnings`
+  (where the real reason lives) were being dropped. The line now carries the underlying reason,
+  bounded to one line:
+
+  ```
+  before:  decompose LLM failed after 2 attempt(s): no JSON in classify output:  (no valid JSON) -> fallback …
+  after:   decompose LLM failed after 2 attempt(s): classify model call failed: You've hit your usage limit. Visit
+           https://chatgpt.com/codex/settings/usage to purchase more credits or try again at Sep 19th, 2026 4:10 PM. -> fallback …
+  ```
+
+  Verified by before/after on this machine with the same command and the same account state (the
+  released 0.9.5 copy versus the fixed tree); the reason text comes from the account, so the run
+  also tells you when it recovers. Recorded in `test/acceptance-2026-09-15-windows-guard-live-run.json`.
+
+- Recorded, not fixed (honest boundary): when units themselves fail on quota exhaustion, the run
+  correctly reports `success: false` with `failed` tasks and no fake success, but the per-task
+  reason is the generic `No durable task checkpoint` / `Safe recovery attempt budget exhausted`;
+  the underlying CLI text stays in `runs/<id>/attempts/`. Surfacing the unit-level reason is a
+  follow-up, not claimed here.
+
 ## 0.9.5 — core 1.14.5
 
 ### Fixed

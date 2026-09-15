@@ -55,5 +55,13 @@
     "conclusion": "Actions jobs cannot start on this private repository for account-billing reasons — nothing to do with the workflow. GitHub's billing documentation states that Actions usage is free for public repositories on standard GitHub-hosted runners, so arming CI before the visibility flip only produces red X's and the flip itself unlocks it at zero cost.",
     "grounding": "https://docs.github.com/billing/managing-billing-for-github-actions/about-billing-for-github-actions"
   },
+  "modelFailureDiagnosis": {
+    "found": "2026-09-15, while the codex account was out of quota: the decompose stage reported `no JSON in classify output:  (no valid JSON) -> fallback to single serial block (autosafe detect)`, which reads like a parsing bug; the real reason (quota / not logged in / network) lives in runThreadPrompt's `errored`/`warnings` and was never inspected",
+    "fix": "the decompose loop now throws `classify model call failed: <reason>` (one line, bounded to 300 chars) when the final message is empty and the model call reported trouble; the fail-safe fallback line is unchanged",
+    "evidence": "before/after on this machine, same command, same account state: 0.9.5 copy printed `… no JSON in classify output:  (no valid JSON) …`; the fixed tree printed `… classify model call failed: You've hit your usage limit. Visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again at Sep 19th, 2026 4:10 PM. …`",
+    "noFakeSuccess": "two real model-driven runs (the 81/84 two-block request, which needs no classify call at all) both ended `success: false` with tasks `failed` under the same quota exhaustion — the tool never claimed success",
+    "honestBoundary": "the per-task failure reasons are the generic `No durable task checkpoint` / `Safe recovery attempt budget exhausted`; the CLI's own text stays in runs/<id>/attempts/. Surfacing the unit-level reason is a follow-up, not claimed here.",
+    "testSeam": "no deterministic offline test exists for this path (the codex branch goes through the in-process SDK, and __setOrchHooks covers only db/alive/now/lock), so the criterion is the recorded real-machine before/after rather than a suite case"
+  },
   "gate": { "inRepo": "node scripts/gate.mjs --all", "levels": "L1–L4 PASS", "numbers": { "coreFiles": 43, "runtimeFiles": 65 } }
 }
