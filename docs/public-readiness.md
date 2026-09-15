@@ -26,7 +26,7 @@
 1. ~~公开前的个人路径清理~~ **完成 2026-09-14**：18 个 tracked 文件、77 处用户名归一化为 `<user>`；根因一并修掉（证据采集器、画像适配器、hermes 画像 provenance）。验证：`git grep -c <user>` 只剩公开的 GitHub 句柄 `yechang1450`。
 2. **npm 发布——只差登录**：`npm publish --dry-run` 全绿（**92 文件 / 298 kB**，本轮加 `scripts/gate.mjs`）；`private` 已去、`files` 白名单已验（不加排除会被 385 MB 的 `scripts/node_modules` 卷进去）、元数据齐备。
    **需要你**：`npm login`（或给 token）→ `npm publish`。
-3. ~~CI~~ **完成 2026-09-14**：`.github/workflows/ci.yml`（`windows-latest` + Node 24 + 装 codex + `--install-deps` 自检 + `node scripts/gate.mjs --all`）。**有意不带 push 触发**（私有仓不吃 Windows runner 分钟数）；转公开时按文件头部注释改 2 行 `on:` 即武装。
+3. ~~CI~~ **完成 2026-09-14 / 实测 2026-09-15**：`.github/workflows/ci.yml`（`windows-latest` + Node 24 + 装 codex + `--install-deps` 自检 + `node scripts/gate.mjs --all`）。**实测结论**：在私有仓手动派发该工作流 → 作业零步骤、3 秒失败，GitHub 注解为「recent account payments have failed or your spending limit needs to be increased」——**私有仓的 Actions 作业起不来（与代码无关，是账户计费问题）**；而 GitHub 计费文档明确：**公开仓的标准 hosted runner 免费**。所以正确姿势是**转公开后再武装**（改文件头 2 行 `on:`），提前武装只会收获红叉。
 4. ~~公开文档面~~ **完成 2026-09-14**：`CHANGELOG.md`、`.github/ISSUE_TEMPLATE/bug_report.yml`、`SECURITY.md`（私密漏洞报告渠道 + 披露政策）、`CONTRIBUTING.md`（屋规：判据必须能红、封印纪律、数字对账）。
 5. ~~信任与安全声明~~ **完成 2026-09-14**：`docs/trust-and-safety.md`（隐藏 agent 以你的凭据运行、Codex 的 `--dangerously-bypass-approvals-and-sandbox`、`--unit-cmd` 属调用方自授权、写哪些文件、无遥测无后台服务、如何卸载），README/README-zh 首屏与 INSTALL 均给出一行摘要 + 链接。
 6. ~~平台声明~~ **完成 2026-09-14**：README/README-zh 首屏与 INSTALL「Requirements」均明写 **Windows-only**，其它平台直接给诊断。
@@ -41,7 +41,8 @@ npm login && npm publish
 
 # 二、转公开
 gh repo edit yechang1450/open-tui-orchestrator --visibility public --accept-visibility-change-consequences
-# 然后按 .github/workflows/ci.yml 头部注释武装 CI（2 行）
+# 然后按 .github/workflows/ci.yml 头部注释武装 CI（2 行）——转公开同时也解锁免费 CI：
+# 私有仓的 Actions 作业被账户计费拦截（2026-09-15 实测），公开仓的标准 runner 免费。
 ```
 
 ## 三、需要你决策

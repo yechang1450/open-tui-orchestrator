@@ -46,5 +46,14 @@
     "the orchestrator degraded correctly under that condition: classify failed twice, it fell back to `{\"mode\":\"inline\",\"reason\":\"single-block\",…}` and told the caller to execute inline — no fake success, no silent half-run",
     "the opencode host (deepseek-flash) answered a probe, but the deterministic splitter still judged the English two-file request as one linked block, so the caller-driven channel was used instead"
   ],
+  "ciAttempt": {
+    "when": "2026-09-15, after the first successful push of this round (remote master 07e02c1)",
+    "command": "gh workflow run ci.yml --repo yechang1450/open-tui-orchestrator",
+    "run": "https://github.com/yechang1450/open-tui-orchestrator/actions/runs/34926764033",
+    "result": "job `gate` had ZERO steps and failed 3 seconds after starting (03:54:31 → 03:54:34)",
+    "platformAnnotation": "The job was not started because recent account payments have failed or your spending limit needs to be increased. Please check the 'Billing & plans' section in your settings",
+    "conclusion": "Actions jobs cannot start on this private repository for account-billing reasons — nothing to do with the workflow. GitHub's billing documentation states that Actions usage is free for public repositories on standard GitHub-hosted runners, so arming CI before the visibility flip only produces red X's and the flip itself unlocks it at zero cost.",
+    "grounding": "https://docs.github.com/billing/managing-billing-for-github-actions/about-billing-for-github-actions"
+  },
   "gate": { "inRepo": "node scripts/gate.mjs --all", "levels": "L1–L4 PASS", "numbers": { "coreFiles": 43, "runtimeFiles": 65 } }
 }
