@@ -3,6 +3,27 @@
 Notable changes, newest first. Every entry pairs a package version with a core version —
 `open-tui-orchestrator --version` prints both (`open-tui-orchestrator <version> (core <core>)`).
 
+## 0.9.7 — core 1.14.7
+
+### Fixed
+
+- **Process-identity failures are now diagnosable.** Measured 2026-09-15: a single
+  `Get-CimInstance Win32_Process` call took **79.8 s** on this machine (WMI/CIM degraded under
+  load) while the engine's snapshot budget is 15 s — every action entry then failed closed with a
+  bare `Cannot verify process identities`, which names neither the elapsed time nor the cause and
+  offers no way out. The line now carries the budget, the elapsed time, the cause and the knob:
+
+  ```
+  before:  [orchestrator] FATAL: Cannot verify process identities
+  after:   [orchestrator] FATAL: Cannot verify process identities: the process snapshot did not
+           return within 15000 ms (elapsed 15210 ms; the machine may be under heavy load);
+           retry, or raise ORCH_PS_TIMEOUT_MS (budget 15000 ms, cap 120000)
+  ```
+
+  `ORCH_PS_TIMEOUT_MS` raises the budget (default 15000 ms, capped at 120000 ms). New red-capable
+  tests: `test/snapshot-diagnostics.test.mjs` (a 1 ms budget must fail with the elapsed time and
+  the knob named; the env override and the cap are asserted).
+
 ## 0.9.6 — core 1.14.6
 
 ### Fixed
