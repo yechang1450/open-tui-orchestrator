@@ -1,6 +1,8 @@
 # orch-level-patrol install / uninstall (L10 machine-ization, open-tui-orchestrator line).
 # Generates the hidden-window VBS launcher, then registers the Windows Scheduled Task
 # 'orch-level-patrol' (every 15 minutes, hidden, exit code lands in task history).
+# Registration uses schtasks /Create (single-slash flags): the PS-native Register-ScheduledTask
+# gets refused unelevated on this machine (0x80070005) - same workaround as 83-level-patrol.
 # Pattern copied from 83-level-patrol (same machine, proven 2026-09-15):
 #   -WindowStyle Hidden is NOT enough; SW_HIDE at CreateProcess time is (window delta = 0).
 # ASCII-only on purpose (PS 5.1 reads BOM-less files as ANSI; keep this file pure ASCII).
@@ -11,14 +13,14 @@
 param([switch]$Uninstall)
 
 $ErrorActionPreference = 'Stop'
-$repo      = 'C:\Users\<user>\.tools\open-tui-orchestrator'
-$python    = 'C:\Users\<user>\AppData\Local\Programs\Python\Python312\python.exe'
-$launchers = 'C:\Users\<user>\.tools\launchers'
+$repo      = Join-Path $HOME '.tools\open-tui-orchestrator'
+$python    = Join-Path $HOME 'AppData\Local\Programs\Python\Python312\python.exe'
+$launchers = Join-Path $HOME '.tools\launchers'
 $vbsPath   = Join-Path $launchers 'orch-level-patrol.vbs'
 $task      = 'orch-level-patrol'
 
 if ($Uninstall) {
-  Unregister-ScheduledTask -TaskName $task -Confirm:$false
+  schtasks.exe /Delete /TN $task /F
   'OK unregistered ' + $task
   exit 0
 }
@@ -34,18 +36,17 @@ $vbs = @'
 ' Exit code is propagated so the task history carries the verdict:
 '   0 = tick green/skip, 1 = tick red, 2 = internal error.
 Set sh = CreateObject("WScript.Shell")
-rc = sh.Run("""C:\Users\<user>\AppData\Local\Programs\Python\Python312\python.exe"" -B -u ""C:\Users\<user>\.tools\open-tui-orchestrator\tools\orch-patrol.py""", 0, True)
+py = sh.ExpandEnvironmentStrings("%USERPROFILE%\AppData\Local\Programs\Python\Python312\python.exe")
+sc = sh.ExpandEnvironmentStrings("%USERPROFILE%\.tools\open-tui-orchestrator\tools\orch-patrol.py")
+rc = sh.Run("""" & py & """" & " -B -u " & """" & sc & """", 0, True)
 WScript.Quit rc
 '@
 Set-Content -Path $vbsPath -Value $vbs -Encoding Ascii
 
-$action = New-ScheduledTaskAction -Execute 'wscript.exe' -Argument ('//nologo //B "' + $vbsPath + '"')
-$rep = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(5) -RepetitionInterval (New-TimeSpan -Minutes 15)
-$lg = New-ScheduledTaskTrigger -AtLogOn
-$st = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 30) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
-$pr = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
-Register-ScheduledTask -TaskName $task -Action $action -Trigger @($lg, $rep) -Settings $st -Principal $pr -Description 'orch patrol (L10): tick observations + commit gate (auto gate.mjs --all per new clean HEAD). Ledger <repo>\logs\patrol\. Exit 0=green 1=red 2=internal.' -Force | Out-Null
-$t = Get-ScheduledTask -TaskName $task
-'OK state=' + $t.State
-'action=' + $t.Actions[0].Execute + ' ' + $t.Actions[0].Arguments
-'triggers=' + (($t.Triggers | ForEach-Object { $_.CimClass.CimClassName }) -join ',')
+$tr = 'wscript.exe //nologo //B "' + $vbsPath + '"'
+schtasks.exe /Create /TN $task /SC MINUTE /MO 15 /TR $tr /F
+if ($LASTEXITCODE -ne 0) { throw ('schtasks /Create failed rc=' + $LASTEXITCODE) }
+$t = Get-ScheduledTaskInfo -TaskName $task
+'OK task=' + $task
+'next=' + $t.NextRunTime
+'trigger=MINUTE/15  action=' + $tr
