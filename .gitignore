@@ -1,6 +1,7 @@
 ﻿node_modules/
 scripts/node_modules/
 temp/
+logs/
 *.log
 *.tmp
 *.part
