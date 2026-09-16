@@ -1,0 +1,93 @@
+{
+  "schema": 1,
+  "kind": "acceptance",
+  "date": "2026-09-16",
+  "round": "L6 delivery-face readings on 0.9.9: cold-install three steps from the packed artifact + zero-model dual-block run on the installed copy + delivery-surface scan (machine-path regression in tools/ found and fixed) + cross-line game cold-install re-shoot",
+  "version": { "package": "0.9.9", "core": "1.14.9" },
+  "repo": {
+    "priorHead": "869174e4eda7cf2813358b9257dc25433c0ebb66",
+    "priorHeadEqualsOrigin": true,
+    "tree": "clean before this round's edits",
+    "patrol": {
+      "ticks": "52-58",
+      "judged": {
+        "head": "869174e4eda7",
+        "at": "2026-09-16 20:12:20",
+        "gate": "PASS",
+        "criteria": 5,
+        "suite": { "pass": 295, "fail": 0, "skipped": 0, "cancelled": 0, "exit": 0 },
+        "secs": 258.1,
+        "log": "logs/patrol/gate-869174e4eda7.log"
+      }
+    }
+  },
+  "artifact": {
+    "file": "open-tui-orchestrator-0.9.9.tgz",
+    "bytes": 315116,
+    "filesInTarball": 93,
+    "sha256": "f227b5349cdda1d6d243df235df98062208fd2fe5c102b358cd522368a0321c7",
+    "packCommand": "npm pack --pack-destination D:/temp/orch-pack-099",
+    "evidence": "D:/temp/orch-pack-099/"
+  },
+  "coldInstallThreeSteps": {
+    "prefix": "D:/temp/orch-coldinstall-099 (clean dir; npm init -y + npm install <tarball>)",
+    "steps": [
+      { "cmd": "open-tui-orchestrator --version", "expected": "0.9.9 (core 1.14.9)", "actual": "open-tui-orchestrator 0.9.9 (core 1.14.9)", "rc": 0 },
+      { "cmd": "open-tui-orchestrator --install-deps", "expected": "ok installed", "actual": "{\"ok\":true,\"action\":\"installed\"}", "rc": 0 },
+      { "cmd": "open-tui-orchestrator --install-deps (2nd run)", "expected": "already-present (idempotent, no network)", "actual": "{\"ok\":true,\"action\":\"already-present\"}", "rc": 0 },
+      { "cmd": "open-tui-orchestrator --agent codex --doctor", "expected": "hostError=null, carrierAvailable=true", "actual": "hostError=null, carrierAvailable=true, rc=0", "rc": 0, "note": "doctor reports the calling shell's ORCH_SPAWN_MODE (window in that shell); the installed-copy run below pins headless" },
+      { "cmd": "node <installed>/scripts/release-integrity.mjs (seal self-verify)", "expected": "43 core + 65 runtime", "actual": "{\"schema\":2,\"coreVersion\":\"1.14.9\",\"files\":43,\"runtimeFiles\":65}", "rc": 0 }
+    ],
+    "evidence": "D:/temp/orch-coldinstall-099/cold-steps.log"
+  },
+  "installedCopyRun": {
+    "channel": "caller-driven (--plan-file + --unit-cmd-file + --acceptance-file) - zero model calls",
+    "entry": "D:/temp/orch-coldinstall-099/node_modules/open-tui-orchestrator/cli.mjs",
+    "request": "在项目81创建文件 alpha.txt 内容 ALPHA_OK；在项目84创建文件 beta.txt 内容 BETA_OK",
+    "board": ["0/2 verified 2 waiting [B1· B2·]", "spawned headless caller-script unit: proj-81", "spawned headless caller-script unit: proj-84", "1/2 verified [B1✓ B2…]", "1/2 verified [B1✓ B2▶]", "2/2 verified [B1✓ B2✓] finalized success=true"],
+    "products": { "alpha.txt": "ALPHA_OK", "beta.txt": "BETA_OK" },
+    "productHashes": {
+      "alpha.txt": "5b59da964685d6c01cad12c216a305f5cddd95dfb66f3bbebd19111d0f7abe10",
+      "beta.txt": "d76be855e11b10cd389106bf9b825791f1f46049f925d50547640fc28b04c8b6",
+      "note": "sha256 byte-identical to the 0.9.5 released-artifact acceptance (2026-09-15)"
+    },
+    "summary": { "success": true, "agent": "caller-script", "spawnMode": "headless" },
+    "popups": { "windowsTerminalBefore": 0, "windowsTerminalAfter": 0 },
+    "evidence": "D:/temp/orch-coldinstall-099/cold-run.log; ws/temp/orchestrator/runs/coldinstall-099-1/summary.json"
+  },
+  "deliverySurfaceScan": {
+    "tarball": { "files": 93, "suspiciousFilenames": 0, "machinePathHits": 0, "nonPublicUsernameHits": 0, "credentialPatternHits": 0 },
+    "currentTreeBeforeFix": { "nonHandleYechaHits": 6, "files": ["tools/orch-patrol.py", "tools/orch-patrol-install.ps1"] },
+    "finding": "the L10 patrol tools hardcoded C:\\Users\\yecha - a regression against the 2026-09-14 identity scrub; the public-readiness claim 'git grep yecha shows only the public handle' had become false again",
+    "fix": {
+      "orch-patrol.py": "NODE_DIR / CODEX_BIN now derive from os.path.expanduser('~/.tools/...')",
+      "orch-patrol-install.ps1": "$repo/$python/$launchers now Join-Path $HOME; the generated VBS expands %USERPROFILE% at runtime; task registration switched to schtasks /Create (PS-native Register-ScheduledTask is refused unelevated on this machine, 0x80070005 - same workaround as 83-level-patrol); uninstall switched to schtasks /Delete"
+    },
+    "verification": [
+      "git grep yecha -- tools/ => 0 non-handle hits",
+      "python ast.parse OK; PowerShell 5.1 PSParser 0 errors; .ps1 stays ASCII-only, LF, BOM-less",
+      "patrol tick green after the edit (seq 55)",
+      "installer re-run rc=0: task re-created via schtasks; task-triggered runs (tick 57/58) with LastTaskResult=0 and NextRunTime set",
+      "the regenerated VBS executed standalone via wscript (rc=0, hidden)"
+    ],
+    "gitHistory": { "commits": 71, "scansWithNoHits": ["ghp_", "_authToken", "npm_"] }
+  },
+  "crossLineGameColdLeg": {
+    "target": "D:/build/game/release/night-market-windows-v0.2.4.zip (batch-20 re-export)",
+    "sha256": { "measured": "334e112731ad5b367a03ba3f0e9f3084fe0ccf467c55c5d73d7c5b502f072a47", "fileValue": "same", "bytes": 124452972, "verdict": "OK" },
+    "sixFiles": "all exact sizes (NightMarket.exe 109161472 / NightMarket.pck 246876 / Godot_v4.7.2.exe 180858888 / Start-Game.cmd 931 / Release-README.md 6796 / VERSION.txt 110); VERSION first line '夜市 / night market v0.2.4'; README one-step line present; no .git//tests//*.gd/saves",
+    "preferredPath": { "cmd": "Godot_v4.7.2.exe --main-pack NightMarket.pck --headless --quit-after 60 (sandbox APPDATA)", "rc": 0, "errorLines": 0, "heartbeat": "1 file, mode=play (instance-16880.json)" },
+    "nativePath": { "cmd": "NightMarket.exe --headless --quit-after 60 (sandbox APPDATA)", "rc": 0, "errorLines": 0, "note": "no policy block; second heartbeat instance-29132.json mode=play" },
+    "realUserDir": "218 files pre/post, snapshots identical (cmp) - zero change",
+    "evidence": "D:/temp/game-coldinstall-orch/logs/batch20-run.log (step2-runtime.log/-rc, step2-native.log/-rc, userdir-pre/post.txt, appdata-files*.txt; batch19 logs archived under logs/prev-batch19/)"
+  },
+  "publish": {
+    "status": "pending-user-action",
+    "npmWhoami": "not logged in (ENEEDAUTH), read 2026-09-16",
+    "registryDistTags": { "latest": "0.9.6" },
+    "registryVersions": ["0.9.6"],
+    "npxBaseline": "npx --yes open-tui-orchestrator@latest --version => open-tui-orchestrator 0.9.6 (core 1.14.6)",
+    "next": "owner runs npm login on this machine, then npm publish (the tarball is already verified in this file)"
+  },
+  "filesTouchedThisRound": ["tools/orch-patrol.py", "tools/orch-patrol-install.ps1", "docs/release-policy.md", "test/acceptance-2026-09-16-l6-delivery-face.json"]
+}
