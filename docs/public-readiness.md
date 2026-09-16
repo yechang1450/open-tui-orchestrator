@@ -24,7 +24,7 @@
 **结论（2026-09-14，core 1.14.4 / 0.9.4）：清单只剩两件事，且都不可逆、都必须用户亲手点——一、发 npm 包（需要 `npm login`/token）；二、仓转公开。其余全部就绪。**
 
 1. ~~公开前的个人路径清理~~ **完成 2026-09-14**：18 个 tracked 文件、77 处用户名归一化为 `<user>`；根因一并修掉（证据采集器、画像适配器、hermes 画像 provenance）。验证：`git grep -c yecha` 只剩公开的 GitHub 句柄 `yechang1450`。
-2. ~~**npm 发布**~~ **已发布 2026-09-15**：`open-tui-orchestrator@0.9.6` 已在 registry 上（93 文件 / 310.5 kB、shasum `4b16de76…`、`dist.tarball` 可取）。账号＝个人账号 unscoped（`npm whoami` = `yechang1450`；正名未被占）。**端到端烟测**：① 干净前缀（`D:/temp/orch-coldinstall`）`npm install open-tui-orchestrator` 345ms → `--version` = `0.9.6 (core 1.14.6)` → `--install-deps` = `{"ok":true,"action":"installed"}` → `--doctor` = `hostError=null / carrierAvailable=true`；② `npx --yes open-tui-orchestrator@latest --version` 同结论（任何 agent 从 PATH 即装的路径成立）。
+2. ~~**npm 发布**~~ **已发布（最新＝0.9.9 · `latest` · 2026-09-17 00:27 +08）**：`open-tui-orchestrator@0.9.9` 已在 registry 上（93 文件 / 315.8 kB、shasum `4dc01c89…`、integrity `sha512-ceuO3vJb…`）。发布前对当轮 HEAD `f1ce647` 复绿：`node scripts/gate.mjs --all` = `ORCH_GATE: PASS — 5 criteria`（295/295）＋ `npm publish --dry-run` 面检同值。账号＝个人账号 unscoped（`npm whoami` = `yechang1450`；正名未被占）。**端到端烟测（0.9.9 · 冷前缀 `D:/temp/orch-coldinstall-099`）**：① `npm install open-tui-orchestrator` → `--version` = `0.9.9 (core 1.14.9)` → `--install-deps` = `{"ok":true,"action":"installed"}`（幂等复跑 `already-present`）→ `--agent codex --doctor` = `hostError=null / carrierAvailable=true`；② `npx --yes open-tui-orchestrator@latest --version` = `0.9.9 (core 1.14.9)`（任何 agent 从 PATH 即装的路径成立）。**历史**：0.9.6 = 2026-09-15 首发（93 文件 / 310.5 kB、shasum `4b16de76…`）。
 3. ~~CI~~ **弃用（用户令 2026-09-15）**：GitHub Actions 一律不用——私有仓被账户计费拦死（2026-09-15 实测：作业零步骤、3 秒失败），转公开也不再启用。**判定全部走本机等价门禁**：`node scripts/gate.mjs --all`（一条命令五判据 + 反例能红）＋ 定时巡逻（83 的 schtasks 法，需要时并入）。`.github/workflows/ci.yml` 仅作历史记录保留、不带任何触发。
 4. ~~公开文档面~~ **完成 2026-09-14**：`CHANGELOG.md`、`.github/ISSUE_TEMPLATE/bug_report.yml`、`SECURITY.md`（私密漏洞报告渠道 + 披露政策）、`CONTRIBUTING.md`（屋规：判据必须能红、封印纪律、数字对账）。
 5. ~~信任与安全声明~~ **完成 2026-09-14**：`docs/trust-and-safety.md`（隐藏 agent 以你的凭据运行、Codex 的 `--dangerously-bypass-approvals-and-sandbox`、`--unit-cmd` 属调用方自授权、写哪些文件、无遥测无后台服务、如何卸载），README/README-zh 首屏与 INSTALL 均给出一行摘要 + 链接。
@@ -35,8 +35,8 @@
 
 ### 公开前一毫米（done 一件、剩一件可选）
 ```powershell
-# 一、发布 ✅ 2026-09-15 已完成（open-tui-orchestrator@0.9.6 已在 registry；冷装三步 + npx 实跑通过）
-#     产物基线：93 文件 / 310.5 kB、shasum 4b16de76…
+# 一、发布 ✅ 已完成（最新＝0.9.9 / latest，2026-09-17 上架；冷装三步 + npx 实跑通过）
+#     产物基线：93 文件 / 315.8 kB、shasum 4dc01c89…（0.9.6 = 2026-09-15 首发、310.5 kB）
 
 # 二、转公开（可选：CI 理由已作废，只剩「让外人能看到/克隆源码」一条）
 gh repo edit yechang1450/open-tui-orchestrator --visibility public --accept-visibility-change-consequences
@@ -48,7 +48,7 @@ gh repo edit yechang1450/open-tui-orchestrator --visibility public --accept-visi
 **当前只剩一个决定（npm 发布账号那条已随发布定案）：**
 
 - **仓库是否转公开**（private → public）：不可逆；历史里只有作者信息（已清理机器用户名，只剩公开的 GitHub 句柄）。CI 理由已作废（CI 弃用），现在只剩「让外人看到/克隆源码」一个动机——愿意再点。
-- ~~**npm 发布账号**~~ **已定 2026-09-15：个人账号 unscoped**（`open-tui-orchestrator@0.9.6` 已发布；正名未被占，无需 scope 退路）。
+- ~~**npm 发布账号**~~ **已定 2026-09-15：个人账号 unscoped**（`open-tui-orchestrator@0.9.9` = `latest` 已发布；正名未被占，无需 scope 退路）。
 
 已由我按「最省事且不烧钱」定完、不需要你操心的：平台路线（Windows-only 明说，不投跨平台）、CI（**弃用**——判定走本机等价门禁 `node scripts/gate.mjs --all`，用户令 2026-09-15）、信任声明与安全渠道（`docs/trust-and-safety.md` + `SECURITY.md`）。
 
@@ -59,3 +59,4 @@ gh repo edit yechang1450/open-tui-orchestrator --visibility public --accept-visi
 3. ~~CI 骨架 + 门禁入仓~~ ✅ 2026-09-14（`scripts/gate.mjs` + `.github/workflows/ci.yml`，有意不武装）→ **2026-09-15 用户令：GitHub CI 弃用，判定走本机等价门禁**
 4. ~~信任/安全声明定稿 + `SECURITY.md` + `CONTRIBUTING.md`~~ ✅ 2026-09-14
 5. 干净环境首次验收（第 7 项）——**你的部分**，过了即可对外说「可以用」
+6. ~~0.9.9 上架（`latest` 刷新）~~ ✅ 2026-09-17 00:27 +08：发布前 `gate.mjs --all` PASS（5 判据 · 295/295）→ `npm publish` → registry 回读（`version=0.9.9`、shasum `4dc01c89…`、integrity `sha512-ceuO3vJb…`）＋ 冷装三步（含 `--install-deps` 幂等复跑）＋ `npx` 烟测全绿；证据 `D:/temp/orch-coldinstall-099/npm-publish-099-smoke.log`。
