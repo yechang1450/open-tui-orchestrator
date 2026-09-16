@@ -48,11 +48,12 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 NODE_DIR = os.path.expanduser('~/.tools/node24-fresh')
 NODE_EXE = os.path.join(NODE_DIR, 'node.exe')
 CODEX_BIN = os.path.join(NODE_DIR, 'node_modules/@openai/codex/node_modules/@openai/codex-win32-x64/vendor/x86_64-pc-windows-msvc/bin')
-GATE_TIMEOUT = 1500          # 门禁全量（含 295 条套件）的宽限；任务侧 ExecutionTimeLimit 30min
+GATE_TIMEOUT = 1500          # 门禁全量（含 296 条套件）的宽限；任务侧 ExecutionTimeLimit 30min
 LOCK_STALE_MIN = 40          # 锁超过这个分钟数视为遗留（任务 15 分钟一跑）
 OTHER_PROCS = r'gate\.mjs|\.test\.mjs|orch-level-check|l5-recovery-drill|orch-suite'
 GATE_LINE = re.compile(r'ORCH_GATE: (PASS|FAIL)(?: \(([^)]*)\))? — (\d+) criteria')
 SUITE_LINE = re.compile(r'actual: pass=(\d+) fail=(\d+) skipped=(\d+) cancelled=(\d+) exit=(\d+)')
+SUITE_REDS_LINE = re.compile(r'\[gate\] suite reds \((\d+)\): (.*)')
 
 
 def now_str():
@@ -69,6 +70,24 @@ def parse_gate(text):
         if m:
             return m.group(1), int(m.group(3)), (m.group(2) or '')
     return 'UNKNOWN', None, ''
+
+
+def parse_suite_reds(text):
+    """门禁 L1 红名单解析（2026-09-17 起 gate 必打）：`[gate] suite reds (N): name @ at | …`。
+    取最后一条；`unparsed`/计数 0 = 名单缺失（如实记 0，不编造名字）；无该行 = None。"""
+    for ln in reversed((text or '').splitlines()):
+        m = SUITE_REDS_LINE.search(ln)
+        if not m:
+            continue
+        named = []
+        body = m.group(2).strip()
+        if body and body != 'unparsed':
+            for part in body.split(' | '):
+                part = part.strip()
+                if part and not part.startswith('…'):
+                    named.append(part)
+        return {'count': int(m.group(1)), 'named': named}
+    return None
 
 
 def p_gate_ok(rc, text):
@@ -90,6 +109,7 @@ def p_self_red_cases():
         'gate_malformed': not p_gate_ok(0, 'ORCH_GATE: PASS — five criteria'),
         'judge_dirty_tree': not p_judge_eligible('a' * 40, 2, None, False),
         'judge_empty_head': not p_judge_eligible('', 0, None, False),
+        'suite_reds_no_marker_no_claim': parse_suite_reds('✖ a failure without the gate marker') is None,
     }
 
 
@@ -99,6 +119,8 @@ def p_self_red_positives():
         'judge_new_clean_head': p_judge_eligible('b' * 40, 0, None, False),
         'judge_already_judged_skips': not p_judge_eligible('b' * 40, 0, 'b' * 40, False),
         'judge_force_overrides': p_judge_eligible('b' * 40, 0, 'b' * 40, True),
+        'suite_reds_parses': (parse_suite_reds('  [gate] suite reds (2): red one @ test/a.test.mjs:1:1 | red two @ test/b.test.mjs:2:1') or {}).get('named') == ['red one @ test/a.test.mjs:1:1', 'red two @ test/b.test.mjs:2:1'],
+        'suite_reds_unparsed_keeps_names_empty': (parse_suite_reds('  [gate] suite reds (2): unparsed') or {}).get('named') == [],
     }
 
 
@@ -163,11 +185,12 @@ def run_gate(repo, state_dir):
     if m:
         suite = {'pass': int(m.group(1)), 'fail': int(m.group(2)), 'skipped': int(m.group(3)),
                  'cancelled': int(m.group(4)), 'exit': int(m.group(5))}
+    suite_reds = parse_suite_reds(text)
     tail = [ln.strip() for ln in text.splitlines() if ln.strip()][-10:]
     ok = p_gate_ok(rc, text)
     meta = {'head': head, 'at': now_str(), 'rc': rc, 'secs': round(time.time() - t0, 1),
             'gate': verdict if verdict != 'UNKNOWN' else 'FAIL', 'criteria': criteria,
-            'failed_ids': failed_ids, 'suite': suite, 'log': os.path.basename(out_log),
+            'failed_ids': failed_ids, 'suite': suite, 'suite_reds': suite_reds, 'log': os.path.basename(out_log),
             'file': os.path.basename(out_json), 'tail': tail, 'ok': ok}
     with open(out_json, 'w', encoding='utf-8') as fh:
         json.dump(meta, fh, ensure_ascii=False, indent=1)
@@ -255,6 +278,8 @@ def do_tick(args, state_dir):
              gate.get('gate') or gate.get('skipped'), reds))
     for r in reds:
         print('PATROL_RED: %s' % r)
+    for name in (gate.get('suite_reds') or {}).get('named', []):
+        print('PATROL_GATE_RED: %s' % name)
     return 0 if not reds else 1
 
 

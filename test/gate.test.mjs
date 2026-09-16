@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
-import {fileURLToPath} from 'node:url';
+import {fileURLToPath, pathToFileURL} from 'node:url';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const family = path.join(root, 'temp');
@@ -63,4 +63,31 @@ test('gate: reports the shell spawn mode and pins its children to headless', () 
   const out2 = (unset.stdout || '') + (unset.stderr || '');
   assert.equal(unset.status, 0, out2);
   assert.match(out2, /\[gate\] shell ORCH_SPAWN_MODE=\(unset\); children pinned to headless/, out2);
+});
+
+// 门禁 L1 红必须点名（2026-09-17）：此前失败只留计数，名单不可恢复（一笔首判红至今无从指名——
+// 门禁只打计数、同 HEAD 重判又把日志与判卷记录覆盖）。红例：解析器退化回空即红；对无标记文本
+// 编造名字、或绿文本里凭空产生红名，都必红。
+test('gate: the L1 red list is named from the suite reporter output', async () => {
+  const {suiteReds} = await import(pathToFileURL(path.join(root, 'scripts', 'gate.mjs')).href);
+  const redFixture = [
+    '✖ sample red one (0.9611ms)',
+    '✔ green neighbor (0.1134ms)',
+    'ℹ tests 2',
+    'ℹ pass 1',
+    'ℹ fail 1',
+    '',
+    '✖ failing tests:',
+    '',
+    'test at test/sample.test.mjs:3:1',
+    '✖ sample red one (0.9611ms)',
+    '  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:',
+  ].join('\n');
+  const reds = suiteReds(redFixture);
+  assert.equal(reds.length, 1, JSON.stringify(reds));
+  assert.equal(reds[0].name, 'sample red one');
+  assert.equal(reds[0].at, 'test/sample.test.mjs:3:1');
+  // 无 `✖ failing tests:` 区（被中断的运行）时退回内联标记；空名/无红一律不得编造。
+  assert.deepEqual(suiteReds('✖ a.test.mjs (12ms)\n✖ b.test.mjs (7ms)\n').map((r) => r.name), ['a.test.mjs', 'b.test.mjs']);
+  assert.deepEqual(suiteReds('ℹ tests 2\nℹ pass 2\nℹ fail 0\n'), []);
 });

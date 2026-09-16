@@ -14,6 +14,12 @@
  *   - a value that cannot be read counts as failure ("unknown is failure");
  *   - exit 0 only if every requested criterion passed; any failure exits 1;
  *   - L2b keeps the criteria themselves honest: it proves a red case still goes red;
+ *   - an L1 red names the failing tests (the reporter's `✖ failing tests:` section), prints one
+ *     machine line `[gate] suite reds (N): name @ file:line:col | …` for the judgement record,
+ *     and dumps the full suite output to `<repo>/temp/gate-suite-<stamp>.log` — learning *which*
+ *     test failed must never cost a re-run (2026-09-17, after a red round whose failing case
+ *     could not be recovered: the gate kept counts only and the log was overwritten by the
+ *     re-judgement of the same head);
  *   - the shell's user-level `ORCH_SPAWN_MODE` (kept for manual runs) is reported, never
  *     inherited: children are pinned to headless, so criteria cannot change with the shell
  *     and nothing pops up (2026-09-16 ruling: 判据随壳变色不可接受).
@@ -24,17 +30,14 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
-import {fileURLToPath} from 'node:url';
+import {fileURLToPath, pathToFileURL} from 'node:url';
 import {coordinatorDir} from './core/leases.mjs';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const AGENT = String(process.env.ORCH_GATE_AGENT || 'codex').trim();
-const args = new Set(process.argv.slice(2));
-const wants = (flag) => args.has(flag) || args.has('--all') || args.size === 0;
 const results = [];
 // 判据不得随壳变色：本壳的用户级 ORCH_SPAWN_MODE 只报告、不继承；子进程一律显式钉 headless。
 const SHELL_SPAWN_MODE = String(process.env.ORCH_SPAWN_MODE || '').trim() || '(unset)';
-console.log(`  [gate] shell ORCH_SPAWN_MODE=${SHELL_SPAWN_MODE}; children pinned to headless (zero popups)`);
 
 function check(id, title, ok, lines) {
   results.push({id, ok});
@@ -50,6 +53,72 @@ function node(argsArr, opts = {}) {
   return {status: r.status, out: (r.stdout || '') + (r.stderr || '')};
 }
 
+// ------------------------------------------- L1 red list (isolated, unit-testable)
+// Node's spec reporter ends a red run with a `✖ failing tests:` section: per failure a
+// `test at <file>:<line>:<col>` line followed by a `✖ <name> (<n>ms)` line. Parse that
+// section; when it is absent (an interrupted run, a non-spec shape) fall back to inline
+// `✖ …` markers. Never fabricate: an unparsable output yields an empty list.
+export function suiteReds(out) {
+  const text = String(out || '');
+  const reds = [];
+  const seen = new Set();
+  const push = (name, at) => {
+    const key = `${name}\u0000${at}`;
+    if (name && !seen.has(key)) {
+      seen.add(key);
+      reds.push({name, at});
+    }
+  };
+  const NAME = /^✖\s+(.+?)\s*(?:\(\d+(?:\.\d+)?ms\))?\s*$/;
+  const cut = text.lastIndexOf('✖ failing tests:');
+  if (cut >= 0) {
+    let pendingAt = '';
+    for (const raw of text.slice(cut).split(/\r?\n/)) {
+      const line = raw.trimEnd();
+      const at = /^\s*test at (.+)$/.exec(line);
+      if (at) {
+        pendingAt = at[1].trim();
+        continue;
+      }
+      const m = NAME.exec(line);
+      if (m && m[1] !== 'failing tests:') {
+        push(m[1], pendingAt);
+        pendingAt = '';
+      }
+    }
+  }
+  if (!reds.length) {
+    for (const raw of text.split(/\r?\n/)) {
+      const m = NAME.exec(raw.trimEnd());
+      if (m && m[1] !== 'failing tests:') push(m[1], '');
+    }
+  }
+  return reds;
+}
+
+function stamp() {
+  const d = new Date();
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
+}
+
+function dumpSuiteOutput(out) {
+  try {
+    const rel = path.join('temp', `gate-suite-${stamp()}.log`);
+    fs.mkdirSync(path.dirname(path.join(REPO, rel)), {recursive: true});
+    fs.writeFileSync(path.join(REPO, rel), out, 'utf8');
+    return rel;
+  } catch {
+    return null;
+  }
+}
+
+function suiteRedsLine(reds) {
+  const shown = reds.slice(0, 30).map((red) => `${red.name}${red.at ? ' @ ' + red.at : ''}`);
+  const more = reds.length > shown.length ? ` | … +${reds.length - shown.length} more` : '';
+  return `  [gate] suite reds (${reds.length}): ${reds.length ? shown.join(' | ') + more : 'unparsed'}`;
+}
+
 // ---------------------------------------------------------------- L1: the suite
 function suite() {
   const files = fs.readdirSync(path.join(REPO, 'test')).filter((n) => n.endsWith('.test.mjs')).sort().map((n) => path.join('test', n));
@@ -62,13 +131,27 @@ function suite() {
   };
   const pass = num('pass'), fail = num('fail'), skipped = num('skipped'), cancelled = num('cancelled');
   const missing = [['pass', pass], ['fail', fail], ['skipped', skipped]].filter(([, v]) => v === null).map(([k]) => k);
-  if (missing.length) return check('L1', 'offline regression suite', false, [`expected: pass>0 / fail==0 / skipped==0 / exit==0`, `actual: missing ${missing.join(', ')} ⇒ unknown is failure`]);
-  const ok = pass > 0 && fail === 0 && skipped === 0 && r.status === 0;
-  check('L1', 'offline regression suite', ok, [
-    `expected: pass>0 / fail==0 / skipped==0 / exit==0`,
-    `actual: pass=${pass} fail=${fail} skipped=${skipped} cancelled=${cancelled} exit=${r.status}`,
-  ]);
-  return pass;
+  const ok = !missing.length && pass > 0 && fail === 0 && skipped === 0 && r.status === 0;
+  const lines = [`expected: pass>0 / fail==0 / skipped==0 / exit==0`];
+  if (missing.length) lines.push(`actual: missing ${missing.join(', ')} ⇒ unknown is failure`);
+  else lines.push(`actual: pass=${pass} fail=${fail} skipped=${skipped} cancelled=${cancelled} exit=${r.status}`);
+  let redLine = '';
+  if (!ok) {
+    const reds = suiteReds(r.out);
+    if (reds.length) {
+      lines.push(`failing tests (${reds.length}):`);
+      for (const red of reds.slice(0, 15)) lines.push(`  ✖ ${red.name}${red.at ? ' — ' + red.at : ''}`);
+      if (reds.length > 15) lines.push(`  … and ${reds.length - 15} more`);
+    } else {
+      lines.push(`failing tests: none named in the suite output (parse miss or the suite never ran)`);
+    }
+    const dump = dumpSuiteOutput(r.out);
+    lines.push(dump ? `full suite output: ${dump}` : `full suite output could not be written (see the captured gate log)`);
+    redLine = suiteRedsLine(reds);
+  }
+  check('L1', 'offline regression suite', ok, lines);
+  if (redLine) console.log(redLine);
+  return missing.length ? undefined : pass;
 }
 
 // ------------------------------------------------- L2a: host resolution (doctor)
@@ -158,13 +241,22 @@ function consistency(suitePass) {
   check('L4', 'version / seal / docs / suite total cross-check', ok, lines);
 }
 
-let measuredSuite = null;
-if (wants('--suite')) measuredSuite = suite();
-if (wants('--doctor')) doctor();
-if (wants('--canary')) canary();
-if (wants('--unknown-run')) unknownRun();
-if (wants('--consistency')) consistency(measuredSuite);
+function main() {
+  const args = new Set(process.argv.slice(2));
+  const wants = (flag) => args.has(flag) || args.has('--all') || args.size === 0;
+  console.log(`  [gate] shell ORCH_SPAWN_MODE=${SHELL_SPAWN_MODE}; children pinned to headless (zero popups)`);
 
-const failed = results.filter((r) => !r.ok).map((r) => r.id);
-console.log(`ORCH_GATE: ${failed.length ? 'FAIL (' + failed.join(', ') + ')' : 'PASS'} — ${results.length} criteria`);
-process.exitCode = failed.length ? 1 : 0;
+  let measuredSuite = null;
+  if (wants('--suite')) measuredSuite = suite();
+  if (wants('--doctor')) doctor();
+  if (wants('--canary')) canary();
+  if (wants('--unknown-run')) unknownRun();
+  if (wants('--consistency')) consistency(measuredSuite);
+
+  const failed = results.filter((r) => !r.ok).map((r) => r.id);
+  console.log(`ORCH_GATE: ${failed.length ? 'FAIL (' + failed.join(', ') + ')' : 'PASS'} — ${results.length} criteria`);
+  process.exitCode = failed.length ? 1 : 0;
+}
+
+// 只有被直接执行时才跑判据；被 import（单测/工具）时不得有副作用。
+if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) main();

@@ -3,6 +3,12 @@
 Notable changes, newest first. Every entry pairs a package version with a core version —
 `open-tui-orchestrator --version` prints both (`open-tui-orchestrator <version> (core <core>)`).
 
+## Unreleased — dev tree after 0.9.9 (core 1.14.9)
+
+### Added
+
+- **An L1 red now names the failing tests.** Measured 2026-09-17: a gate round went red with one failing case (plus the L4 cross-check cascade) and the name turned out to be *unrecoverable* — L1 printed counts only, and the re-judgement of the same head overwrote both `gate-<head>.log` and `judged-<head>.json`. `scripts/gate.mjs` now extracts the failing tests from the reporter's `✖ failing tests:` section (`suiteReds`, with an inline-marker fallback for interrupted runs; it never fabricates), prints them inside the L1 block, prints one machine line `[gate] suite reds (N): name @ file:line:col | …`, and dumps the full suite output to `temp/gate-suite-<stamp>.log`. `tools/orch-patrol.py` parses that line into the judgement record as `suite_reds` and echoes `PATROL_GATE_RED:` lines when a judgement fails. New red-capable criterion: `test/gate.test.mjs` (the parser must name the red test from a reporter fixture, must stay empty on marker-less and green output; before the change `suiteReds` does not exist ⇒ red). Regression 296/296.
+
 ## 0.9.9 — core 1.14.9
 
 ### Fixed
