@@ -2,7 +2,9 @@
 // 两条腿：
 //   ① 默认（自动接管）：控制器进程被杀 → 守护进程自动接管（restarts>=1）→ 跑完并收口；
 //   ② --no-resume-budget（让恢复失败）：预算 1 → 杀掉接管的引擎 → 守护进程必须**可见地**停下
-//      （guardian.json status=exhausted + 日志一行），run 保持未收口，再由手动 --resume-run 收口。
+//      （guardian.json status=exhausted + 日志一行），run 保持未收口，再由手动 --resume-run 收口
+//      （收口须重交同一份 --unit-cmd-file；salvage 输出入 report——2026-09-16 收尾件①）。
+//   载体口径（2026-09-16 收尾件②）：两条腿显式 headless、零弹窗；可见窗手动调试用 ORCH_DRILL_WINDOW=1。
 // 证据：<根目录>/report-auto.json 与 report-fail.json（含 steps 布尔逐条 + 账本/守护数据）。
 // 用法: node tools/l5-recovery-drill.mjs [--no-resume-budget]
 //   env: ORCH_REPO（默认=本仓）、ORCH_L5_ROOT（默认 D:/temp/orch-l5，不放义为临时目录）
@@ -26,7 +28,7 @@ const GUARDIAN_LOG = path.join(runDir, 'guardian.log');
 const barrier = path.join(ROOT, 'release');
 const waiting = path.join(ROOT, 'waiting');
 
-fs.rmSync(WS, {recursive: true, force: true});
+fs.rmSync(WS, {recursive: true, force: true, maxRetries: 10, retryDelay: 200});
 for (const f of ['release', 'waiting', 'alpha.txt', 'beta.txt', 'unit-runs.json']) { try { fs.rmSync(path.join(ROOT, f), {force: true}); } catch {} }
 fs.mkdirSync(path.join(WS), {recursive: true});
 
@@ -79,7 +81,10 @@ fs.writeFileSync(path.join(ROOT, 'acceptance.json'), JSON.stringify({
 const env = {...process.env};
 for (const key of ['WORKSPACE_DIR', 'ORCH_STATE_DIR', 'ORCH_TUI', 'ORCH_APPROVAL', 'ORCH_SANDBOX', 'NODE_TEST_CONTEXT']) delete env[key];
 env.ORCH_GUARDIAN = '1';
-if (failMode) { env.ORCH_GUARDIAN_MAX_RESTARTS = '1'; env.ORCH_SPAWN_MODE = 'window'; }
+// 收尾件②：非交互自动化一律显式 headless、零弹窗（不继承本壳 ORCH_SPAWN_MODE）；
+// 需要可见窗口的手动调试才显式 ORCH_DRILL_WINDOW=1。
+env.ORCH_SPAWN_MODE = process.env.ORCH_DRILL_WINDOW === '1' ? 'window' : 'headless';
+if (failMode) { env.ORCH_GUARDIAN_MAX_RESTARTS = '1'; }
 
 const read = () => { try { return JSON.parse(fs.readFileSync(summaryFile, 'utf8')); } catch { return null; } };
 const readGuardian = () => { try { return JSON.parse(fs.readFileSync(guardianFile, 'utf8')); } catch { return null; } };
@@ -131,11 +136,15 @@ try {
     report.steps.budgetExhaustedNoSecondRestart = (readGuardian()?.restarts || 0) === 1;
     report.steps.stayedUnfinalized = !read()?.finishedAt;
     report.guardianLogTail = fs.existsSync(GUARDIAN_LOG) ? fs.readFileSync(GUARDIAN_LOG, 'utf8').split('\n').filter(Boolean).slice(-8) : [];
-    const salvage = spawn(NODE, [path.join(REPO, 'cli.mjs'), '--resume-run', runId], {cwd: WS, env, windowsHide: true});
+    // 收尾件①：手动收口必须重交同一份 --unit-cmd-file（与 ③ 红/绿口径一致），输出捕获入 report。
+    const salvage = spawn(NODE, [path.join(REPO, 'cli.mjs'), '--resume-run', runId, '--unit-cmd-file', path.join(ROOT, 'unit.json')], {cwd: WS, env, windowsHide: true});
+    let salvageOut = '';
+    for (const p of [salvage.stdout, salvage.stderr]) p.on('data', (b) => { salvageOut += b.toString(); });
     await pause(3000);
     fs.writeFileSync(barrier, 'go');
-    await Promise.race([new Promise((r) => salvage.on('exit', r)), pause(240000)]);
-    report.steps.manualResumeFinalized = await until(() => !!read()?.finishedAt, 'manual resume finalize', 60000);
+    report.salvageExit = await Promise.race([new Promise((r) => salvage.on('exit', r)), pause(240000).then(() => 'timeout')]);
+    report.steps.manualResumeFinalized = await until(() => !!read()?.finishedAt, 'manual resume finalize', 120000);
+    report.salvageOutput = salvageOut.split('\n').filter(Boolean).slice(-20);
     report.summary = read();
     report.passed = report.steps.blockWaiting && report.steps.guardianArmed && report.steps.resumedOwnerAppeared
       && report.steps.budgetExhaustedNoSecondRestart && report.steps.stayedUnfinalized && report.steps.manualResumeFinalized
@@ -156,7 +165,13 @@ try {
   report.error = String(error);
 } finally {
   fs.writeFileSync(barrier, 'go');
-  if (failMode) { try { spawnSync(NODE, [path.join(REPO, 'cli.mjs'), '--resume-run', runId], {cwd: WS, env, windowsHide: true, timeout: 240000}); } catch {} }
+  if (failMode && !read()?.finishedAt) {
+    try {
+      // 收尾件①补：salvage 未收口时兜底再收一次（同样重交 unit 命令），输出捕获入 report。
+      const fin = spawnSync(NODE, [path.join(REPO, 'cli.mjs'), '--resume-run', runId, '--unit-cmd-file', path.join(ROOT, 'unit.json')], {cwd: WS, env, windowsHide: true, timeout: 240000, encoding: 'utf8'});
+      report.finisherOutput = String((fin.stdout || '') + (fin.stderr || '')).split('\n').filter(Boolean).slice(-20);
+    } catch {}
+  }
   report.controllerOutputTail = out.split('\n').filter(Boolean).slice(-12);
   fs.writeFileSync(path.join(ROOT, failMode ? 'report-fail.json' : 'report-auto.json'), JSON.stringify(report, null, 2));
   console.log('[drill] passed =', report.passed, report.error ? 'error=' + report.error : '');

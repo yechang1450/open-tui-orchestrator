@@ -3,6 +3,12 @@
 Notable changes, newest first. Every entry pairs a package version with a core version —
 `open-tui-orchestrator --version` prints both (`open-tui-orchestrator <version> (core <core>)`).
 
+## 0.9.9 — core 1.14.9
+
+### Fixed
+
+- **Resume adoption of a surviving unit no longer mis-reads one transient identity-snapshot miss as a dead launcher.** Measured 2026-09-16 with the L5 recovery drill re-run on the headless carrier: after the controller was killed, the guardian's resume engine read the live unit's identity with a *single* process snapshot; when that read missed (a known under-load form), the started-but-unproven task was cascaded into `needs-reconciliation` and the run finalized `success=false` about a second after resume — the drill's second kill hit a dead PID and the "stays unfinalized → guardian visibly exhausts → manual re-supply finalizes" scenario could not reproduce (it had passed on the window carrier, a timing accident of the same cause). On a resumed generation (>1) whose unit has no result file yet, the adoption read now uses the same bounded grace-retry as the spawn read (`identityWithGrace`, the default 10 s / 800 ms poll; if the identity still cannot be read the block falls back to recovery, and the engine stays alive through the grace so a re-kill still has a target): a live unit is adopted (`[resume] adopting live <block>; no duplicate window`) and the run keeps waiting on it. Fresh runs and the result-file-present path keep their single-read legacy semantics (the result is read from `rf` anyway, so identity is not required there), so existing fresh-run criteria are untouched. Acceptance: the drill's fail leg re-run goes rc=0 (`passed=true`, `stayedUnfinalized`/`manualResumeFinalized` both true, salvage rc=0) and the auto leg rc=0 — zero popups on both (WindowsTerminal count 0→0); `gate.mjs --all` PASS, regression 295/295.
+
 ## 0.9.8 — core 1.14.8
 
 ### Fixed

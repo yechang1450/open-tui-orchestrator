@@ -186,7 +186,12 @@ export async function runWindows(request,hooks,options={}) {
       const limit=Math.max(1,Math.min(3,Number(options.maxAttempts||2)));
       while(Date.now()<deadline) {
         let e=sum.results[r.key],la=e.launcherFiles,identity;spawnConfirmed=false;
-        if(la)try{identity=launcherIdentity(hooks.readPid(la.pidf),la.pidf);}catch{identity=undefined;}
+        // 采纳读加固（2026-09-16 L5 复跑实逮）：**接管（generation>1）且单元还没出结果**时，全量快照会
+        // 瞬时缺失/超时（见 identityWithGrace 注释），单次读失手会把「还活着的单元」误判为未采纳 ⇒ 走
+        // recovery 误收口（实测 headless 接管引擎 ~3s 内把在飞单元判 needs-reconciliation）；此时改用与
+        // spawn 读同一套宽限重试（identityWithGrace 默认 10s／800ms；仍无则按未采纳走 recovery，且宽限
+        // 期间引擎存活⇒二次杀有靶）。首轮（fresh）与已有结果文件的路径保持单读旧语义（fresh 判据零扰动）。
+        if(la)try{identity=(Number(sum.generation)>1&&!fs.existsSync(la.rf))?await identityWithGrace(hooks,la):launcherIdentity(hooks.readPid(la.pidf),la.pidf);}catch{identity=undefined;}
         const adopted=identity&&(!e.launcher||sameProcess(e.launcher,identity));
         let active;
         if(adopted) {
