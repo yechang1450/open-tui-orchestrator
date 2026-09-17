@@ -1,13 +1,28 @@
 # Changelog
 
+## 0.9.11 — core 1.15.1
+
+### Fixed
+
+- **pi host died on an ambiguous model name.** pi's `settings.json` keeps `defaultProvider` and `defaultModel` apart; the detector only read `defaultModel`, so a bare `--model deepseek-flash` reached a pi install with several authenticated providers for that alias and pi refused with `Model "deepseek-flash" is ambiguous across providers: … Use --provider or provider/model` (exit 1). In `--mode window` the TUI therefore exited immediately and every block was marked failed while the windows themselves popped correctly (measured 2026-09-17, pi 0.85.1). `detectPi` now composes `provider/model` when `defaultProvider` is set and the value is not already qualified, and passes an already-qualified spec through untouched. Red-capable criterion: `test/host-model.test.mjs` (`defaultProvider=opencode-go` + `defaultModel=glm-5.3-flash` must yield `opencode-go/glm-5.3-flash`; before the fix it yields the bare name).
+
+
 Notable changes, newest first. Every entry pairs a package version with a core version —
 `open-tui-orchestrator --version` prints both (`open-tui-orchestrator <version> (core <core>)`).
 
-## Unreleased — dev tree after 0.9.9 (core 1.14.9)
+## 0.9.10 — core 1.15.0
 
 ### Added
 
 - **An L1 red now names the failing tests.** Measured 2026-09-17: a gate round went red with one failing case (plus the L4 cross-check cascade) and the name turned out to be *unrecoverable* — L1 printed counts only, and the re-judgement of the same head overwrote both `gate-<head>.log` and `judged-<head>.json`. `scripts/gate.mjs` now extracts the failing tests from the reporter's `✖ failing tests:` section (`suiteReds`, with an inline-marker fallback for interrupted runs; it never fabricates), prints them inside the L1 block, prints one machine line `[gate] suite reds (N): name @ file:line:col | …`, and dumps the full suite output to `temp/gate-suite-<stamp>.log`. `tools/orch-patrol.py` parses that line into the judgement record as `suite_reds` and echoes `PATROL_GATE_RED:` lines when a judgement fails. New red-capable criterion: `test/gate.test.mjs` (the parser must name the red test from a reporter fixture, must stay empty on marker-less and green output; before the change `suiteReds` does not exist ⇒ red). Regression 296/296.
+
+### Fixed
+
+- **`--mode window` now actually shows windows.** Measured 2026-09-17 with a top-level-window probe: the spawned Windows Terminal window was `visible=True showCmd=1(normal)` but was *never activated*, and the launcher helper spent 2.5 s pushing the previous foreground window back to the front — so windows opened *behind* whatever the user was looking at, and two full test rounds produced zero visible popups. The popup criterion (pidf + launcher process alive) reported `popup CONFIRMED` throughout, i.e. it was a false green. Now `inactive-window.ps1` takes `-Activate` (default in window mode): it snapshots top-level windows, waits up to 9 s for the fresh sane one, restores it with `ShowWindow(SW_SHOWNORMAL)`, raises it (topmost → not-topmost) and asks for the foreground, then prints a machine-readable verdict (`ok/hwnd/rect/foreground/raised/minimized`). The engine stores that verdict next to the pidf (`win-<stem>.window.json`), logs it on the spawn line, and `windowGenuinelyPopped` now **requires** `ok:true`, so a window sitting behind other windows can no longer pass as a popup. `ORCH_WINDOW_NOACTIVATE=1` restores the old background behavior. Red-capable criteria: `test/inactive-window.test.mjs` (`-Activate` flag + verdict plumbing, `ok:false`/exit-3 and no-verdict failures, helper stays ASCII+LF+PowerShell-parseable) and the rewritten `windowGenuinelyPopped` case (live launcher with no verdict ⇒ false).
+
+### Changed
+
+- **Window capacity now comes from *available* memory**: `maximum windows = floor(available memory MB ÷ 1000) × 2` (never below 1), replacing `round(nominal GB × 3 ÷ 4)` computed from *total* memory — the old form counted memory other processes already held as spare capacity. Read per decision via `os.freemem()`; README, README-zh and `docs/pi-adapter.md` state the new rule and the regression numbers were updated for it.
 
 ## 0.9.9 — core 1.14.9
 

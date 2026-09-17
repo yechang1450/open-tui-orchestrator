@@ -477,7 +477,10 @@ function fallbackPlan(request) {
  * 重试耗尽仍无合法 JSON 时回退到 fallbackPlan —— 完整串行计划，确保整批任务仍可追踪和落地。
  * 返回已 normalize + split 的 blocks；绝不因拆块失败而抛错中止整批。
  */
-async function decomposeSafely(request, maxWindows = computeMaxWindows(os.totalmem() / 1024 ** 3)) {
+// 容量读数的唯一来源：**剩余可用内存**（MB）。2026-09-17 用户口径更新：
+// 最大窗口数 = floor(剩余可用MB ÷ 1000) × 2（至少 1）。旧口径用总内存，会把别人已占用的算成自己的余量。
+function availableMemoryMb() { return os.freemem() / 1024 ** 2; }
+async function decomposeSafely(request, maxWindows = computeMaxWindows(availableMemoryMb())) {
   const finalize = plan => capPlanBlocks(normalizePlan(plan), maxWindows);
   const hints = resolveHints(); // hints 参与缓存键（moduleToProj/foldRules/tail），防跨项目映射撞缓存
   // 0) 缓存优先：相同请求+相同 hints 的拆块结果永不自动失效（仅 --clear-cache 或删除缓存文件才重置），
@@ -939,7 +942,24 @@ function normalizeSpawnMode(value){const v=String(value||"").trim().toLowerCase(
 // Visible window (REAL popup, via cmd /c start — reliably opens a new console)
 // ---------------------------------------------------------------------------
 // Trust configuration is owned by the user, never rewritten here.
-function spawnVisibleWindow(lp, title) {
+// 弹窗证据：助手把机读裁决写在 pidf 同目录同 stem 的 win-<stem>.window.json 里。
+// windowGenuinelyPopped 现在必须拿到 ok:true 才认"弹出来了"——2026-09-17 实测的教训是：
+// 只查 pidf+launcher 存活会让"窗口在别的窗口后面，用户根本看不见"这种情况假绿。
+function windowConfirmationPath(pidf) {
+  return path.join(path.dirname(String(pidf)), path.basename(String(pidf)).replace(/^window-/, 'win-').replace(/\.pid$/, '.window.json'));
+}
+function writeWindowConfirmation(pidf, verdict) {
+  try { writeFileSync(windowConfirmationPath(pidf), JSON.stringify({ ...verdict, at: new Date().toISOString() })); } catch { /* best effort evidence */ }
+}
+function describeWindowVerdict(v) {
+  if (!v) return ' [window state unknown]';
+  if (v.ok) return ' [VISIBLE hwnd=' + v.hwnd + ' rect=' + v.rect + ' zrank=' + (v.zrank ?? '?') + ' foreground=' + v.foreground + ']';
+  return ' [WINDOW NOT VISIBLE: ' + (v.reason || 'unknown') + ']';
+}
+function spawnVisibleWindow(lp, title, pidf) {
+  // 窗口模式默认把窗口**送到用户眼前**（置顶→请求前台）。要旧的无打扰行为
+  // （窗口开在后台、不抢焦点）就设 ORCH_WINDOW_NOACTIVATE=1。
+  const activate = String(process.env.ORCH_WINDOW_NOACTIVATE || '') !== '1';
   // Workspace trust remains under the host/user configuration.
   // Prefer Windows Terminal: it natively supports IME/TSF composition, so the Codex
   // TUI keeps accepting Microsoft 拼音/日语 IME switches (fixes "偶发失效"). Codex
@@ -949,17 +969,19 @@ function spawnVisibleWindow(lp, title) {
     const bn = path.basename(String(lp || ""));
     const winS = bn.replace(/^win-launch-/, "").replace(/\.ps1$/, "");
     const windowName = "win-" + (winS || "x");
-    // 同步拉起（no-activate helper 经 spawnSync 执行完 CreateProcessW 再返回）：实测异步 detached 路径
-    // 弹窗经常不出现（"popup NOT confirmed" 直至超时），sync 路径稳定 1~2 秒内确认；阻塞 ~2.5s 换可靠性。
-    spawnInactiveWindow(WT_EXE, ["-w", windowName, PS_EXE, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", lp], WORKSPACE);
-    console.log("spawned visible " + AGENT.agent + " TUI (Windows Terminal): " + title + " (window=" + windowName + ")");
+    // 同步拉起（no-activate helper 经 spawnSync 执行完再返回）：实测异步 detached 路径弹窗经常不出现
+    // （"popup NOT confirmed" 直至超时），sync 路径稳定；activate 时助手会等新窗口出现并把它带前。
+    const verdict = spawnInactiveWindow(WT_EXE, ["-w", windowName, PS_EXE, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", lp], WORKSPACE, { activate });
+    if (pidf) writeWindowConfirmation(pidf, verdict);
+    console.log("spawned visible " + AGENT.agent + " TUI (Windows Terminal): " + title + " (window=" + windowName + ")" + describeWindowVerdict(verdict));
     return;
   }
   // conhost fallback uses the same no-activate helper rather than cmd /c start,
   // so a missing Windows Terminal does not reintroduce a focusing window.
   // 与 WT 路径一致：sync 拉起保证窗口真正弹出（见上）。powershell 走 SystemRoot 锚定（防工作区二进制投毒）。
-  spawnInactiveWindow(PS_EXE,['-NoProfile','-ExecutionPolicy','Bypass','-File',lp],WORKSPACE);
-  console.log("spawned visible " + AGENT.agent + " TUI: " + title);
+  const verdict = spawnInactiveWindow(PS_EXE, ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', lp], WORKSPACE, { activate });
+  if (pidf) writeWindowConfirmation(pidf, verdict);
+  console.log("spawned visible " + AGENT.agent + " TUI: " + title + describeWindowVerdict(verdict));
 }
 // 弹窗后精准检测：pid 文件存在 + launcher(WT pane 宿主)进程存活 => 窗口真弹出（见 windowGenuinelyPopped）。
 // 失败重试（上限 maxRetry，默认 3），仍失败返回 false（由调用方标记 popup-failed 并汇报）。
@@ -968,12 +990,21 @@ function windowGenuinelyPopped(pidf, token) {
   // 不把 agent 子进程作为必选证据：agent 冷启动(模型 provider)可能很慢，若等它会把"已弹出"误判为未弹出而重复弹窗；agent 未起由回收超时兜底。
   // 秒退单元兜底：超快/秒崩的单元可能在确认轮询间隙里已跑完退出——结果文件已落盘即视为已启动，
   // 交给正常 wait 路径读取结果，避免把"已完成"误判成 popup-failed 并白白重试。
+  // 注意：本函数 headless 与 window 两条路径共用，只证明 launcher 级证据；"窗口是否真的出现在用户眼前"
+  // 由窗口路径额外的 windowVerdictOk() 判定（2026-09-17 假绿教训）。
   if (!pidf || !existsSync(pidf)) return false;
   const pid = readPidFile(pidf);
   if (!pid) return false;
   if (pidAliveCheck(pid)) return true;
   const rf = path.join(path.dirname(String(pidf)), path.basename(String(pidf)).replace(/^window-/, 'win-').replace(/\.pid$/, '.result.json'));
   return existsSync(rf);
+}
+// 窗口可见性裁决（窗口模式专属）：inactive-window.ps1 -Activate 把新窗口带到最前后写下的机读裁决。
+// 背景（2026-09-17 实测）：窗口可以 vis=True show=1 却 fg=False —— 开在其它窗口后面，用户全程看不见，
+// 而 launcher 级判据照样说"已弹出"。所以窗口路径必须拿到 ok:true 才算真的弹了。
+function windowVerdictOk(pidf) {
+  const conf = windowConfirmationPath(pidf);
+  try { return existsSync(conf) && JSON.parse(readFileSync(conf, 'utf8')).ok === true; } catch { return false; }
 }
 async function confirmWindowPopped(pidf, token) {
   const deadline = Date.now() + 35000;
@@ -1009,22 +1040,22 @@ async function warmupWindow(pidf, token) {
 }
 async function spawnWindowWithRetry(lp, title, pidf, maxRetry = 3, token, reservedByRunner = false) {
   const auxiliaryId="aux-"+path.basename(lp); let coordinator;
-  if(!reservedByRunner){coordinator=coordinatorDir(WORKSPACE);const auxCap=Math.max(0,Number(process.env.ORCH_MAX_WINDOWS||0)||0);const claim=reserve(coordinator,{id:auxiliaryId,keys:["aux:"+token]},auxCap?Math.min(computeMaxWindows(os.totalmem()/1024**3),auxCap):computeMaxWindows(os.totalmem()/1024**3));if(!claim.ok)throw new Error("Window admission waiting: "+claim.reason);}
+  if(!reservedByRunner){coordinator=coordinatorDir(WORKSPACE);const auxCap=Math.max(0,Number(process.env.ORCH_MAX_WINDOWS||0)||0);const claim=reserve(coordinator,{id:auxiliaryId,keys:["aux:"+token]},auxCap?Math.min(computeMaxWindows(availableMemoryMb()),auxCap):computeMaxWindows(availableMemoryMb()));if(!claim.ok)throw new Error("Window admission waiting: "+claim.reason);}
   // 恢复调用方传入的重试上限（默认 3）：sync 拉起后每次尝试 ~2.5s，重试成本可控，兜底 WT 偶发不弹窗。
   for (let attempt = 1; attempt <= maxRetry; attempt++) {
-    spawnVisibleWindow(lp, title);
+    spawnVisibleWindow(lp, title, pidf);
     const deadline = Date.now() + 35000;
     let ok = false;
     const t0 = Date.now();
     while (Date.now() < deadline) {
-      if (windowGenuinelyPopped(pidf, token)) { ok = true; break; }
+      if (windowGenuinelyPopped(pidf, token) && windowVerdictOk(pidf)) { ok = true; break; }
       await new Promise((r) => setTimeout(r, 500));
     }
     if (ok) {
       // 加固②：弹窗确认后再等 agent 子进程真正拉起（冷启动），确保父进程随后去等 session rollout 时不会起跑太早。
       await warmupWindow(pidf, token);
       if(!reservedByRunner)bind(coordinator,auxiliaryId,launcherIdentity(readPidFile(pidf),pidf));
-      if (attempt > 1 || Date.now() - t0 > 6500) console.log("  [window] popup CONFIRMED (pidf+launcher+" + AGENT.agent + " child) for [" + title + "]");
+      if (attempt > 1 || Date.now() - t0 > 6500) console.log("  [window] popup CONFIRMED (pidf+launcher+visible window+" + AGENT.agent + " child) for [" + title + "]");
       return true;
     }
     console.log("  [window] popup NOT confirmed (attempt " + attempt + "/" + maxRetry + ") for [" + title + "]");
@@ -1054,7 +1085,7 @@ function spawnHeadlessUnit(lp, title) {
 }
 async function spawnHeadlessWithRetry(lp, title, pidf, maxRetry = 3, token, reservedByRunner = false) {
   const auxiliaryId="aux-"+path.basename(lp); let coordinator;
-  if(!reservedByRunner){coordinator=coordinatorDir(WORKSPACE);const auxCap=Math.max(0,Number(process.env.ORCH_MAX_WINDOWS||0)||0);const claim=reserve(coordinator,{id:auxiliaryId,keys:["aux:"+token]},auxCap?Math.min(computeMaxWindows(os.totalmem()/1024**3),auxCap):computeMaxWindows(os.totalmem()/1024**3));if(!claim.ok)throw new Error("Window admission waiting: "+claim.reason);}
+  if(!reservedByRunner){coordinator=coordinatorDir(WORKSPACE);const auxCap=Math.max(0,Number(process.env.ORCH_MAX_WINDOWS||0)||0);const claim=reserve(coordinator,{id:auxiliaryId,keys:["aux:"+token]},auxCap?Math.min(computeMaxWindows(availableMemoryMb()),auxCap):computeMaxWindows(availableMemoryMb()));if(!claim.ok)throw new Error("Window admission waiting: "+claim.reason);}
   // Hidden spawn is deterministic (no OS window manager in the loop), so a
   // single attempt usually confirms; keep the retry budget for cold-start
   // hiccups and parity with the window path.
@@ -2281,7 +2312,7 @@ export async function main() {
     checkDiskSpace({ warnOnly: true });
     if (PLAN_FILE) {
       // 计划文件模式：纯确定性，零 LLM（不读缓存、不写缓存、不调模型）。
-      const capacity = computeMaxWindows(os.totalmem() / 1024 ** 3);
+      const capacity = computeMaxWindows(availableMemoryMb());
       const effective = ledgerEffectivePlan(request, planFromFile(request, loadPlanFile(PLAN_FILE), capacity), capacity);
       console.log(JSON.stringify({ blocks: effective }, null, 2));
       return;
@@ -2478,7 +2509,7 @@ export async function main() {
     if(!FORCE_EXECUTE&&isOrchestratorSelfMod(request)){console.log(JSON.stringify({mode:'inline',reason:'Modify the orchestrator in the initiating conversation before opening windows'}));return;}
     // 计划文件模式：调用方已显式给出计划并要求编排——跳过只读定性（零模型调用）；自改文本门与容量门仍在。
     if(!resume&&!FORCE_EXECUTE&&!PLAN_FILE&&await classifyExecutionMode(request)==='inline'){console.log(JSON.stringify({mode:'inline',reason:'Read-only analysis'}));return;}
-    const capacity=computeMaxWindows(os.totalmem()/1024**3);
+    const capacity=computeMaxWindows(availableMemoryMb());
     if(!resume&&capacity<2&&!FORCE_EXECUTE){
       console.log(JSON.stringify({mode:'inline',reason:'capacity-below-two-windows',capacity,request,tasks:requestTasks(request),next:'在发起对话直接执行原始请求；不要再次调用 --run-windows'}));
       return;
@@ -2592,4 +2623,4 @@ if (isMain) main().catch((e) => {
   reportFatal(e);
   process.exitCode = 1;
 });
-export { classifyBlockComplexity, classifyExecutionMode, windowExecutionPolicy, appendModelEffortArgs, genericProjectSplit, trySingleBlock, conflictByKeys, loadCachedDecompose, buildBlocksFromTasks, resolveHints, extractTasks, classifyPrompt, buildBlockPrompt, levelWaves, decomposeHash, loadPlanFile, planFromFile, checkDiskSpace, readPidFile, pidAliveCheck, closeWindowByPid, windowGenuinelyPopped, extractResult, extractUsage, readReportFromResult, sessionDir, writeInteractiveLauncher, staleTransientFiles, pidFileOfTransient, tryReserveWindow, commitReservation, cancelReservation, computeMaxWindows, blockKeys, keysOverlap, scanTaskComplete, __setOrchHooks, isOrchestratorSelfMod, resolveCodexHome, withRegistryLock, spawnHeadlessWithRetry, normalizeSpawnMode, REG_LOCK as REGISTRY_LOCK_FILE };
+export { classifyBlockComplexity, classifyExecutionMode, windowExecutionPolicy, appendModelEffortArgs, genericProjectSplit, trySingleBlock, conflictByKeys, loadCachedDecompose, buildBlocksFromTasks, resolveHints, extractTasks, classifyPrompt, buildBlockPrompt, levelWaves, decomposeHash, loadPlanFile, planFromFile, checkDiskSpace, readPidFile, pidAliveCheck, closeWindowByPid, windowGenuinelyPopped, windowVerdictOk, extractResult, extractUsage, readReportFromResult, sessionDir, writeInteractiveLauncher, staleTransientFiles, pidFileOfTransient, tryReserveWindow, commitReservation, cancelReservation, computeMaxWindows, blockKeys, keysOverlap, scanTaskComplete, __setOrchHooks, isOrchestratorSelfMod, resolveCodexHome, withRegistryLock, spawnHeadlessWithRetry, normalizeSpawnMode, REG_LOCK as REGISTRY_LOCK_FILE };

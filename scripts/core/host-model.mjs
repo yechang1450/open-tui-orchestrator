@@ -165,7 +165,12 @@ function detectPi({ piHome }) {
   const home = piHome || path.join(os.homedir(), '.pi');
   try {
     const s = JSON.parse(fs.readFileSync(path.join(home, 'agent', 'settings.json'), 'utf8'));
-    const model = clean(s.defaultModel);
+    const raw = clean(s.defaultModel);
+    const provider = clean(s.defaultProvider);
+    // pi 的模型规格是 `provider/model`；settings 把两者分开存。只把裸名递给 pi，多 provider 同时
+    // authenticated 时它会报 "Model "x" is ambiguous across providers" 并 exit 1（2026-09-17 实测：
+    // defaultProvider=opencode-go-0 + defaultModel=deepseek-flash，窗口里 pi 直接退出、块判失败）。
+    const model = raw && provider && !raw.includes('/') ? `${provider}/${raw}` : raw;
     const effort = clean(s.defaultThinkingLevel);
     return model || effort ? { model, effort, source: 'pi-settings' } : null;
   } catch { return null; }

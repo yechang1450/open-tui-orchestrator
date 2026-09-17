@@ -45,7 +45,7 @@ export const {
   classifyBlockComplexity, classifyExecutionMode, appendModelEffortArgs, genericProjectSplit,
   trySingleBlock, conflictByKeys, loadCachedDecompose, buildBlocksFromTasks, resolveHints,
   extractTasks, classifyPrompt, buildBlockPrompt, levelWaves, decomposeHash, checkDiskSpace,
-  readPidFile, pidAliveCheck, closeWindowByPid, windowGenuinelyPopped, extractResult, extractUsage,
+  readPidFile, pidAliveCheck, closeWindowByPid, windowGenuinelyPopped, windowVerdictOk, extractResult, extractUsage,
   readReportFromResult, sessionDir, writeInteractiveLauncher, staleTransientFiles,
   pidFileOfTransient, tryReserveWindow, commitReservation, cancelReservation, computeMaxWindows,
   blockKeys, keysOverlap, scanTaskComplete, windowExecutionPolicy, __setOrchHooks, isOrchestratorSelfMod, resolveCodexHome,

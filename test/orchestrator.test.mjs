@@ -139,7 +139,7 @@ test('force.mjs CLI --enable arms enforcement', () => {
 });
 
 // ---------- orchestrate-sdk: pure decompose/conflict helpers ----------
-const { classifyBlockComplexity, classifyExecutionMode, windowExecutionPolicy, appendModelEffortArgs, conflictByKeys, trySingleBlock, genericProjectSplit, loadCachedDecompose, buildBlockPrompt, levelWaves, decomposeHash, checkDiskSpace, readPidFile, pidAliveCheck, closeWindowByPid, windowGenuinelyPopped, extractResult, extractUsage, readReportFromResult, sessionDir, writeInteractiveLauncher, pidFileOfTransient, staleTransientFiles, computeMaxWindows, applyAuthPromptPolicy, tryReserveWindow, commitReservation, cancelReservation, __setOrchHooks, isOrchestratorSelfMod, resolveCodexHome } = await import(importUrl(path.join(scripts, 'orchestrate-sdk.mjs')));
+const { classifyBlockComplexity, classifyExecutionMode, windowExecutionPolicy, appendModelEffortArgs, conflictByKeys, trySingleBlock, genericProjectSplit, loadCachedDecompose, buildBlockPrompt, levelWaves, decomposeHash, checkDiskSpace, readPidFile, pidAliveCheck, closeWindowByPid, windowGenuinelyPopped, windowVerdictOk, extractResult, extractUsage, readReportFromResult, sessionDir, writeInteractiveLauncher, pidFileOfTransient, staleTransientFiles, computeMaxWindows, applyAuthPromptPolicy, tryReserveWindow, commitReservation, cancelReservation, __setOrchHooks, isOrchestratorSelfMod, resolveCodexHome } = await import(importUrl(path.join(scripts, 'orchestrate-sdk.mjs')));
 const { buildBlocksFromTasks, resolveHints, extractTasks, classifyPrompt } = await import(importUrl(path.join(scripts, 'orchestrate-sdk.mjs')));
 const { buildPsArrayLit } = await import(importUrl(path.join(scripts, 'orchestrate-sdk.mjs')));
 const { blockKeys, keysOverlap } = await import(importUrl(path.join(scripts, 'orchestrate-sdk.mjs')));
@@ -358,10 +358,10 @@ test('runtime: pidAliveCheck', () => {
   assert.equal(pidAliveCheck(0), false);
   assert.equal(pidAliveCheck(-5), false);
 });
-test('runtime: windowGenuinelyPopped = pidf present AND launcher process alive', () => {
+test('runtime: windowGenuinelyPopped = pidf 存在 + launcher 存活（headless/window 共用层）', () => {
   const d = fs.mkdtempSync(path.join(fixtureFamily, 'orch-rt2-'));
   try {
-    const pf = path.join(d, 'w.pid');
+    const pf = path.join(d, 'window-w.pid');
     assert.equal(windowGenuinelyPopped(path.join(d, 'missing.pid'), 'tok'), false);
     fs.writeFileSync(pf, String(999999999), 'utf8');
     assert.equal(windowGenuinelyPopped(pf, 'tok'), false);
@@ -369,6 +369,22 @@ test('runtime: windowGenuinelyPopped = pidf present AND launcher process alive',
     assert.equal(windowGenuinelyPopped(pf, 'tok'), true);
     fs.writeFileSync(pf, '', 'utf8');
     assert.equal(windowGenuinelyPopped(pf, 'tok'), false);
+  } finally { fs.rmSync(d, { recursive: true, force: true }); }
+});
+test('runtime: windowVerdictOk 是窗口路径的可见性裁决（缺裁决/ok:false 都不许算弹窗）', () => {
+  // 2026-09-17 假绿现场：窗口 vis=True show=1 但 fg=False（开在别的窗口后面，用户全程看不见），
+  // launcher 级判据照样说"已弹窗"。所以窗口路径必须有助手 -Activate 写下的 ok:true 裁决。
+  const d = fs.mkdtempSync(path.join(fixtureFamily, 'orch-rt2b-'));
+  try {
+    const pf = path.join(d, 'window-w.pid');
+    const cf = path.join(d, 'win-w.window.json');
+    assert.equal(windowVerdictOk(pf), false, '没有裁决文件 -> false（正是修复前会假绿的场景）');
+    fs.writeFileSync(cf, 'not json', 'utf8');
+    assert.equal(windowVerdictOk(pf), false, '裁决损坏 -> false');
+    fs.writeFileSync(cf, JSON.stringify({ok: false, reason: 'no new visible window appeared within 9000ms'}), 'utf8');
+    assert.equal(windowVerdictOk(pf), false, '裁决 ok:false -> false');
+    fs.writeFileSync(cf, JSON.stringify({ok: true, hwnd: '0x1', rect: '0,0,100,100', foreground: true}), 'utf8');
+    assert.equal(windowVerdictOk(pf), true, 'ok:true -> true');
   } finally { fs.rmSync(d, { recursive: true, force: true }); }
 });
 test('runtime: extractResult takes last assistant text (token/content/value tolerant)', () => {
@@ -444,14 +460,16 @@ test('runtime: interactive launcher template ships Get-LastReport + tolerant ext
     assert.equal(parse.status, 0, 'generated launcher ps1 must be parseable by PowerShell: ' + String(parse.stdout || parse.stderr || ''));
   } finally { for (const f of [lp, pidf, pf]) { try { if (fs.existsSync(f)) fs.rmSync(f, { force: true }); } catch {} } }
 });
-test('orchestrate-sdk computeMaxWindows: nominal GB = round(n * 1024 / 1000), windows = round(nominal * 3 / 4)', () => {
-  assert.equal(computeMaxWindows(2), 2, '2G -> nominal round(2.048)=2 -> round(1.5)=2 (caller refuses <4G)');
-  assert.equal(computeMaxWindows(4), 3, '4G -> nominal 4 -> 3 windows');
-  assert.equal(computeMaxWindows(8), 6, '8G -> nominal 8 -> 6 windows');
-  assert.equal(computeMaxWindows(12), 9, '12G -> nominal 12 -> 9 windows');
-  assert.equal(computeMaxWindows(16), 12, '16G -> nominal 16 -> 12 windows');
-  assert.equal(computeMaxWindows(32), 25, '32G -> nominal round(32.768)=33 -> round(24.75)=25');
-  assert.equal(computeMaxWindows(64), 50, '64G -> nominal round(65.536)=66 -> round(49.5)=50');
+test('computeMaxWindows: 按剩余可用内存(MB)算窗口数 = floor(mb/1000)*2，至少 1', () => {
+  assert.equal(computeMaxWindows(500), 1, '0.5G 剩用 -> floor(0.5)=0 -> 下限 1');
+  assert.equal(computeMaxWindows(1000), 2, '1G 剩用 -> 2');
+  assert.equal(computeMaxWindows(1500), 2, '1.5G 剩用 -> floor(1.5)=1 -> 2');
+  assert.equal(computeMaxWindows(2000), 4, '2G 剩用 -> 4');
+  assert.equal(computeMaxWindows(8192), 16, '8G 剩用 -> floor(8.192)=8 -> 16');
+  assert.equal(computeMaxWindows(16000), 32, '16G 剩用 -> 32');
+  assert.equal(computeMaxWindows(0), 1, '0/负数/NaN -> 下限 1（调用方另有 <2 窗口则 inline 的规则）');
+  assert.equal(computeMaxWindows(-5), 1, '负数 -> 下限 1');
+  assert.equal(computeMaxWindows(Number.NaN), 1, 'NaN -> 下限 1');
 });
 test('orchestrate-sdk applyAuthPromptPolicy: 不注入子代理指令 + 三遍检查 ①②③ -> 1)2)3)（修复 WT CJK 重叠）', () => {
   // 旧 auth 片段：子代理「无超时上限」+ 三遍检查用 ①②③（Windows Terminal CJK 宽度歧义会导致序号与文字重叠）。
@@ -532,7 +550,7 @@ test('runtime: spawnWindowWithRetry warms up after popup so the parent never rac
   // 1) warmupWindow must be defined
   assert.match(src, /async function warmupWindow/, 'warmupWindow must exist');
   // 2) spawnWindowWithRetry must invoke warmupWindow after confirming popup
-  const idxConfirmed = src.indexOf('windowGenuinelyPopped(pidf, token)) { ok = true; break; }');
+  const idxConfirmed = src.indexOf('windowGenuinelyPopped(pidf, token) && windowVerdictOk(pidf)) { ok = true; break; }');
   const idxWarmup = src.indexOf('await warmupWindow(pidf, token);');
   assert.ok(idxConfirmed > -1 && idxWarmup > -1, 'spawnWindowWithRetry must confirm popup then warm up');
   assert.ok(idxWarmup > idxConfirmed, 'warmup must run AFTER the popup is confirmed');
@@ -1054,14 +1072,13 @@ test('readReportFromResult: 畸形 JSON/无 REPORT/损坏文件 返回空, 不�
   } finally { fs.rmSync(d, { recursive: true, force: true }); }
 });
 
-test('computeMaxWindows: 内存上限/下限边界', () => {
-  assert.equal(computeMaxWindows(2), 2, '2G -> nominal round(2.048)=2 -> round(1.5)=2');
-  assert.equal(computeMaxWindows(3.9), 3, '3.9G -> nominal round(3.9936)=4 -> 3');
-  assert.equal(computeMaxWindows(4), 3, '4G -> nominal 4 -> 3');
-  assert.equal(computeMaxWindows(7), 5, '7G -> nominal round(7.168)=7 -> round(5.25)=5');
-  assert.equal(computeMaxWindows(16), 12, '16G -> nominal 16 -> 12');
-  assert.equal(computeMaxWindows(64), 50, '64G -> nominal round(65.536)=66 -> round(49.5)=50');
-  assert.equal(computeMaxWindows(0), 0, '0 -> nominal 0 -> 0 (caller refuses <4G)');
+test('computeMaxWindows: 按剩余可用内存(MB)算，边界与下限', () => {
+  assert.equal(computeMaxWindows(400), 1, '0.4G -> floor(0.4)=0 -> 下限 1');
+  assert.equal(computeMaxWindows(1999), 2, '1.999G -> floor=1 -> 2');
+  assert.equal(computeMaxWindows(2000), 4, '2G -> 4');
+  assert.equal(computeMaxWindows(7999), 14, '7.999G -> floor=7 -> 14');
+  assert.equal(computeMaxWindows(65536), 130, '64G 剩用 -> floor(65.536)=65 -> 130');
+  assert.equal(computeMaxWindows(0), 1, '0 -> 下限 1');
 });
 test('generic entry rejects unsupported hosts without fallback', async () => {
   const { resolveAgent } = await import(importUrl(path.join(scripts, 'agent.mjs')));
