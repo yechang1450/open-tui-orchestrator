@@ -3,16 +3,19 @@ import fs from 'node:fs';
 import crypto from 'node:crypto';
 import {spawnSync} from 'node:child_process';
 
-export const CORE_VERSION = '1.14.9';
+export const CORE_VERSION = '1.15.1';
 export const SUCCESS = new Set(['verified']);
 export const TERMINAL = new Set(['verified','failed','blocked','cancelled','awaiting-verification','preflight-failed','popup-failed','timeout','needs-reconciliation']);
 
-// 内存 → 最大并发 TUI 窗数：先由内存 GiB 换算出厂商标称内存 GB（round(GiB × 1024 ÷ 1000)），再取其 3/4（round(标称GB × 3 ÷ 4)）。
-// 例如 16G 标称 → 12 台并发，4G 标称 → 3 台；不再有固定 8 硬上限。下限由调用方以 <4G 判定为不支持。为可测试而独立成函数。
+// 剩余可用内存(MB) → 最大并发 TUI 窗数：每满 1000 MB 给 2 个窗口，向下取整，至少 1 个（2026-09-17 用户口径）。
+// 例：剩用 8000 MB → 16 台并发；4G → 8；900 MB → 1（下限）。旧的"标称内存 GB × 3/4"（按总内存）已弃用：
+// 它把别人已经占住的内存也算作自己的余量。为可测试而独立成函数。
 // fresh 规划与 --resume-run 的恢复校验共用同一容量（contracts 放置以避免 recovery↔sdk 循环依赖）。
-export function computeMaxWindows(memGb) {
-  const nominalGb = Math.round((memGb * 1024) / 1000);
-  return Math.round((nominalGb * 3) / 4);
+// 注意：恢复校验里的"块数上界"用**总内存**推，保持可复算稳定（见 recovery.mjs）。
+export function computeMaxWindows(availableMemoryMb) {
+  const mb = Number(availableMemoryMb);
+  if (!Number.isFinite(mb) || mb <= 0) return 1;
+  return Math.max(1, Math.floor(mb / 1000) * 2);
 }
 
 export function summaryComplete(sum, strict = true) {

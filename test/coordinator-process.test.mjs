@@ -120,7 +120,9 @@ test('stale mutex tickets are reclaimed by age while fresh ones survive',()=>{
   assert.equal(sweepStaleMutexTickets(dir),2,'both aged tickets must be reclaimed');
   assert.ok(fs.existsSync(fresh),'a fresh ticket must survive the sweep');
   assert.ok(fs.existsSync(unrelated),'non-ticket files must never be touched');
-  assert.equal(sweepStaleMutexTickets(dir,{ttlMs:0}),1,'an explicit ttl reclaims the fresh ticket too');
+  // 用显式前拨的时钟：Windows 文件时间戳粒度（ms/15ms 取整）会让"刚写入的票"偶发地比 Date.now() 晚，
+  // 裸测 ttlMs:0 就成了毫秒级竞速（2026-09-17 实捉一次假红）。契约本身支持注入 now，就用它。
+  assert.equal(sweepStaleMutexTickets(dir,{ttlMs:0,now:Date.now()+60000}),1,'an explicit ttl reclaims the fresh ticket too');
  }finally{fs.rmSync(dir,{recursive:true,force:true});}
 });
 

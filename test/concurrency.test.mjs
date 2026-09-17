@@ -4,15 +4,15 @@ import { computeMaxWindows, capPlanBlocks, buildWindowWaves } from '../scripts/o
 const blocks = n => Array.from({length:n}, (_,i) => ({type:'independent', title:`p${i}`, dependsOn:[], conflictKeys:[`file:/task${i}.json`], tasks:[{id:`t${i}`, title:`task${i}`, prompt:`execute task ${i}`}]}));
 const recs = plan => plan.map((b,i)=>({key:`B${i+1}`,title:b.title,b,dependsOn:b.dependsOn}));
 for (const n of [0,1,7,8,9,17,65]) {
-  test(`capacity caps the entire plan: ${n} tasks, at most ${computeMaxWindows(16)} blocks, no loss`, () => {
+  test(`capacity caps the entire plan: ${n} tasks, at most ${computeMaxWindows(16000)} blocks, no loss`, () => {
     const input=blocks(n), original=structuredClone(input);
-    const plan=capPlanBlocks(input,computeMaxWindows(16));
-    assert.equal(plan.length,Math.min(n,computeMaxWindows(16)));
+    const plan=capPlanBlocks(input,computeMaxWindows(16000));
+    assert.equal(plan.length,Math.min(n,computeMaxWindows(16000)));
     assert.deepEqual(plan.flatMap(b=>b.tasks.map(t=>t.id)),input.flatMap(b=>b.tasks.map(t=>t.id)));
     assert.deepEqual(input,original,'planning must not mutate cached/source plans');
     for (const b of plan) if (b.tasks.length>1) assert.equal(b.type,'linked');
     assert.equal(new Set(plan.flatMap(b=>b.conflictKeys)).size,n);
-    assert.equal(buildWindowWaves(recs(plan),computeMaxWindows(16)).flat().length,plan.length);
+    assert.equal(buildWindowWaves(recs(plan),computeMaxWindows(16000)).flat().length,plan.length);
   });
 }
 test('nine tasks become seven singleton blocks and one two-task serial block',()=>{
@@ -36,7 +36,7 @@ test('existing linked tasks and resource locks remain intact',()=>{
   assert.deepEqual(plan.at(-1).conflictKeys,['file:/task7.json','file:/task8.json']);
 });
 test('capacity scales with memory: larger memory yields more windows',()=>{
-  assert.equal(computeMaxWindows(32),25);
+  assert.equal(computeMaxWindows(32000),64);
   assert.equal(capPlanBlocks(blocks(17),16).length,16);
 });
 test('invalid capacities fail immediately',()=>{

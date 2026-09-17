@@ -13,7 +13,10 @@ export function validateRecoverySummary(sum) {
   if(sum.acceptanceSha256!==undefined&&(typeof sum.acceptanceSha256!=='string'||!/^[0-9a-f]{64}$/.test(sum.acceptanceSha256)))fail('invalid acceptance hash');
   const tasks=requestTasks(sum.request);
   if(!tasks.length||!Array.isArray(sum.tasks)||!same(sum.tasks.map(t=>({id:t?.id,prompt:t?.prompt})),tasks))fail('original task inventory mismatch');
-  if(!Array.isArray(sum.blocks)||!sum.blocks.length||sum.blocks.length>computeMaxWindows(os.totalmem()/1024**3)||!Array.isArray(sum.plan)||sum.plan.length!==sum.blocks.length)fail('block inventory mismatch');
+  // 块数上界是**可复算的合理性上界**，不是当时的活动容量：容量按"剩余可用内存"算会随机器负载浮动，
+  // 若拿它当恢复门，一台忙起来的机器会把合法账本误判成篡改（2026-09-17 实测：GiB 喂给新公式直接把上界算成 1）。
+  // 用总内存推上界：稳定、可复算，且恒 ≥ 任何"剩余可用"推出的容量（可用内存 ≤ 总内存）。
+  if(!Array.isArray(sum.blocks)||!sum.blocks.length||sum.blocks.length>computeMaxWindows(os.totalmem()/1024**2)||!Array.isArray(sum.plan)||sum.plan.length!==sum.blocks.length)fail('block inventory mismatch');
   const ids=tasks.map(t=>t.id),blockIds=sum.blocks.map(b=>b?.key);
   if(!strings(blockIds)||!exact(blockIds,sum.results)||!exact(ids,sum.taskResults))fail('result inventory mismatch');
   const covered=[];

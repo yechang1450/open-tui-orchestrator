@@ -71,11 +71,20 @@ test('kimi: cwd 不匹配任何会话时回退 config.toml 的 default_model/[th
 });
 
 // --------------------------------------------------------------------- pi --
-test('pi: 读 settings.json 的 defaultModel/defaultThinkingLevel', () => {
+test('pi: defaultProvider 与 defaultModel 合成 provider/model（多 provider 歧义回归）', () => {
+  // 2026-09-17 实测：settings 里 defaultProvider=opencode-go-0 + defaultModel=deepseek-flash，
+  // 只传裸名给 pi 会得到 'Model "deepseek-flash" is ambiguous across providers …' 并 exit 1，
+  // 窗口直接退出、块被判失败。规格必须限定到 provider。
   const home = tmpdir();
   write(path.join(home, 'agent', 'settings.json'), JSON.stringify({ defaultProvider: 'opencode-go', defaultModel: 'glm-5.3-flash', defaultThinkingLevel: 'max' }));
   const got = detectHostModelEffort('pi', { env: {}, homes: { pi: home } });
-  assert.deepEqual(got, { model: 'glm-5.3-flash', effort: 'max', source: 'pi-settings' });
+  assert.deepEqual(got, { model: 'opencode-go/glm-5.3-flash', effort: 'max', source: 'pi-settings' });
+  const home2 = tmpdir();
+  write(path.join(home2, 'agent', 'settings.json'), JSON.stringify({ defaultModel: 'opencode-go/glm-5.3-flash', defaultThinkingLevel: 'max' }));
+  assert.deepEqual(detectHostModelEffort('pi', { env: {}, homes: { pi: home2 } }), { model: 'opencode-go/glm-5.3-flash', effort: 'max', source: 'pi-settings' }, '已限定的规格原样透传');
+  const home3 = tmpdir();
+  write(path.join(home3, 'agent', 'settings.json'), JSON.stringify({ defaultModel: 'glm-5.3-flash' }));
+  assert.deepEqual(detectHostModelEffort('pi', { env: {}, homes: { pi: home3 } }), { model: 'glm-5.3-flash', effort: null, source: 'pi-settings' }, '没有 defaultProvider 时保持裸名');
 });
 
 // --------------------------------------------------------------- opencode --
