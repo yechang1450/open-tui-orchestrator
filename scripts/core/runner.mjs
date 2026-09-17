@@ -12,6 +12,31 @@ const WAIT_BACKOFF={base:Math.max(50,Number(process.env.ORCH_WAIT_BACKOFF_MS||60
 WAIT_BACKOFF.max=Math.max(WAIT_BACKOFF.base,Number(process.env.ORCH_WAIT_BACKOFF_MAX_MS||5000)||5000);
 export {scheduleReady,recoveryTasks};
 const pause=ms=>new Promise(r=>setTimeout(r,ms));
+// 单元停滞看门狗（2026-09-17 用户令：不要让调用方手动 Ctrl-D 退出僵死窗）：
+// agent 进程活着但不再产出（典型：账号额度耗尽后 TUI 停在错误横幅、或界面卡在等输入）时，
+// 旧行为是一直等到运行上限（默认 6h）——外部只能人工打断。现在：进度停超过 ORCH_UNIT_STALL_MS
+// 就判停滞 → 关窗/强制收口单元树 → 计入 attempts 预算自动重跑；预算耗尽则诚实以 stalled 收口。
+const UNIT_STALL_MS=Math.max(1000,Number(process.env.ORCH_UNIT_STALL_MS||600000)||600000);
+const UNIT_TIMEOUT_MS=Math.max(5000,Number(process.env.ORCH_UNIT_TIMEOUT_MS||2700000)||2700000);
+// 进度戳：任一证据文件（检查点/结果/启动器 out·pty 日志/宿主会话）mtime 前进即视为有进展。
+// 只读 mtime，不解析宿主格式——对全部宿主一视同仁，也不依赖模型侧配合。
+function progressStamp(paths){let t=0;for(const p of paths){try{t=Math.max(t,fs.statSync(p).mtimeMs);}catch{}}return t;}
+export async function waitWithStallWatchdog(hooks,la,session,active,timeoutMs){
+  const stallMs=Math.max(1000,Number(process.env.ORCH_UNIT_STALL_MS||UNIT_STALL_MS)||UNIT_STALL_MS);
+  const base=path.dirname(String(la.rf||la.pidf||'.'));
+  const stem=path.basename(String(la.lp||'')).replace(/\.ps1$/,'');
+  const paths=[active.file,la.rf,la.pidf,path.join(base,stem+'.out.log'),path.join(base,stem+'.pty.log')];
+  if(typeof session==='string')paths.push(session);else if(session&&typeof session==='object'&&session.file)paths.push(session.file);
+  const started=Date.now();let last=progressStamp(paths)||started;let iv=null;
+  const watchdog=new Promise(resolve=>{iv=setInterval(()=>{const now=Date.now(),s=progressStamp(paths);
+    if(s>last)last=s;
+    if(now-last>stallMs){clearInterval(iv);resolve({stall:'stalled: no unit progress for '+Math.round((now-last)/1000)+'s; retrying within the attempt budget'});}
+    else if(now-started>timeoutMs){clearInterval(iv);resolve({stall:'stalled: unit timeout after '+Math.round((now-started)/1000)+'s with no result'});}
+  },Math.min(5000,Math.max(250,Math.floor(stallMs/4))));});
+  try{
+    return await Promise.race([hooks.wait(session,timeoutMs,la.rf,'【本块唯一标识】'+active.token,la.pidf).then(result=>({result})),watchdog]);
+  } finally { if(iv)clearInterval(iv); }
+}
 // Identity acquisition under load: a full-process snapshot can be slow or miss a
 // just-spawned launcher, and one unlucky read used to burn the whole attempt
 // budget as popup-failed ('Launcher process identity mismatch'). Retry within a
@@ -202,7 +227,7 @@ export async function runWindows(request,hooks,options={}) {
           Object.assign(sum.taskResults,recovery.results);
           if(recovery.verified.length===tasks.length){e.status='verified';e.endedAt=Date.now();persist();return;}
           if(recovery.uncertain.length){e.status='needs-reconciliation';e.reason='Uncertain tasks: '+recovery.uncertain.join(', ');e.endedAt=Date.now();persist();return;}
-          if(attemptsThisController>=limit){mark(r,'failed','Safe recovery attempt budget exhausted');return;}
+          if(attemptsThisController>=limit){mark(r,'failed','Safe recovery attempt budget exhausted'+(e.reason?': '+e.reason:''));return;}
           if(attemptsThisController)await pause(Math.min(2000*attemptsThisController,Math.max(0,deadline-Date.now())));
           let reserved=false,waitAttempt=0;
           while(Date.now()<deadline) {
@@ -252,8 +277,10 @@ export async function runWindows(request,hooks,options={}) {
           if(identity||fs.existsSync(la.rf)) {
             e.status='running';persist();
             const session=await hooks.session('【本块唯一标识】'+active.token,Math.min(90000,Math.max(0,deadline-Date.now())),la.rf);
-            const result=session?await hooks.wait(session,Math.max(0,deadline-Date.now()),la.rf,'【本块唯一标识】'+active.token,la.pidf):{done:fs.existsSync(la.rf),exitCode:hooks.exitCode(la.rf)};
-            e.exitCode=result.exitCode??hooks.exitCode(la.rf);e.status=result.done?'awaiting-verification':'timeout';
+            const unitBudget=Math.max(0,Math.min(deadline,Date.now()+UNIT_TIMEOUT_MS)-Date.now());
+            const waited=session?await waitWithStallWatchdog(hooks,la,session,active,unitBudget):{result:{done:fs.existsSync(la.rf),exitCode:hooks.exitCode(la.rf)}};
+            if(waited.stall){e.status='failed';e.reason=waited.stall;}
+            else {const result=waited.result||{};e.exitCode=result.exitCode??hooks.exitCode(la.rf);e.status=result.done?'awaiting-verification':'timeout';}
           }
         }catch(error){e.status='failed';e.reason=error.message;}
         finally {

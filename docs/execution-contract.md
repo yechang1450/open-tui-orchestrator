@@ -29,6 +29,10 @@ Acceptance JSON maps T001, T002... to arrays of parent-defined checks. Supported
 
 file checks require a regular file and optionally sha256; json checks compare specified top-level values; absent checks confirm deletion. command checks run an explicit executable with an args array, shell disabled, from the initiating workspace; they check exitCode (default 0) and optional stdout. Checks may run repeatedly, so they must be read-only. The parent must choose checks that establish the intended result: file existence alone is insufficient for semantic correctness. Checkpoint tokens identify this execution; they are not a security boundary against an intentionally malicious agent.
 
+## Unit liveness
+
+A running unit is watched for progress, not just for an exit: checkpoints, the result file and the launcher logs all count as progress. A unit that stays alive without any progress for `ORCH_UNIT_STALL_MS` (default 600000 ms) is declared `stalled: no unit progress for Ns`, closed through the normal teardown path (descendants are killed so the launcher still reaches its own `exit 0` — never a forced kill of the launcher itself), and retried inside the block's attempt budget. `ORCH_UNIT_TIMEOUT_MS` (default 2700000 ms) caps a single unit's lifetime even when progress keeps trickling. Leftover Windows Terminal windows recorded by this run (`win-*.window.json` handles, still owned by Windows Terminal, host without live children) are swept before the runner starts, so killed runs and power cuts do not leave dead panes to close by hand.
+
 ## Interruption and recovery
 
 The launcher invokes the CLI once. It preserves failure evidence instead of blindly replaying a whole block. The controller independently rechecks every checkpoint and retries only remaining work, with a bounded attempt count (default two per block per controller) and backoff. Replacement windows use the same planned block and cannot exceed global concurrent capacity; verified tasks are omitted from their prompts.

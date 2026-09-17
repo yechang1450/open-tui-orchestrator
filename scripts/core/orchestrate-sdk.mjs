@@ -1856,6 +1856,50 @@ function pidAliveCheck(pid) {
   if (!Number.isFinite(p) || p <= 0) return false;
   try { process.kill(p, 0); return true; } catch (e) { return !!(e && e.code === "EPERM"); }
 }
+// 残窗收口（2026-09-17 用户令：不要让人手动关窗）：powercut / 外部杀进程之后，Windows Terminal 宿主
+// 仍可能留着**尸体窗口**（窗格进程已死 → 显示「[已退出进程，代码为 N]」，但窗口不自动关）。判据组合
+// 保证绝不误伤：① 句柄来自**本 run 自己**的 win-*.window.json 记录；② 该窗口的宿主进程当前**没有任何子进程**
+// （= 尸体窗）。两条同时满足才发 WM_CLOSE。
+export function leftoverWindowHandles(tmpDir) {
+  let names = [];
+  try { names = readdirSync(tmpDir).filter((n) => /^win-.*\.window\.json$/i.test(n)); } catch { return []; }
+  const handles = [];
+  for (const n of names) {
+    try {
+      const v = JSON.parse(readFileSync(path.join(tmpDir, n), "utf8"));
+      const h = String((v && v.hwnd) || "");
+      if (/^0x[0-9a-f]+$/i.test(h)) handles.push(h);
+    } catch { /* unreadable verdict: skip */ }
+  }
+  return [...new Set(handles)];
+}
+async function sweepLeftoverRunWindows() {
+  const handles = leftoverWindowHandles(TMP);
+  if (!handles.length) return 0;
+  const list = handles.map((h) => "'" + h.replace(/'/g, "''") + "'").join(",");
+  const script =
+    "$ErrorActionPreference='SilentlyContinue';" +
+    "Add-Type -TypeDefinition @'\n" +
+    "using System;using System.Runtime.InteropServices;\n" +
+    "public static class OrchSweepWin{\n" +
+    " [DllImport(\"user32.dll\")] public static extern bool IsWindow(IntPtr h);\n" +
+    " [DllImport(\"user32.dll\")] public static extern bool IsWindowVisible(IntPtr h);\n" +
+    " [DllImport(\"user32.dll\")] public static extern uint GetWindowThreadProcessId(IntPtr h,out uint pid);\n" +
+    " [DllImport(\"user32.dll\")] public static extern IntPtr SendMessage(IntPtr h,uint msg,IntPtr w,IntPtr l);\n" +
+    " public static int Owner(IntPtr h){if(!IsWindow(h)||!IsWindowVisible(h))return 0;uint pid=0;GetWindowThreadProcessId(h,out pid);if(pid==0)return 0;try{var p=System.Diagnostics.Process.GetProcessById((int)pid);if(p.HasExited)return 0;if(p.ProcessName.ToLowerInvariant()!=\"windowsterminal\")return 0;}catch{return 0;}return (int)pid;}\n" +
+    " public static int Close(IntPtr h){SendMessage(h,0x0010,IntPtr.Zero,IntPtr.Zero);return 1;}\n" +
+    "}\n" +
+    "'@;" +
+    // 安全判据：句柄来自本 run 的 spawn 记录；窗口属于 Windows Terminal；**该宿主当前无任何子进程**（尸体窗）才关。
+    "$children=@{};Get-CimInstance Win32_Process | ForEach-Object{ $children[[int]$_.ParentProcessId]=$true };" +
+    "$k=0;foreach($h in @(" + list + ")){ $hp=[IntPtr][Convert]::ToInt64($h,16); $owner=[OrchSweepWin]::Owner($hp); if($owner -and -not $children[[int]$owner]){ $k+=[OrchSweepWin]::Close($hp) } };$k";
+  try {
+    const r = spawnSync(PS_EXE, ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script], { encoding: "utf8", windowsHide: true, timeout: 30000 });
+    const n = Number(String(r.stdout || "").trim().split(/\r?\n/).pop()) || 0;
+    if (n) console.log("[run] closed " + n + " leftover window(s) from killed units");
+    return n;
+  } catch { return 0; }
+}
 async function closeWindowByPid(pid, expected) {
   const p = Number(pid);
   if (!Number.isFinite(p) || p <= 0) return false;
@@ -2528,6 +2572,9 @@ export async function main() {
       if(policy.mode==='inline')console.log('[orchestrator] force-execute: inline gate bypassed ('+policy.reason+'); spawning unit(s) anyway');
     }
     armEnforcement();
+    // 残窗收口：resume 前先收掉上次被杀留下的尸体窗（判据见 sweepLeftoverRunWindows），
+    // 免得用户对着一排「[已退出进程…]」的窗手动关。
+    await sweepLeftoverRunWindows();
     const result=await runWindows(request,{
       plan:decomposeSafely,compact:capPlanBlocks,infer:inferTargetKeys,launcher:writeInteractiveLauncher,prompt:buildBlockPrompt,
       spawn:(...args)=>(SPAWN_MODE==="headless"?spawnHeadlessWithRetry:spawnWindowWithRetry)(...args,true),readPid:readPidFile,
