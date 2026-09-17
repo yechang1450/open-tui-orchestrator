@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.9.12 — core 1.15.2
+
+### Fixed
+
+- **A live-but-silent unit no longer waits out the run deadline (and no manual Ctrl-D).** Measured 2026-09-17: with the codex account out of quota the TUI sat on its usage-limit banner for 22+ minutes while the engine kept waiting (default run deadline is 6 h), and the only way out was a manual interrupt. The runner now watches *progress* (checkpoint file, result file, launcher `out`/`pty` logs, host session file — mtimes only, no host-format parsing): no movement for `ORCH_UNIT_STALL_MS` (default 600000 ms) means `stalled: no unit progress for Ns`, the unit is closed through the normal teardown path (descendants killed so the launcher still reaches its own `exit 0`; the launcher itself is never force-killed, which would leave a `[process exited, code 1]` pane), and the block retries inside its attempt budget. `ORCH_UNIT_TIMEOUT_MS` (default 2700000 ms) caps one unit's lifetime; the exhausted-budget reason now carries the last attempt's failure text. Red-capable criterion: `test/unit-stall.test.mjs` (a fake launcher that sleeps for 600 s plus a never-resolving wait hook must end as `stalled`, be closed out and retried — before the change the run hangs).
+- **Leftover corpse windows are swept.** After a killed unit or a power cut, Windows Terminal keeps dead-pane windows ("[process exited …]") open. The engine now closes the windows it recorded for this run (`win-*.window.json` handles) when they are still owned by Windows Terminal and that host has no live children — never touching other windows. `leftoverWindowHandles()` is the pure, red-capable criterion (`test/leftover-windows.test.mjs`).
+
+
 ## 0.9.11 — core 1.15.1
 
 ### Fixed
