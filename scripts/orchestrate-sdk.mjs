@@ -2,6 +2,7 @@
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {verifyRelease} from './release-integrity.mjs';
+import {formatFailureLines} from './core/failure-report.mjs';
 import {enforceWindowsOnly} from './platform-guard.mjs';
 
 // 机器可调用契约：**作为主入口时，任何失败只回一行** `[orchestrator] FATAL: <原因>`
@@ -10,7 +11,8 @@ import {enforceWindowsOnly} from './platform-guard.mjs';
 // 只是不再把栈帧甩到调用者脸上。
 const IS_MAIN = !!process.argv[1] && path.resolve(process.argv[1]).toLowerCase() === fileURLToPath(import.meta.url).toLowerCase();
 function fatal(error) {
-  console.error('[orchestrator] FATAL: ' + (error && error.message ? error.message : String(error)));
+  // 首行仍是机器判据 `[orchestrator] FATAL: <原因>`；其后是给人看的 cause/tried/fix/docs。
+  for (const line of formatFailureLines(error)) console.error(line);
   if (process.env.ORCH_DEBUG === '1' && error && error.stack) console.error(error.stack);
 }
 // 引导入口（--install-deps）必须先于一切依赖存在：本包自己的 SDK 依赖（node-pty / codex-sdk）正是

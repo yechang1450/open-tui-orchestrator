@@ -1,6 +1,6 @@
 {
   "name": "open-tui-orchestrator",
-  "version": "0.9.12",
+  "version": "0.9.13",
   "private": false,
   "description": "Split a multi-part agent request into a verified TODO ledger, then run the parallel blocks in hidden or visible TUI windows of the agent CLI you already use (Windows).",
   "type": "module",

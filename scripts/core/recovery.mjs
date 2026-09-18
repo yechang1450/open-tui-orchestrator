@@ -62,7 +62,10 @@ export async function scheduleReady(recs,execute,status,onBlocked=()=>{}) {
   await Promise.all(recs.map(start));
 }
 
-export const taskPolicy=value=>Array.isArray(value)?{checks:value,retrySafe:false}:{checks:value?.checks||[],retrySafe:value?.retrySafe===true};
+// retrySafe 三态：true=总是可重跑；false=明确否决（连瞬时故障也不重跑）；未声明=仅对"瞬时故障特征"
+// 自动重跑（见 runner.mjs 的 TRANSIENT_RETRIES）。retryVeto 让"未声明"与"明确否决"可区分——
+// 旧实现两者都塌缩成 false，导致合法账本在偶发故障时只能停在 needs-reconciliation。
+export const taskPolicy=value=>Array.isArray(value)?{checks:value,retrySafe:false,retryVeto:false}:{checks:value?.checks||[],retrySafe:value?.retrySafe===true,retryVeto:value?.retrySafe===false};
 export function recoveryTasks(tasks,checkpoints,checks,workspace) {
   const result={verified:[],pending:[],uncertain:[],results:{}};
   for(const task of tasks) {

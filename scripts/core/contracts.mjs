@@ -2,8 +2,9 @@ import path from 'node:path';
 import fs from 'node:fs';
 import crypto from 'node:crypto';
 import {spawnSync} from 'node:child_process';
+import os from 'node:os';
 
-export const CORE_VERSION = '1.15.2';
+export const CORE_VERSION = '1.16.0';
 export const SUCCESS = new Set(['verified']);
 export const TERMINAL = new Set(['verified','failed','blocked','cancelled','awaiting-verification','preflight-failed','popup-failed','timeout','needs-reconciliation']);
 
@@ -12,6 +13,9 @@ export const TERMINAL = new Set(['verified','failed','blocked','cancelled','awai
 // 它把别人已经占住的内存也算作自己的余量。为可测试而独立成函数。
 // fresh 规划与 --resume-run 的恢复校验共用同一容量（contracts 放置以避免 recovery↔sdk 循环依赖）。
 // 注意：恢复校验里的"块数上界"用**总内存**推，保持可复算稳定（见 recovery.mjs）。
+// 开机标识（2026-09-18 断电恢复 P0）：用 uptime 反推开机时刻，秒级取整——同一次开机的所有进程算出
+// 同一个值，跨重启必变。PID 跨重启会重用，时间戳会被改，只有它能确定性判定“这条记录来自上一次开机”。
+export function bootId() { return Math.floor((Date.now() - os.uptime() * 1000) / 1000); }
 export function computeMaxWindows(availableMemoryMb) {
   const mb = Number(availableMemoryMb);
   if (!Number.isFinite(mb) || mb <= 0) return 1;

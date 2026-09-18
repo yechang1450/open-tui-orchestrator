@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import {fileURLToPath} from 'node:url';
-import {CORE_VERSION,ledgerPlan,levelWaves,verifyChecks,summaryComplete,TERMINAL,canonicalKey,requestTasks,acceptanceKeyDiff} from './contracts.mjs';
+import {CORE_VERSION,ledgerPlan,levelWaves,verifyChecks,summaryComplete,TERMINAL,canonicalKey,requestTasks,acceptanceKeyDiff,bootId} from './contracts.mjs';
 import {coordinatorDir,reserve,bind,release,prepare,atomicJson,launcherIdentity,processSnapshot,sameProcess,claimRun,releaseRun,waitBackoffMs} from './leases.mjs';
 import {scheduleReady,recoveryTasks,taskPolicy,validateRecoverySummary} from './recovery.mjs';
 import {readCheckpoints} from './checkpoint.mjs';
@@ -18,6 +18,13 @@ const pause=ms=>new Promise(r=>setTimeout(r,ms));
 // 就判停滞 → 关窗/强制收口单元树 → 计入 attempts 预算自动重跑；预算耗尽则诚实以 stalled 收口。
 const UNIT_STALL_MS=Math.max(1000,Number(process.env.ORCH_UNIT_STALL_MS||600000)||600000);
 const UNIT_TIMEOUT_MS=Math.max(5000,Number(process.env.ORCH_UNIT_TIMEOUT_MS||2700000)||2700000);
+// 偶发瞬时故障（2026-09-18 用户令）：单元“启动即死、无终态检查点”这类瞬时故障必须自动检测 + 自动
+// 重跑，绝不把瞬时故障当结论甩给调用方。判据 = ①该块待定任务的检查点全部停在 started（无终态）
+// ②最近一次尝试的存活时长 ≤ 窗口（真跑过很久的失败不算瞬时）③验收未被 retrySafe:false 明确否决。
+// retrySafe:true 仍是“总是可重跑”的强声明；未声明 = 仅瞬时特征自动重跑（默认 1 次，可 env 调）。
+const TRANSIENT_RETRIES=(()=>{const v=Number(process.env.ORCH_TRANSIENT_RETRIES);return Number.isFinite(v)&&v>=0?Math.floor(v):1;})();
+const TRANSIENT_WINDOW_MS=Math.max(1000,Number(process.env.ORCH_TRANSIENT_WINDOW_MS||180000)||180000);
+const TRANSIENT_BACKOFF_MS=Math.max(0,Number(process.env.ORCH_TRANSIENT_BACKOFF_MS||2500)||2500);
 // 进度戳：任一证据文件（检查点/结果/启动器 out·pty 日志/宿主会话）mtime 前进即视为有进展。
 // 只读 mtime，不解析宿主格式——对全部宿主一视同仁，也不依赖模型侧配合。
 function progressStamp(paths){let t=0;for(const p of paths){try{t=Math.max(t,fs.statSync(p).mtimeMs);}catch{}}return t;}
@@ -139,7 +146,8 @@ export async function runWindows(request,hooks,options={}) {
   const workspace=path.resolve(options.workspace),capacity=options.capacity;
   // options.windowCap (ORCH_MAX_WINDOWS) throttles live-window admission only;
   // planning keeps the full memory-derived capacity so block shape is unchanged.
-  const windowCap=Math.max(1,Math.min(capacity,Number(options.windowCap)||capacity));
+  // let（非 const）：resume 时若当前可用内存低于建账块数，只收紧准入，不失败。
+  let windowCap=Math.max(1,Math.min(capacity,Number(options.windowCap)||capacity));
   const runId=options.runId||crypto.randomUUID(),dir=runDirectory(workspace,runId),summaryFile=path.join(dir,'summary.json');
   const deadline=Date.now()+(options.timeoutMs||21600000),coordinator=options.coordinator||coordinatorDir(workspace);
   const runKey='run:'+dir.toLowerCase(),claim=await coordinate(()=>claimRun(coordinator,runKey),deadline);
@@ -157,7 +165,11 @@ export async function runWindows(request,hooks,options={}) {
       {const savedUnit=sum.unitProfile||null,givenUnit=options.unitProfile||null;
        if(savedUnit&&!givenUnit)throw new Error('This run used a caller-supplied unit command; re-supply the identical --unit-cmd/--unit-cmd-file to resume');
        if(savedUnit&&givenUnit&&JSON.stringify(savedUnit)!==JSON.stringify(givenUnit))throw new Error('Resume unit command differs from the saved run; refusing to resume');}
-      if(sum.blocks.length>capacity)throw new Error('Current memory capacity is below the saved block count');
+      // 容量按“剩余可用内存”浮动 ⇒ 恢复时机器更忙是常态（2026-09-18 实测：建账容量 4、恢复时
+      // 可用内存掉到 <4，旧行为直接 FATAL，把合法账本拒之门外）。计划与块数不动（篡改上界已由
+      // validateRecoverySummary 用总内存把住），只把“同时在飞的窗”收紧到当前容量，其余块照常排队
+      // 等（reserve/backoff 的波次机制本就是这个用途）。绝不因“忙”把错误甩给调用方。
+      if(sum.blocks.length>capacity){windowCap=Math.max(1,capacity);console.log(`[orchestrator] resume admission clamped to ${windowCap} (free-memory capacity ${capacity}, saved blocks ${sum.blocks.length}); remaining blocks queue in waves`);}
       checks=loadChecks(options.acceptanceFile||path.join(dir,'acceptance.json'));
       if(sum.acceptanceSha256&&checksHash(checks)!==sum.acceptanceSha256)throw new Error('Acceptance contract changed since run creation; refusing to resume');
       sum.history.push({generation:sum.generation,finishedAt:sum.finishedAt,success:sum.success});
@@ -174,7 +186,7 @@ export async function runWindows(request,hooks,options={}) {
       const {plan,tasks}=ledgerPlan(request,candidate,capacity,hooks.compact);
       const recs=plan.map((b,i)=>({key:`B${i+1}`,title:b.title,b,dependsOn:b.dependsOn||[],keys:[...new Set([...(b.conflictKeys||[]),...b.tasks.flatMap(t=>hooks.infer(t.prompt||''))].map(k=>canonicalKey(k,workspace)))]}));
       levelWaves(recs);
-      sum={protocol:2,version:CORE_VERSION,agent:options.agent||'codex',runId,workspace,request,capacity,coordinator,generation:1,history:[],startedAt:Date.now(),tasks,plan:recs,spawnMode:options.spawnMode||'window',
+      sum={protocol:2,version:CORE_VERSION,agent:options.agent||'codex',runId,workspace,request,capacity,coordinator,generation:1,history:[],startedAt:Date.now(),bootId:bootId(),tasks,plan:recs,spawnMode:options.spawnMode||'window',
         model:options.modelPlan?.model??null,effort:options.modelPlan?.effort??null,modelSource:options.modelPlan?.modelSource??null,effortSource:options.modelPlan?.effortSource??null,
         blocks:recs.map(r=>({key:r.key,title:r.title,taskIds:r.b.tasks.flatMap(t=>t.sourceIds)})),results:{},taskResults:{}};
       for(const r of recs){sum.results[r.key]={status:'pending',attempts:[]};for(const id of sum.blocks.find(b=>b.key===r.key).taskIds)sum.taskResults[id]={status:'pending'};}
@@ -207,7 +219,7 @@ export async function runWindows(request,hooks,options={}) {
     async function execute(r) {
       const b=sum.blocks.find(b=>b.key===r.key),tasks=b.taskIds.map(id=>sum.tasks.find(t=>t.id===id));
       const leaseId=crypto.createHash('sha256').update(runKey).digest('hex').slice(0,16)+'-'+r.key;
-      let attemptsThisController=0,spawnConfirmed=false;
+      let attemptsThisController=0,spawnConfirmed=false,transientRetries=0,transientGrant=false;
       const limit=Math.max(1,Math.min(3,Number(options.maxAttempts||2)));
       while(Date.now()<deadline) {
         let e=sum.results[r.key],la=e.launcherFiles,identity;spawnConfirmed=false;
@@ -226,8 +238,33 @@ export async function runWindows(request,hooks,options={}) {
           const recovery=recoveryTasks(tasks,cps,checks,workspace);
           Object.assign(sum.taskResults,recovery.results);
           if(recovery.verified.length===tasks.length){e.status='verified';e.endedAt=Date.now();persist();return;}
-          if(recovery.uncertain.length){e.status='needs-reconciliation';e.reason='Uncertain tasks: '+recovery.uncertain.join(', ');e.endedAt=Date.now();persist();return;}
-          if(attemptsThisController>=limit){mark(r,'failed','Safe recovery attempt budget exhausted'+(e.reason?': '+e.reason:''));return;}
+          if(recovery.uncertain.length){
+            // 瞬时故障自动处理：单元“启动即死”（无终态检查点）且最近尝试存活时长短 ⇒ 自动重跑一轮，
+            // 而不是把"不确定"直接当结论。retrySafe:false 可否决（连瞬时也不重跑）；未声明=允许瞬时重跑。
+            const runtimeMs=Math.max(0,(e.endedAt||Date.now())-(e.startedAt||Date.now()));
+            const envRetries=Number(process.env.ORCH_TRANSIENT_RETRIES);
+            const transientMax=Number.isFinite(envRetries)&&envRetries>=0?Math.floor(envRetries):TRANSIENT_RETRIES;
+            const transientWindowMs=Math.max(1000,Number(process.env.ORCH_TRANSIENT_WINDOW_MS||TRANSIENT_WINDOW_MS)||TRANSIENT_WINDOW_MS);
+            const transientBackoffMs=Math.max(0,Number(process.env.ORCH_TRANSIENT_BACKOFF_MS||TRANSIENT_BACKOFF_MS)||TRANSIENT_BACKOFF_MS);
+            const transient=transientRetries<transientMax&&runtimeMs<=transientWindowMs&&recovery.uncertain.every(id=>{
+              const cp=cps[id];
+              return cp&&cp.state==='started'&&!taskPolicy(checks[id]).retryVeto;
+            });
+            if(transient){
+              transientRetries++;transientGrant=true;
+              e.transientRetries=(e.transientRetries||0)+1;
+              e.transientReason=`unit exited after ${Math.round(runtimeMs/1000)}s with no terminal checkpoint`;
+              console.log(`[recovery] ${r.key}: transient unit failure (${e.transientReason}) -> auto-retry ${transientRetries}/${transientMax}`);
+              for(const id of recovery.uncertain){recovery.pending.push(id);delete recovery.results[id];}
+              recovery.uncertain=[];
+              persist();
+              await pause(Math.min(transientBackoffMs+Math.floor(Math.random()*transientBackoffMs),Math.max(0,deadline-Date.now())));
+            }else{
+              e.status='needs-reconciliation';e.reason='Uncertain tasks: '+recovery.uncertain.join(', ')+' — hint: declare {"checks":[...],"retrySafe":true} for idempotent tasks so the engine auto-retries instead of reporting';e.endedAt=Date.now();persist();return;
+            }
+          }
+          if(attemptsThisController>=limit&&!transientGrant){mark(r,'failed','Safe recovery attempt budget exhausted'+(e.reason?': '+e.reason:''));return;}
+          transientGrant=false;
           if(attemptsThisController)await pause(Math.min(2000*attemptsThisController,Math.max(0,deadline-Date.now())));
           let reserved=false,waitAttempt=0;
           while(Date.now()<deadline) {

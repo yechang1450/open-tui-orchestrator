@@ -1,4 +1,7 @@
-import { test } from 'node:test';
+// 2026-09-18：网络策略按 auto 门控（用户配了自家 provider 就不注入）。本文件判据锁定 OpenAI 默认路径，
+// 免得被这台机器自己的 config.toml（deepseek）染色——否则期望值里的 networkArgs() 会与实跑 argv 不符。
+process.env.ORCH_CODEX_NETWORK_POLICY = 'on';
+import {test} from 'node:test';
 import { networkArgs } from '../scripts/network-policy.mjs';
 import assert from 'node:assert/strict';
 import { detectHostAgent, detectHostFromChain, resolveHost, launchArgs } from '../scripts/host-cli.mjs';

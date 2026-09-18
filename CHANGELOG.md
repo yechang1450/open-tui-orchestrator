@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.9.13 — core 1.16.0
+
+### Added
+
+- **Transient unit failures are absorbed, not reported (auto-detect + auto-retry).** Measured 2026-09-18: in a window-mode resume two units exited with code 1 seconds after launch (a transient shared hiccup — the identical command succeeded moments later), and because a unit that wrote a `started` checkpoint but no terminal one was classified `uncertain`, one block surfaced `needs-reconciliation` to the caller while its sibling recovered on the next attempt. The runner now treats "quick death with a started-only checkpoint" as a transient signature and auto-retries the block once — `ORCH_TRANSIENT_RETRIES` (default 1), `ORCH_TRANSIENT_WINDOW_MS` (default 180000 ms), `ORCH_TRANSIENT_BACKOFF_MS` (default 2500 ms). `"retrySafe": false` vetoes the automatic retry (the escape hatch for non-idempotent work); `"retrySafe": true` keeps its "always safe to re-run" meaning. A failure that ran past the window is never masked. Red-capable criterion: `test/transient-retry.test.mjs` (before the change the run ends `success=false` with `Uncertain tasks`).
+- **Power-cut posture: a deterministic bootId, durable state and a boot-time recovery scan.** A real power cut kills everything at once, so the response is boot-time convergence: (1) `atomicJson` now writes `tmp -> fsync -> rename`, and readers treat a missing/unreadable ledger as *unknown*, never "finished"; (2) every run and lease record carries `bootId` (boot time from `os.uptime()`, seconds) and a lease/run-owner from a previous boot is reclaimed even when its PID matches a live process (PIDs are reused across reboots); (3) `scripts/core/reboot-recovery.mjs` + `scripts/recover-stale.mjs` list interrupted runs and (opt-in `--resume`) converge them through the one `--resume-run` path, which is itself interruptible and converging. Red-capable criterion: `test/reboot-recovery.test.mjs`.
+
+### Fixed
+
+- **The Codex network policy no longer clobbers a user-declared provider.** The OpenAI HTTPS policy (`model_provider=orchestrator-openai-https`, ChatGPT auth + no WebSocket probe) used to be injected unconditionally into every Codex launch and into the SDK classify path, overriding a provider configured in the user's `config.toml`. Measured 2026-09-18 while moving Codex onto a DeepSeek provider: the injected provider produced `API key login is required, but ChatGPT is currently being used`. `codexNetworkArgs()` / `codexNetworkConfig()` now gate on the effective provider — `auto` (default) injects only while it is the default OpenAI one, `ORCH_CODEX_NETWORK_POLICY=on|off` forces either way. Red-capable criteria: `test/network-policy.test.mjs` (custom provider ⇒ no injection) and `test/host-cli.test.mjs` (argv identity pinned to the OpenAI path).
+- **Resume no longer fails because the machine got busier.** `runWindows` threw `Current memory capacity is below the saved block count` when free memory at resume time dropped below the block count captured at run creation (measured 2026-09-18: created with capacity 4, resume computed 2 → the whole resume was refused, `pi` window power-cut leg). Admission is now clamped to the current capacity and remaining blocks queue in waves; the ledger's block-count upper bound is still validated against total memory, so tampering is still caught.
+
 ## 0.9.12 — core 1.15.2
 
 ### Fixed
