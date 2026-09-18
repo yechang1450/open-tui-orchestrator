@@ -389,7 +389,22 @@ export async function runWindows(request,hooks,options={}) {
             peakSampled=startUnitSampler(la, r.key, active.token, Number(identity?.ProcessId||hooks.readPid(la.pidf)))||peakSampled;
             const session=await hooks.session('【本块唯一标识】'+active.token,Math.min(90000,Math.max(0,deadline-Date.now())),la.rf);
             const unitBudget=Math.max(0,Math.min(deadline,Date.now()+UNIT_TIMEOUT_MS)-Date.now());
-            const waited=session?await waitWithStallWatchdog(hooks,la,session,active,unitBudget):{result:{done:fs.existsSync(la.rf),exitCode:hooks.exitCode(la.rf)}};
+            let waited;
+            if (session) waited=await waitWithStallWatchdog(hooks,la,session,active,unitBudget);
+            else {
+              // 2026-09-18：TUI 窗不会自己退（如 hermes chat --tui）⇒ 以「盘上验收已满足」作为合法 done
+              //（"看验收就收窗"）：每 10s 检查本块任务是否已被盘上证据全数验证；是 ⇒ 收口并关窗（finally 里统一关）。
+              const endAt=Date.now()+unitBudget;
+              let done=false,exitCode=null;
+              while(Date.now()<endAt){
+                if(fs.existsSync(la.rf)){done=true;exitCode=hooks.exitCode(la.rf);break;}
+                const cps=blockCheckpoints(e,b,sum);
+                const rec=recoveryTasks(tasks,cps,checks,workspace);
+                if(rec.verified.length===tasks.length){done=true;exitCode=0;break;}
+                await pause(10000);
+              }
+              waited={result:{done,exitCode}};
+            }
             if(waited.stall){e.status='failed';e.reason=waited.stall;}
             else {const result=waited.result||{};e.exitCode=result.exitCode??hooks.exitCode(la.rf);e.status=result.done?'awaiting-verification':'timeout';}
           }

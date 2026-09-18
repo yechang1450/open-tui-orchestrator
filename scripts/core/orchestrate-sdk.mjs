@@ -2643,7 +2643,7 @@ export async function main() {
     const result=await runWindows(request,{
       plan:decomposeSafely,compact:capPlanBlocks,infer:inferTargetKeys,launcher:writeInteractiveLauncher,prompt:buildBlockPrompt,
       spawn:(...args)=>(SPAWN_MODE==="headless"?spawnHeadlessWithRetry:spawnWindowWithRetry)(...args,true),readPid:readPidFile,
-      session:AGENT.agent!=='codex'?async(_token,_timeout,rf)=>rf:waitForSessionFile,
+      session:(AGENT.config.profile&&SPAWN_MODE==='window')?null:(AGENT.agent!=='codex'?async(_token,_timeout,rf)=>rf:waitForSessionFile),
       wait:AGENT.agent!=='codex'?(async(_session,timeout,rf,_token,pidf)=>waitAdapterResult(rf,timeout,pidf)):waitTaskComplete,exitCode:readExitCode,
       register:r=>updateWindows(ws=>[...ws,r]),commit:commitReservation,unregister:cancelReservation,close:closeWindowByPid,
       guardian:g=>ensureRunGuardian({...g,agent:AGENT.agent,env:process.env}),
