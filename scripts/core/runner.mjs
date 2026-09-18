@@ -28,19 +28,33 @@ function unitPeakFile(la, key, token) {
 }
 function startUnitSampler(la, key, token, rootPid) {
   try {
-    if (!la || !Number.isInteger(rootPid) || rootPid <= 0) return false;
+    if (!la || !Number.isInteger(rootPid) || rootPid <= 0) {
+      console.error('[mem] sampler skipped (rootPid=' + String(rootPid) + ', la=' + (la ? 'yes' : 'no') + ')');
+      return false;
+    }
     const sampler = path.join(path.dirname(fileURLToPath(import.meta.url)), 'unit-memory-sampler.ps1');
-    const child = spawn(powershellExe(), ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', sampler, '-RootPid', String(rootPid), '-OutFile', unitPeakFile(la, key, token), '-IntervalMs', '6000'], {detached: true, windowsHide: true, stdio: 'ignore'});
+    // 2026-09-18 实测定论：detached:true 会让 PS 子进程在 Windows 上静默死掉（一行不执行、不报错、不退出）
+    // —— 去 detached，做普通子进程（引擎寿命 ≥ 单元寿命，采样器随单元结束自然收尾）。
+    const child = spawn(powershellExe(), ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', sampler, '-RootPid', String(rootPid), '-OutFile', unitPeakFile(la, key, token), '-IntervalMs', '6000'], {windowsHide: true, stdio: ['ignore', 'ignore', 'pipe']});
+    // 采样器的 stderr 落盘（2026-09-18：静默失败排查用；引擎先退出也尽量写）。
+    try {
+      const errLog = unitPeakFile(la, key, token) + '.stderr.txt';
+      child.stderr.on('data', (buf) => { try { fs.appendFileSync(errLog, buf); } catch {} });
+    } catch {}
     child.unref();
+    console.log('[mem] sampler started pid=' + String(child.pid) + ' root=' + rootPid + ' out=' + unitPeakFile(la, key, token));
     return true;
-  } catch { return false; }
+  } catch (error) {
+    console.error('[mem] sampler failed to start: ' + String(error && error.message));
+    return false;
+  }
 }
 async function recordUnitPeakIfReady(la, key, token, agent, waitForSample) {
   try {
     if (!la) return;
     const file = unitPeakFile(la, key, token);
     for (let i = 0; waitForSample && i < 10 && !fs.existsSync(file); i += 1) await pause(1000);
-    if (!fs.existsSync(file)) return;
+    if (!fs.existsSync(file)) { if (waitForSample) console.error('[mem] no peak sample for ' + key + ' (sampler did not finish; markers: ' + file + '.start / .error)'); return; }
     const peak = Number(JSON.parse(fs.readFileSync(file, 'utf8'))?.peakMB);
     fs.rmSync(file, {force: true});                        // 读过即销：天然去重，旧样本不会重复入账
     if (!Number.isFinite(peak) || peak <= 0) return;
