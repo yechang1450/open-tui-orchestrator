@@ -183,7 +183,9 @@ export function launchArgs(config, options = {}) {
   }
   if(config?.profile){
     if(options.sandbox&&options.sandbox!=='danger-full-access')throw new Error('PROFILE_SANDBOX_UNSUPPORTED: '+config.id+' does not implement the requested sandbox');
-    return profileArgs(config,{model:process.env.ORCH_MODEL,effort:process.env.ORCH_EFFORT});
+    // 2026-09-18：窗口模式下走画像的 window 入口（如 hermes: chat --tui --yolo --no-restore-cwd -q）；
+    // 其余模式（默认 headless）行为逐字不变。
+    return profileArgs(config,{model:process.env.ORCH_MODEL,effort:process.env.ORCH_EFFORT,mode:String(options?.mode||process.env.ORCH_SPAWN_MODE||'').toLowerCase()});
   }
   if (!adapters[config?.id]) throw new Error('ADAPTER_UNSUPPORTED: refusing Codex argv for another agent.');
   const cwd = options.cwd || process.cwd();
