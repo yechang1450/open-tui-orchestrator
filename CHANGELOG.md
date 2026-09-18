@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.9.18 — core 1.16.5
+
+### Fixed
+
+- **The per-unit memory sampler now actually runs (and the learning loop is live).** Two Windows-specific killers, both found by exact reproduction: (1) spawning the sampler PowerShell with `detached: true` made it die silently before executing a single line (no write, no error, no exit) — the spawn is now a plain child; (2) the tree walk used an unfiltered `Get-CimInstance Win32_Process` snapshot, which stalls under load, and crashed on a null pid in the tree — it now walks children with per-parent filtered queries plus null guards. The sampler also writes a `.start` marker and an `.error` file (and the runner tees its stderr), so a silent failure can never happen again unnoticed. Verified end-to-end: a real orchestration recorded six 68MB peaks for its agent into `unit-memory.json`, so estimates now come from measurements (p90 × safety) instead of the conservative default. The 0.9.17 mechanism itself is unchanged and was already verified; safety behaviour (falling back to the default when no samples exist) stays.
+
 ## 0.9.17 — core 1.16.4
 
 ### Changed
