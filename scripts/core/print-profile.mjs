@@ -36,17 +36,22 @@ export function listProfiles(env = process.env) {
   } catch { return []; }
 }
 
-export function profileArgs(config, {model, effort} = {}) {
+export function profileArgs(config, {model, effort, mode} = {}) {
   const p = config?.profile || {};
   const a = p.args || {};
   const flagValue = (flag, value) => (Array.isArray(flag) && flag.length && value && String(value).trim() && !/\s/.test(String(value)) ? [...flag, String(value).trim()] : []);
+  // window 模式（2026-09-18）：画像可选提供 windowPrefix（子命令+TUI 旗标，置于最前）与 windowPrompt
+  // （末位提示词旗标；提示词仍由调用方追加为最后一个 argv）。未提供 ⇒ 行为与从前完全一致。
+  const windowMode = String(mode || '') === 'window';
+  const useWindow = windowMode && Array.isArray(a.windowPrefix) && a.windowPrefix.length && Array.isArray(a.windowPrompt) && a.windowPrompt.length;
   return [
+    ...(useWindow ? a.windowPrefix : []),
     ...(config.prefixArgs || []),
     ...(a.approve || []),
     ...(a.extra || []),
     ...flagValue(a.model, model),
     ...flagValue(a.effort, effort),
-    ...(a.prompt || ['-p']),
+    ...(useWindow ? a.windowPrompt : (a.prompt || ['-p'])),
   ];
 }
 
