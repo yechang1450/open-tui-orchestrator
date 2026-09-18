@@ -3,11 +3,13 @@ import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import {fileURLToPath} from 'node:url';
-import {CORE_VERSION,ledgerPlan,levelWaves,verifyChecks,summaryComplete,TERMINAL,canonicalKey,requestTasks,acceptanceKeyDiff,bootId} from './contracts.mjs';
+import {CORE_VERSION,ledgerPlan,levelWaves,verifyChecks,summaryComplete,TERMINAL,canonicalKey,requestTasks,acceptanceKeyDiff,bootId,powershellExe} from './contracts.mjs';
 import {coordinatorDir,reserve,bind,release,prepare,atomicJson,launcherIdentity,processSnapshot,sameProcess,claimRun,releaseRun,waitBackoffMs} from './leases.mjs';
 import {scheduleReady,recoveryTasks,taskPolicy,validateRecoverySummary} from './recovery.mjs';
 import {readCheckpoints} from './checkpoint.mjs';
 import {boardSignature,boardJson,boardSummaryLine} from './run-board.mjs';
+import {memConfig, loadUnitMemory, saveUnitMemory, recordUnitPeak, unitMemoryStorePath} from './unit-memory.mjs';
+import {spawn} from 'node:child_process';
 // 队列退避参数（env 可调，测试提速用）：首等 base、指数 ×1.7、封顶 max（抖动上界 ×1.2）。
 const WAIT_BACKOFF={base:Math.max(50,Number(process.env.ORCH_WAIT_BACKOFF_MS||600)||600),max:0};
 WAIT_BACKOFF.max=Math.max(WAIT_BACKOFF.base,Number(process.env.ORCH_WAIT_BACKOFF_MAX_MS||5000)||5000);
@@ -19,6 +21,36 @@ const pause=ms=>new Promise(r=>setTimeout(r,ms));
 // 就判停滞 → 关窗/强制收口单元树 → 计入 attempts 预算自动重跑；预算耗尽则诚实以 stalled 收口。
 const UNIT_STALL_MS=Math.max(1000,Number(process.env.ORCH_UNIT_STALL_MS||600000)||600000);
 const UNIT_TIMEOUT_MS=Math.max(5000,Number(process.env.ORCH_UNIT_TIMEOUT_MS||2700000)||2700000);
+
+// —— 0.9.17 通用内存采样接线（宿主无关）：只拿单元根 pid；采样/回写任何失败都不影响编排（fail-open）。
+function unitPeakFile(la, key, token) {
+  return la ? path.join(path.dirname(String(la.pidf)), 'unit-peak-' + key + '-' + String(token || 'x').slice(-8) + '.json') : '';
+}
+function startUnitSampler(la, key, token, rootPid) {
+  try {
+    if (!la || !Number.isInteger(rootPid) || rootPid <= 0) return false;
+    const sampler = path.join(path.dirname(fileURLToPath(import.meta.url)), 'unit-memory-sampler.ps1');
+    const child = spawn(powershellExe(), ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', sampler, '-RootPid', String(rootPid), '-OutFile', unitPeakFile(la, key, token), '-IntervalMs', '6000'], {detached: true, windowsHide: true, stdio: 'ignore'});
+    child.unref();
+    return true;
+  } catch { return false; }
+}
+async function recordUnitPeakIfReady(la, key, token, agent, waitForSample) {
+  try {
+    if (!la) return;
+    const file = unitPeakFile(la, key, token);
+    for (let i = 0; waitForSample && i < 10 && !fs.existsSync(file); i += 1) await pause(1000);
+    if (!fs.existsSync(file)) return;
+    const peak = Number(JSON.parse(fs.readFileSync(file, 'utf8'))?.peakMB);
+    fs.rmSync(file, {force: true});                        // 读过即销：天然去重，旧样本不会重复入账
+    if (!Number.isFinite(peak) || peak <= 0) return;
+    const storeFile = unitMemoryStorePath(process.env);
+    const store = loadUnitMemory(storeFile);
+    recordUnitPeak(store, agent, peak);
+    saveUnitMemory(storeFile, store);
+    console.log('[mem] unit ' + key + ' peak=' + peak + 'MB (agent=' + String(agent || 'unknown') + ')');
+  } catch {}
+}
 // 偶发瞬时故障（2026-09-18 用户令）：单元“启动即死、无终态检查点”这类瞬时故障必须自动检测 + 自动
 // 重跑，绝不把瞬时故障当结论甩给调用方。判据 = ①该块待定任务的检查点全部停在 started（无终态）
 // ②最近一次尝试的存活时长 ≤ 窗口（真跑过很久的失败不算瞬时）③验收未被 retrySafe:false 明确否决。
@@ -231,7 +263,7 @@ export async function runWindows(request,hooks,options={}) {
     async function execute(r) {
       const b=sum.blocks.find(b=>b.key===r.key),tasks=b.taskIds.map(id=>sum.tasks.find(t=>t.id===id));
       const leaseId=crypto.createHash('sha256').update(runKey).digest('hex').slice(0,16)+'-'+r.key;
-      let attemptsThisController=0,spawnConfirmed=false,transientRetries=0,transientGrant=false,unproductiveRetries=0;
+      let attemptsThisController=0,spawnConfirmed=false,transientRetries=0,transientGrant=false,unproductiveRetries=0,peakSampled=false;
       const limit=Math.max(1,Math.min(3,Number(options.maxAttempts||2)));
       while(Date.now()<deadline) {
         let e=sum.results[r.key],la=e.launcherFiles,identity;spawnConfirmed=false;
@@ -339,6 +371,8 @@ export async function runWindows(request,hooks,options={}) {
         try {
           if(identity||fs.existsSync(la.rf)) {
             e.status='running';persist();
+            // 0.9.17：单元起来了 ⇒ 挂通用采样器（拿根 pid 收进程树峰值；成败都不影响编排）。
+            peakSampled=startUnitSampler(la, r.key, active.token, Number(identity?.ProcessId||hooks.readPid(la.pidf)))||peakSampled;
             const session=await hooks.session('【本块唯一标识】'+active.token,Math.min(90000,Math.max(0,deadline-Date.now())),la.rf);
             const unitBudget=Math.max(0,Math.min(deadline,Date.now()+UNIT_TIMEOUT_MS)-Date.now());
             const waited=session?await waitWithStallWatchdog(hooks,la,session,active,unitBudget):{result:{done:fs.existsSync(la.rf),exitCode:hooks.exitCode(la.rf)}};
@@ -351,6 +385,7 @@ export async function runWindows(request,hooks,options={}) {
           if(identity)await hooks.close(identity.ProcessId,identity);
           if(identity&&!(await waitForProcessExit(identity))){e.status='failed';e.reason='Launcher still alive; lease retained';persist();return;}
           await coordinate(()=>release(coordinator,e.leaseId||leaseId),Date.now()+30000);
+          await recordUnitPeakIfReady(la, r.key, active.token, options.agent, peakSampled);
           hooks.unregister(e.leaseId||leaseId);if(la)hooks.cleanup(la);
           e.endedAt=Date.now();active.endedAt=e.endedAt;active.exitCode=e.exitCode;
           collectVerification(sum,checks,workspace);persist();

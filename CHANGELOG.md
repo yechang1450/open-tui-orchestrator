@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.9.17 — core 1.16.4
+
+### Changed
+
+- **Concurrency is now memory-fit, not a formula (bottom-layer mechanism; zero per-agent special cases).** The old ceiling — `floor(freeMB / 1000) × 2` — assumed every unit costs the same, which is false across hosts (measured spread ≈3–4×), so it under-used memory for light hosts and over-admitted for heavy ones (and could merge blocks the machine could easily have run in parallel). New flow: once the TODO list is split (dependencies/conflicts honoured), the engine estimates each unit's footprint from a generic per-host learning table (p90 of measured peaks × `ORCH_UNIT_MEM_SAFETY=1.3`; below `ORCH_UNIT_MEM_MIN_SAMPLES=3` samples it falls back to the generic default `ORCH_UNIT_MEM_DEFAULT_MB=640`), then merges the most mergeable pair — dependency pair → conflict pair → largest pair — until the all-parallel estimate clears the floor `ORCH_MIN_FREE_MEM_MB=256`, or only one block is left. A block costs `1 + ORCH_UNIT_MEM_BLOCK_GROWTH × (tasks−1)` (default 0.15, clamped below 1 so every merge strictly lowers the estimate — the convergence guarantee). When even a single unit cannot clear the floor the run proceeds anyway with a loud `[mem-fit] WARNING` (work is never blocked by memory).
+- **A single fitted block means no parallelism ⇒ no spawn.** The request is handed back inline (`reason: single-block`) per the tool's boundary: orchestrate parallel units, or don't spawn at all. (Forced invocations still spawn.) The old `capacity-below-two-windows` gate is retired; `ORCH_MAX_WINDOWS` remains a ceiling.
+- **Per-unit peaks are measured generically and fed back.** The runner attaches one lightweight sampler (`unit-memory-sampler.ps1`) to every unit's process tree — it only needs the unit's root pid, so it is host-agnostic — and records the peak into the machine-level store `<tmp>/orchestrator/unit-memory.json` (override `ORCH_UNIT_MEM_STORE`). Sampling and recording fail open and never affect orchestration; records are deleted after being read, which de-duplicates them naturally. Run logs gain a `[mem-fit]` line, every unit logs `[mem] unit <key> peak=<n>MB`, and `--plan` dry runs report the fitted blocks plus a `memFit` object.
+- **Auxiliary (interactive) window admission** now uses the same single-unit fit instead of the retired formula, so no dual track remains.
+
+### Tests
+
+- `test/unit-memory.test.mjs` — 13 red-capable criteria: config defaults/clamps (incl. the empty-string trap), store fail-open + round-trip, estimate (default vs learned p90×safety), merge order (dependency → conflict → largest), floor respect, extreme-collapse honesty (`fits=false`), monotonicity under `g<1`, idempotence, and host-genericity (two hosts, one request, different fits).
+
 ## 0.9.16 — core 1.16.3
 
 ### Fixed

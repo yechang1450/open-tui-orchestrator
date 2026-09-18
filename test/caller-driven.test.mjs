@@ -65,6 +65,11 @@ function callEnv({ws, unitFile, planFile, acceptance, extra = {}}) {
   env.ORCH_STATE_DIR = path.join(ws, 'temp', 'orchestrator');
   env.ORCH_MAINTENANCE_LOCK = path.join(ws, 'no-maintenance-lock.json');
   env.ORCH_MAX_POLL_MS = '120000';
+  // 0.9.17 内存拟合：测试要确定性 ⇒ 钉住单元估算与硬底（否则分块形状随机器当时内存漂移），
+  // 并把学习表隔离到工作区里（否则同机其它运行的实测样本会改变判据）。
+  env.ORCH_UNIT_MEM_DEFAULT_MB = '64';
+  env.ORCH_MIN_FREE_MEM_MB = '64';
+  env.ORCH_UNIT_MEM_STORE = path.join(ws, 'unit-memory.json');
   if (unitFile) env.ORCH_UNIT_CMD_FILE = unitFile;
   if (planFile) env.ORCH_PLAN_FILE = planFile;
   if (acceptance) env.ORCH_ACCEPTANCE_FILE = acceptance;

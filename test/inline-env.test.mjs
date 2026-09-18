@@ -23,5 +23,8 @@ test('inline outputs carry environment telemetry (platform/node/free/total + cap
 test('every capacity-gated inline JSON literal carries the env field (source wiring)', () => {
   const src = fs.readFileSync(path.join(root, 'scripts', 'core', 'orchestrate-sdk.mjs'), 'utf8');
   const hits = src.match(/env:inlineEnvJson\(/g) || [];
-  assert.ok(hits.length >= 2, 'both inline JSON literals (capacity gate + policy fallback) must carry env:inlineEnvJson — found ' + hits.length);
+  assert.ok(hits.length >= 1, 'the policy-fallback inline JSON must carry env:inlineEnvJson — found ' + hits.length);
+  // 0.9.17：容量公式退役 ⇒ 旧的 capacity-below-two-windows 门不得复活（复活即红）。
+  assert.equal(src.includes("reason:'capacity-below-two-windows'"), false, 'the retired capacity gate must not reappear');
+  assert.ok(src.includes('memFit:LAST_MEM_FIT'), 'inline JSON must surface the memory-fit result (memFit)');
 });
