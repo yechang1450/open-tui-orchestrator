@@ -331,6 +331,7 @@ function classifyPrompt(request, hints = {}) {
     "depends_on(依赖的其它任务 id 数组，无则 [])、" +
     "feasible(是否可行，布尔)、already_done(是否已达成无需做，布尔)。" +
     "规则：TODO LIST 必须覆盖全部原始任务；不遗漏、不合并；请求没写项目号时 project 必须为 null，交给模块映射校正，不许猜；" +
+    "纯元指令/流程说明句（如“必须按上述顺序执行”“注意执行先后依赖”“以上任务请依次完成”这类只有约束、没有具体动作或产物的句子）不算任务：把它并入被它约束的任务，或直接忽略，绝不单独建任务；" +
     "project 任务的 conflict_hints 不许偷懒留空：留空表示资源不确定，该项目组会被整体串行；给出精确资源关键词，同项目不重叠的任务就能并行开窗；" +
     "禁止调用任何工具/读文件/搜索/联网；只输出一个 JSON 对象 {\"tasks\":[...]}，能被 JSON.parse 直接解析，不要 Markdown 代码块、不要任何前后缀文字。" +
     hintText + "\n请求：" + request + '\n以下原始任务清单是权威清单。逐条返回相同的 T001 等 id，不添加、不遗漏、不合并任务。summary 可概述，执行正文由主控按 id 恢复；depends_on 也使用原始 id。\n'+JSON.stringify(requestTasks(request))
@@ -481,6 +482,16 @@ function fallbackPlan(request) {
 // 容量读数的唯一来源：**剩余可用内存**（MB）。2026-09-17 用户口径更新：
 // 最大窗口数 = floor(剩余可用MB ÷ 1000) × 2（至少 1）。旧口径用总内存，会把别人已占用的算成自己的余量。
 function availableMemoryMb() { return os.freemem() / 1024 ** 2; }
+// 环境监测（0.9.15）：inline 路径也要能看见平台/内存/容量——"容量不足所以不给开窗"这个结论
+// 在机器可读输出里原本只有 capacity 一个数，看不出机器当时到底多紧。
+export function inlineEnvJson(extra = {}) {
+  return Object.assign({
+    platform: process.platform,
+    node: process.version,
+    freeMB: Math.round(availableMemoryMb()),
+    totalMB: Math.round(os.totalmem() / 1024 ** 2),
+  }, extra);
+}
 async function decomposeSafely(request, maxWindows = computeMaxWindows(availableMemoryMb())) {
   const finalize = plan => capPlanBlocks(normalizePlan(plan), maxWindows);
   const hints = resolveHints(); // hints 参与缓存键（moduleToProj/foldRules/tail），防跨项目映射撞缓存
@@ -1861,6 +1872,26 @@ function pidAliveCheck(pid) {
 // 仍可能留着**尸体窗口**（窗格进程已死 → 显示「[已退出进程，代码为 N]」，但窗口不自动关）。判据组合
 // 保证绝不误伤：① 句柄来自**本 run 自己**的 win-*.window.json 记录；② 该窗口的宿主进程当前**没有任何子进程**
 // （= 尸体窗）。两条同时满足才发 WM_CLOSE。
+export function runWindowEntries(tmpDir) {
+  let names = [];
+  try { names = readdirSync(tmpDir).filter((n) => /^win-.*\.window\.json$/i.test(n)); } catch { return []; }
+  const out = [];
+  for (const n of names) {
+    try {
+      const v = JSON.parse(readFileSync(path.join(tmpDir, n), "utf8"));
+      const h = String((v && v.hwnd) || "");
+      const stem = n.replace(/^win-/i, "").replace(/\.window\.json$/i, "");
+      if (/^0x[0-9a-f]+$/i.test(h) && stem) out.push({ stem, hwnd: h });
+    } catch { /* unreadable verdict: skip */ }
+  }
+  const seen = new Set();
+  return out.filter((e) => (seen.has(e.hwnd) ? false : (seen.add(e.hwnd), true)));
+}
+// 残窗收口（2026-09-17 用户令：不要让人手动关窗；2026-09-18 pi 电池加严）：powercut / 外部杀进程 /
+// 单元跑完但面板没退，Windows Terminal 都可能留着**尸体窗**。判据组合保证绝不误伤：
+// ① 句柄来自**本 run 自己**的 win-*.window.json 记录；② 窗口当前可见且属于 Windows Terminal；
+// ③ 全机没有任何活进程的命令行引用该窗对应单元的唯一 stem（launcher 文件 win-launch-<stem>.ps1 或
+//    该单元的 pi session 路径都含 stem）——即该窗的单元确实已经退出。三条同时满足才发 WM_CLOSE。
 export function leftoverWindowHandles(tmpDir) {
   let names = [];
   try { names = readdirSync(tmpDir).filter((n) => /^win-.*\.window\.json$/i.test(n)); } catch { return []; }
@@ -1875,9 +1906,9 @@ export function leftoverWindowHandles(tmpDir) {
   return [...new Set(handles)];
 }
 async function sweepLeftoverRunWindows() {
-  const handles = leftoverWindowHandles(TMP);
-  if (!handles.length) return 0;
-  const list = handles.map((h) => "'" + h.replace(/'/g, "''") + "'").join(",");
+  const entries = runWindowEntries(TMP);
+  if (!entries.length) return 0;
+  const pairs = entries.map((e) => "@('" + e.hwnd.replace(/'/g, "''") + "','" + e.stem.replace(/'/g, "''") + "')").join(",");
   const script =
     "$ErrorActionPreference='SilentlyContinue';" +
     "Add-Type -TypeDefinition @'\n" +
@@ -1891,9 +1922,10 @@ async function sweepLeftoverRunWindows() {
     " public static int Close(IntPtr h){SendMessage(h,0x0010,IntPtr.Zero,IntPtr.Zero);return 1;}\n" +
     "}\n" +
     "'@;" +
-    // 安全判据：句柄来自本 run 的 spawn 记录；窗口属于 Windows Terminal；**该宿主当前无任何子进程**（尸体窗）才关。
-    "$children=@{};Get-CimInstance Win32_Process | ForEach-Object{ $children[[int]$_.ParentProcessId]=$true };" +
-    "$k=0;foreach($h in @(" + list + ")){ $hp=[IntPtr][Convert]::ToInt64($h,16); $owner=[OrchSweepWin]::Owner($hp); if($owner -and -not $children[[int]$owner]){ $k+=[OrchSweepWin]::Close($hp) } };$k";
+    // 安全判据：句柄来自本 run 的 spawn 记录；窗口属于 Windows Terminal；**没有活进程引用该单元的 stem**（尸体窗）才关。
+    // 用 CommandLine.Contains(stem) 判定：launcher 脚本路径与 pi session 路径都带唯一 stem；并排除本脚本自身。
+    "$procs=@(Get-CimInstance Win32_Process | Where-Object { $_.CommandLine } | Where-Object { $_.CommandLine -notlike '*OrchSweepWin*' } | ForEach-Object { $_.CommandLine });" +
+    "$k=0;foreach($e in @(" + pairs + ")){ $hp=[IntPtr][Convert]::ToInt64($e[0],16); $owner=[OrchSweepWin]::Owner($hp); if(-not $owner){continue}; $stem=$e[1]; $busy=$false; foreach($c in $procs){ if($c.Contains($stem)){$busy=$true;break} }; if(-not $busy){ $k+=[OrchSweepWin]::Close($hp) } };$k";
   try {
     const r = spawnSync(PS_EXE, ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script], { encoding: "utf8", windowsHide: true, timeout: 30000 });
     const n = Number(String(r.stdout || "").trim().split(/\r?\n/).pop()) || 0;
@@ -2556,7 +2588,7 @@ export async function main() {
     if(!resume&&!FORCE_EXECUTE&&!PLAN_FILE&&await classifyExecutionMode(request)==='inline'){console.log(JSON.stringify({mode:'inline',reason:'Read-only analysis'}));return;}
     const capacity=computeMaxWindows(availableMemoryMb());
     if(!resume&&capacity<2&&!FORCE_EXECUTE){
-      console.log(JSON.stringify({mode:'inline',reason:'capacity-below-two-windows',capacity,request,tasks:requestTasks(request),next:'在发起对话直接执行原始请求；不要再次调用 --run-windows'}));
+      console.log(JSON.stringify({mode:'inline',reason:'capacity-below-two-windows',capacity,env:inlineEnvJson({capacity}),request,tasks:requestTasks(request),next:'在发起对话直接执行原始请求；不要再次调用 --run-windows'}));
       return;
     }
     if(!checkDiskSpace()) {process.exitCode=1;return;}
@@ -2567,7 +2599,7 @@ export async function main() {
       preflightPlan=PLAN_FILE?ledgerEffectivePlan(request,planFromFile(request,loadPlanFile(PLAN_FILE),capacity),capacity):await decomposeSafely(request,capacity);
       const policy=windowExecutionPolicy(preflightPlan);
       if(policy.mode==='inline'&&!FORCE_EXECUTE){
-        console.log(JSON.stringify({mode:'inline',reason:policy.reason,capacity,request,tasks:requestTasks(request),blocks:preflightPlan.map(b=>({title:b.title,type:b.type,dependsOn:b.dependsOn||[],tasks:b.tasks||[]})),next:'在发起对话直接执行原始请求；不要再次调用 --run-windows'}));
+        console.log(JSON.stringify({mode:'inline',reason:policy.reason,capacity,env:inlineEnvJson({capacity}),request,tasks:requestTasks(request),blocks:preflightPlan.map(b=>({title:b.title,type:b.type,dependsOn:b.dependsOn||[],tasks:b.tasks||[]})),next:'在发起对话直接执行原始请求；不要再次调用 --run-windows'}));
         return;
       }
       if(policy.mode==='inline')console.log('[orchestrator] force-execute: inline gate bypassed ('+policy.reason+'); spawning unit(s) anyway');
@@ -2585,6 +2617,9 @@ export async function main() {
       guardian:g=>ensureRunGuardian({...g,agent:AGENT.agent,env:process.env}),
       cleanup:la=>{const wsRoot=(()=>{const r=path.resolve(WORKSPACE);return r.endsWith(path.sep)?r:r+path.sep;})();for(const f of [la.lp,la.pf,la.pidf,la.rf,la.pidf+'.self-closed',la.rf+'.self-closed',String(la.lp||'').replace(/\.ps1$/,'.pty.log')])try{const resolved=path.resolve(String(f||''));if(resolved.startsWith(wsRoot))rmSync(resolved,{force:true});}catch{}}
     },{workspace:WORKSPACE,capacity,resume,agent:AGENT.agent,unitProfile:AGENT.config.unit||null,modelPlan:MODEL_PLAN,runId:process.env.ORCH_RUN_ID,acceptanceFile:process.env.ORCH_ACCEPTANCE_FILE,timeoutMs:POLL_TIMEOUT_MS,auth:readAuthPrompt(),plan:preflightPlan,spawnMode:SPAWN_MODE,spawnStaggerMs:Math.max(0,Number(process.env.ORCH_WINDOW_STAGGER_MS||0)||0),windowCap:Math.max(0,Number(process.env.ORCH_MAX_WINDOWS||0)||0)||undefined});
+    // 收窗补丁（2026-09-15/0.9.15）：run 结束后再扫一次——跑完/被杀留下的尸体窗（单元已退出、无活进程引用）
+    // 在此关掉，不让用户看到残留面板（pi 电池实测：成功跑完的 pi 窗也不会自动退）。判据同开跑前那次。
+    await sweepLeftoverRunWindows();
     process.exitCode=result.success?0:1;return;
   }
 

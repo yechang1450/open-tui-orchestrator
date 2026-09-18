@@ -4,7 +4,7 @@ import crypto from 'node:crypto';
 import {spawnSync} from 'node:child_process';
 import os from 'node:os';
 
-export const CORE_VERSION = '1.16.1';
+export const CORE_VERSION = '1.16.2';
 export const SUCCESS = new Set(['verified']);
 export const TERMINAL = new Set(['verified','failed','blocked','cancelled','awaiting-verification','preflight-failed','popup-failed','timeout','needs-reconciliation']);
 

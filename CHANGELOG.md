@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.9.15 — core 1.16.2
+
+### Fixed
+
+- **Finished windows are now closed at finalize (measured on the pi battery 2026-09-18).** A successful `--mode window` pi run left its panels on screen: the unit processes and the launcher had exited, but the Windows Terminal window stayed — the only sweep (`sweepLeftoverRunWindows`) ran *before* a run, and its corpse criterion ("the Windows Terminal host has no children at all") never fires while the user keeps any other WT window open (the shared host always has children). The sweep now runs both before the runner **and after it returns**, with a per-unit criterion: a recorded window is closed only when no live process references that unit's unique stem (`win-launch-<stem>.ps1` launcher path or the unit's pi session path) — i.e. the unit is really gone — plus the existing "visible window owned by Windows Terminal" checks. Red-capable criteria: `test/leftover-windows.test.mjs` (stem pairing; the post-run sweep wiring).
+- **Pure meta/process sentences no longer become tasks.** Measured in the dependency drill: the sentence "必须按上述顺序执行：项目82的产物依赖项目81的产物" became its own task (and its own block), wasting a unit. The classify prompt now states that meta sentences (constraints without a concrete action or artifact) must be merged into the task they constrain or dropped, never given their own task id.
+
+### Added
+
+- **`[env]` telemetry on the inline paths.** The capacity gate and the policy fallback now emit `env:{platform,node,freeMB,totalMB,capacity}` inside their JSON, so "no windows: capacity below two-windows" carries the machine state that produced it (measured: free RAM swung 0.3–3.2 GB on this box, flipping capacity 1↔4 between probes). Red-capable criterion: `test/inline-env.test.mjs`.
+- **Foreground activation retries.** With several windows spawning back-to-back one window was measured ending `foreground=false` while its siblings reached the front (the pi battery's 4-window leg). The activation helper now retries the foreground switch up to 3 times (350 ms settle + 900 ms gap between tries) before falling back to the taskbar flash.
+
 ## 0.9.14 — core 1.16.1
 
 ### Added
