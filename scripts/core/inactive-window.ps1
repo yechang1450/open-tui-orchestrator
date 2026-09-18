@@ -96,17 +96,26 @@ public static class OrchestratorInactiveShell {
   AllowSetForegroundWindow(-1);
   // A background process is normally denied the foreground. The attach-thread-input trick borrows the
   // foreground thread's input queue for one SetForegroundWindow call, which Windows does allow.
-  var fgw=GetForegroundWindow();
-  uint fgThread=0;uint fgThreadDummy=0;if(fgw!=IntPtr.Zero)fgThread=GetWindowThreadProcessId(fgw,out fgThreadDummy);
-  var thisThread=GetCurrentThreadId();
-  var attached=false;
-  if(fgThread!=0&&fgThread!=thisThread)attached=AttachThreadInput(thisThread,fgThread,true);
-  SwitchToThisWindow(found,true);
-  BringWindowToTop(found);
-  var fg=SetForegroundWindow(found);
-  if(attached)AttachThreadInput(thisThread,fgThread,false);
-  System.Threading.Thread.Sleep(300);
-  var visible=IsWindowVisible(found);var minimized=IsIconic(found);var isFg=(GetForegroundWindow()==found);var zrank=ZRank(found);
+  // 2026-09-18 (pi battery): with several windows spawning back-to-back a sibling spawn can steal the
+  // foreground right after our switch, leaving this window visible but not in front. Retry the
+  // activation up to 3 times; the last check is what the verdict reports.
+  var fg=false;var isFg=false;var visible=false;var minimized=false;var zrank=-1;
+  for(var attempt=0;attempt<3;attempt++){
+    var fgw=GetForegroundWindow();
+    uint fgThread=0;uint fgThreadDummy=0;if(fgw!=IntPtr.Zero)fgThread=GetWindowThreadProcessId(fgw,out fgThreadDummy);
+    var thisThread=GetCurrentThreadId();
+    var attached=false;
+    if(fgThread!=0&&fgThread!=thisThread)attached=AttachThreadInput(thisThread,fgThread,true);
+    SwitchToThisWindow(found,true);
+    BringWindowToTop(found);
+    fg=SetForegroundWindow(found);
+    if(attached)AttachThreadInput(thisThread,fgThread,false);
+    System.Threading.Thread.Sleep(350);
+    isFg=(GetForegroundWindow()==found);
+    if(isFg)break;
+    System.Threading.Thread.Sleep(900);
+  }
+  visible=IsWindowVisible(found);minimized=IsIconic(found);zrank=ZRank(found);
   // If the foreground switch still did not take, flash the taskbar entry so the user notices anyway.
   var flashed=false;
   if(!isFg){

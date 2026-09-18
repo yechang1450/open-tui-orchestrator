@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {leftoverWindowHandles} from '../scripts/orchestrate-sdk.mjs';
+import {leftoverWindowHandles, runWindowEntries} from '../scripts/orchestrate-sdk.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const family = path.join(root, 'temp');
@@ -33,4 +33,28 @@ test('the run path sweeps leftover windows before the runner starts (source wiri
   assert.ok(idxSweep > -1, 'sweepLeftoverRunWindows must be wired into the run path');
   assert.ok(idxRun > -1, 'runWindows call must exist');
   assert.ok(idxSweep < idxRun, 'the sweep must run before the runner so stale corpses vanish before new windows open');
+});
+
+// 2026-09-15/0.9.15（pi 电池现场）：成功跑完的 pi 窗也会留面板。收口判据升级为「没有任何活进程
+// 引用该单元的 stem」（launcher 文件与 pi session 路径都含唯一 stem）⇒ 需要句柄与 stem 成对记录。
+test('run window entries carry the unit stem so the sweep can tell a corpse from a live unit', () => {
+  const dir = fs.mkdtempSync(path.join(family, 'entries-'));
+  try {
+    fs.writeFileSync(path.join(dir, 'win-B1-run-a1.window.json'), JSON.stringify({ok: true, hwnd: '0x1234', title: 'x'}), 'utf8');
+    fs.writeFileSync(path.join(dir, 'win-B2-run-a1.window.json'), JSON.stringify({ok: true, hwnd: '0x1234'}), 'utf8');            // 同 hwnd 去重
+    fs.writeFileSync(path.join(dir, 'win-B3-run-a1.window.json'), JSON.stringify({ok: false, reason: 'no window'}), 'utf8');   // 无 hwnd
+    fs.writeFileSync(path.join(dir, 'win-B4-run-a1.window.json'), '{ not json', 'utf8');                                        // 坏文件
+    fs.writeFileSync(path.join(dir, 'other.window.json'), JSON.stringify({hwnd: '0xDEAD'}), 'utf8');                            // 命名不符
+    const got = runWindowEntries(dir);
+    assert.deepEqual(got, [{stem: 'B1-run-a1', hwnd: '0x1234'}], 'entries must pair hwnd with the unit stem: ' + JSON.stringify(got));
+    assert.deepEqual(runWindowEntries(path.join(dir, 'missing')), [], 'a missing dir must not throw');
+  } finally { fs.rmSync(dir, {recursive: true, force: true}); }
+});
+
+test('the run path also sweeps finished windows after the runner returns (dead panes must not stay on screen)', () => {
+  const src = fs.readFileSync(path.join(root, 'scripts', 'core', 'orchestrate-sdk.mjs'), 'utf8');
+  const idxRun = src.indexOf('const result=await runWindows(request,{');
+  assert.ok(idxRun > -1, 'runWindows call must exist');
+  const idxAfter = src.indexOf('await sweepLeftoverRunWindows();', idxRun);
+  assert.ok(idxAfter > idxRun, 'a sweep must also run after the runner finishes, or completed units leave their panels behind');
 });
