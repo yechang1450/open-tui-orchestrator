@@ -387,7 +387,7 @@ export async function runWindows(request,hooks,options={}) {
             e.status='running';persist();
             // 0.9.17：单元起来了 ⇒ 挂通用采样器（拿根 pid 收进程树峰值；成败都不影响编排）。
             peakSampled=startUnitSampler(la, r.key, active.token, Number(identity?.ProcessId||hooks.readPid(la.pidf)))||peakSampled;
-            const session=await hooks.session('【本块唯一标识】'+active.token,Math.min(90000,Math.max(0,deadline-Date.now())),la.rf);
+            const session=hooks.session?await hooks.session('【本块唯一标识】'+active.token,Math.min(90000,Math.max(0,deadline-Date.now())),la.rf):null;
             const unitBudget=Math.max(0,Math.min(deadline,Date.now()+UNIT_TIMEOUT_MS)-Date.now());
             let waited;
             if (session) waited=await waitWithStallWatchdog(hooks,la,session,active,unitBudget);
