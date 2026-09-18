@@ -4,7 +4,7 @@ import crypto from 'node:crypto';
 import {spawnSync} from 'node:child_process';
 import os from 'node:os';
 
-export const CORE_VERSION = '1.16.2';
+export const CORE_VERSION = '1.16.3';
 export const SUCCESS = new Set(['verified']);
 export const TERMINAL = new Set(['verified','failed','blocked','cancelled','awaiting-verification','preflight-failed','popup-failed','timeout','needs-reconciliation']);
 
@@ -75,6 +75,18 @@ export function levelWaves(recs) {
   return waves;
 }
 
+// 纯元指令句过滤（0.9.16）：分类器与请求切分都可能把「必须按上述顺序执行：…」这类只有约束、没有
+// 动作或产物的元句当成一条任务（2026-09-18 验收实测：连真模型也照建不误，提示词规则不总是生效）。
+// 判据＝首句命中元前缀（按上述/以上…顺序/先后/要求/依赖 或 以上任务请依次…），且前缀之后没有
+// 任何具体物（路径/文件名/动作动词/业务名词）。命中即从任务清单剔除——但绝不剔到一条不剩（保底）。
+const META_PREFIX_RE = /^(?:(?:必须|请|一定|务必|注意)?(?:严格)?(?:切)?(?:按|按照)?(?:上述|以上)(?:顺序|先后|次序|要求|依赖)|(?:上述|以上)(?:全部)?任务(?:请)?(?:依次|按顺序)?(?:执行|完成|处理|做))/;
+const CONCRETE_RE = /[\/\\]|\.\w{1,6}\b|(?:修复|优化|修改|更新|检查|创建|生成|写入|读取|删除|实现|开发|添加|移除|重构|部署|安装|配置|登录|注册|下单|商品|订单|页面|接口|功能|按钮|数据|文件|模块|数据库|测试|文档|代码)/;
+export function isMetaOnlyTask(prompt) {
+  const seg = String(prompt || '').trim().split(/[。；;！!？?\n]/)[0].trim();
+  if (!seg || !META_PREFIX_RE.test(seg)) return false;
+  const tail = seg.replace(META_PREFIX_RE, '').trim().replace(/^[：:，,、\-]+/, '');
+  return !CONCRETE_RE.test(tail);
+}
 export function requestTasks(request) {
   const text=String(request),parts=[];let start=0,quote='',depth=0;
   for(let i=0;i<text.length;i++) {
@@ -87,7 +99,9 @@ export function requestTasks(request) {
     if(!depth&&(/[；;\n]/.test(c)||(/[，,。]/.test(c)&&explicitNext))){parts.push(text.slice(start,i));start=i+1;}
   }
   parts.push(text.slice(start));
-  return parts.map(s=>s.trim()).filter(Boolean).map((prompt,i)=>({id:`T${String(i+1).padStart(3,'0')}`,prompt}));
+  const all=parts.map(s=>s.trim()).filter(Boolean).map((prompt,i)=>({id:`T${String(i+1).padStart(3,'0')}`,prompt}));
+  const kept=all.filter(t=>!isMetaOnlyTask(t.prompt));
+  return kept.length?kept:all;
 }
 export function bindClassifiedTasks(request,classified) {
   const tasks=requestTasks(request),byId=new Map(tasks.map(t=>[t.id,t]));
