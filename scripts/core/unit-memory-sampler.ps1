@@ -10,14 +10,19 @@ param(
   [int]$MaxMs = 3600000
 )
 $ErrorActionPreference = 'SilentlyContinue'
+Set-Content -Path ($OutFile + '.start') -Value ((Get-Date).ToString('s')) -Encoding ascii
+try {
 
 function Get-TreeIds([int]$root) {
-  $all = Get-CimInstance Win32_Process | Select-Object ProcessId, ParentProcessId
+  # 2026-09-18：全表 Get-CimInstance 在忙机器上会卡死（实测采样器刚起就被拖住 ✗）⇒ 改成按父进程过滤的递归查询。
   $ids = @($root)
   $frontier = @($root)
   while ($frontier.Count -gt 0) {
-    $next = @($all | Where-Object { $frontier -contains $_.ParentProcessId } | Select-Object -ExpandProperty ProcessId)
-    $next = @($next | Where-Object { $ids -notcontains $_ })
+    $next = @()
+    foreach ($parent in $frontier) {
+      $next += @(Get-CimInstance Win32_Process -Filter ("ParentProcessId=" + $parent) -ErrorAction SilentlyContinue | Select-Object -ExpandProperty ProcessId | Where-Object { $_ })
+    }
+    $next = @($next | Where-Object { $_ -and ($ids -notcontains $_) })
     if ($next.Count -eq 0) { break }
     $ids += $next
     $frontier = $next
@@ -32,8 +37,9 @@ $loops = 0
 while ((((Get-Date) - $start).TotalMilliseconds) -lt $MaxMs) {
   $alive = $false
   $sum = [int64]0
-  foreach ($procId in $tree) {
-    $procObj = Get-Process -Id $procId -ErrorAction SilentlyContinue
+  foreach ($procId in @($tree | Where-Object { $_ })) {
+    if (-not $procId) { continue }
+    $procObj = Get-Process -Id ([int]$procId) -ErrorAction SilentlyContinue
     if ($procObj) {
       $alive = $true
       $sum += [int64]$procObj.WorkingSet64
@@ -51,3 +57,7 @@ $peakMb = [int][math]::Round($peak / 1MB, 0)
 $stamp = (Get-Date).ToString('s')
 $json = '{"schema":1,"rootPid":' + $RootPid + ',"peakMB":' + $peakMb + ',"sampledAt":"' + $stamp + '","loops":' + $loops + '}'
 Set-Content -Path $OutFile -Value $json -Encoding ascii
+} catch {
+  Set-Content -Path ($OutFile + '.error') -Value ($_ | Out-String) -Encoding ascii
+  exit 1
+}
