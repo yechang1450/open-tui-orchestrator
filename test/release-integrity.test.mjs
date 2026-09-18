@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {coreInventory, runtimeInventory, verifyRelease} from '../scripts/release-integrity.mjs';
+import {CORE_VERSION} from '../scripts/core/contracts.mjs';   // 版本判据与仓库核心同源：进位不再需要手改本文件
 
 const source = fileURLToPath(new URL('..', import.meta.url));
 
@@ -25,7 +26,7 @@ function writeFixture(root) {
 test('generic release seal covers the current core and runtime entrypoints', () => {
   const result = verifyRelease(source);
   assert.equal(result.schema, 2);
-  assert.equal(result.coreVersion, '2026.9.18');
+  assert.equal(result.coreVersion, CORE_VERSION);
   assert.ok(result.files >= 20, `expected a sealed execution core, got ${result.files}`);
   assert.ok(result.runtimeFiles >= 10, `expected sealed runtime entrypoints, got ${result.runtimeFiles}`);
 });

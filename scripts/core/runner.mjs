@@ -414,7 +414,7 @@ export async function runWindows(request,hooks,options={}) {
           if(identity)await hooks.close(identity.ProcessId,identity);
           if(identity&&!(await waitForProcessExit(identity))){e.status='failed';e.reason='Launcher still alive; lease retained';persist();return;}
           await coordinate(()=>release(coordinator,e.leaseId||leaseId),Date.now()+30000);
-          await recordUnitPeakIfReady(la, r.key, active.token, options.agent, peakSampled);
+          await recordUnitPeakIfReady(la, r.key, active.token, options.agent || sum.agent || 'caller', peakSampled);
           hooks.unregister(e.leaseId||leaseId);if(la)hooks.cleanup(la);
           e.endedAt=Date.now();active.endedAt=e.endedAt;active.exitCode=e.exitCode;
           collectVerification(sum,checks,workspace);persist();

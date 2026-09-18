@@ -1,5 +1,20 @@
 # Changelog
 
+## 2026.9.19 — hermes TUI window leg + hygiene
+
+### Added
+
+- **hermes interactive TUI windows ("close on acceptance").** The hermes profile gains a window entry (`hermes chat --tui --yolo --no-restore-cwd -q "<prompt>"`) and the run path picks it from the spawn mode (`ORCH_SPAWN_MODE=window`; the default headless path is unchanged word-for-word). Because a TUI window never exits on its own, the runner now treats a **disk-verified acceptance** as a legitimate settle condition for those units (polling the block's verification every 10 s; on success the unit settles and the window is closed in the existing teardown, which also keeps the post-run sweep clean). Live acceptance: two real hermes TUI windows spawned `VISIBLE`, `2/2 verified`, `success=true`, `verify rc=0`, artifacts correct, **zero leftover windows**.
+
+### Fixed
+
+- The release criterion's version assertion now reads the core constant instead of a hard-coded string (version bumps no longer require editing the test).
+- Per-unit peak records fall back to a real label (`options.agent || sum.agent || 'caller'`) instead of writing `unknown` rows into the learning table.
+
+### Note
+
+- Version numbers are release dates (`YYYY.M.D`; leading zeros are not valid semver). Additional releases on the same day advance the date number.
+
 ## 2026.9.18 — version scheme switch (calver)
 
 ### Changed
