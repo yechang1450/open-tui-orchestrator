@@ -41,6 +41,9 @@ test('pty carrier gives the unit a real console while keeping pidf/identity cont
     'Start-Sleep -Seconds 8',
   ].join("\n"));
   const prev = process.env.ORCH_UNIT_CARRIER;
+  // 0.9.17：辅助窗内存准入参与直连 spawn ⇒ 钉住内存参数，避免本判据随机器剩余内存漂移。
+  process.env.ORCH_UNIT_MEM_DEFAULT_MB = '1';
+  process.env.ORCH_MIN_FREE_MEM_MB = '1';
   process.env.ORCH_UNIT_CARRIER = 'pty';
   try {
     const ok = await spawnHeadlessWithRetry(lp, 'probe', pidf, 1, 'tok-pty-probe', false);
@@ -65,12 +68,18 @@ test('unknown ORCH_UNIT_CARRIER fails closed before any spawn', async () => {
   const pidf = path.join(dir, 'window-pty-probe-b.pid');
   fs.writeFileSync(lp, '# never runs\n');
   const prev = process.env.ORCH_UNIT_CARRIER;
+  const prevMem = [process.env.ORCH_UNIT_MEM_DEFAULT_MB, process.env.ORCH_MIN_FREE_MEM_MB];
   process.env.ORCH_UNIT_CARRIER = 'window';
+  // 0.9.17：辅助窗内存准入先于载体解析 ⇒ 先钉住内存参数，让载体错误如实浮出（本测点在载体守卫）。
+  process.env.ORCH_UNIT_MEM_DEFAULT_MB = '1';
+  process.env.ORCH_MIN_FREE_MEM_MB = '1';
   try {
     await assert.rejects(() => spawnHeadlessWithRetry(lp, 'probe', pidf, 1, 'tok', false), /UNSUPPORTED_UNIT_CARRIER/);
     assert.equal(fs.existsSync(pidf), false, 'fail-closed must not spawn anything');
   } finally {
     if (prev === undefined) delete process.env.ORCH_UNIT_CARRIER; else process.env.ORCH_UNIT_CARRIER = prev;
+    if (prevMem[0] === undefined) delete process.env.ORCH_UNIT_MEM_DEFAULT_MB; else process.env.ORCH_UNIT_MEM_DEFAULT_MB = prevMem[0];
+    if (prevMem[1] === undefined) delete process.env.ORCH_MIN_FREE_MEM_MB; else process.env.ORCH_MIN_FREE_MEM_MB = prevMem[1];
     fs.rmSync(dir, {recursive: true, force: true});
   }
 });

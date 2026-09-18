@@ -61,6 +61,9 @@ test('headless spawn confirms a hidden launcher via pidf and leaves no waiting w
   // A node child makes the generic warmup probe exit fast; the sleep keeps the launcher alive until cleanup.
   fs.writeFileSync(lp, "$PID | Set-Content -LiteralPath " + lit(pidf) + " -Encoding UTF8\nStart-Process -FilePath 'node' -ArgumentList '-e','setTimeout(()=>{},20000)' | Out-Null\nStart-Sleep -Seconds 20\n");
   try {
+    // 0.9.17：辅助窗内存准入参与直连 spawn ⇒ 钉住内存参数，让本判据不随机器剩余内存漂移。
+    process.env.ORCH_UNIT_MEM_DEFAULT_MB = '1';
+    process.env.ORCH_MIN_FREE_MEM_MB = '1';
     const ok = await spawnHeadlessWithRetry(lp, 'probe', pidf, 1, 'tok-headless-probe', false);
     assert.equal(ok, true);
     let pid = 0;

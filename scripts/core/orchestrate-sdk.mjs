@@ -61,12 +61,13 @@
  */
 import {nativeArgumentLines} from "./native-argv.mjs";
 import {CORE_VERSION, levelWaves, keysOverlap, summaryComplete,requestTasks,bindClassifiedTasks,ledgerPlan,computeMaxWindows,powershellExe,systemToolExe} from "./contracts.mjs";
+import {memConfig, loadUnitMemory, saveUnitMemory, recordUnitPeak, unitEstimateMb, admitCount, fitBlocks, describeFit, unitMemoryStorePath} from "./unit-memory.mjs";
 import {formatFailureLines} from "./failure-report.mjs";
 import {effectiveUnitCarrier, ptyAvailability} from "./unit-carrier.mjs";
 // 锚定 SystemRoot 的系统工具：裸名会先按进程 cwd（=任意工作区）解析，防二进制投毒。
 const PS_EXE=powershellExe(),WHERE_EXE=systemToolExe("where.exe");
 import {runWindows,verifyRun} from "./runner.mjs";
-import {launcherIdentity,processSnapshot,sameProcess,coordinatorDir,reserve,bind} from "./leases.mjs";
+import {launcherIdentity,processSnapshot,sameProcess,coordinatorDir,reserve,release,bind} from "./leases.mjs";
 import {runPiPlanner,writePiLauncher,waitPiResult} from './pi-runtime.mjs';
 import {runOpenClawPlanner,writeOpenClawLauncher} from './openclaw-runtime.mjs';
 import {runOpenCodePlanner,writeOpenCodeLauncher,waitOpenCodeResult} from './opencode-runtime.mjs';
@@ -492,8 +493,42 @@ export function inlineEnvJson(extra = {}) {
     totalMB: Math.round(os.totalmem() / 1024 ** 2),
   }, extra);
 }
-async function decomposeSafely(request, maxWindows = computeMaxWindows(availableMemoryMb())) {
-  const finalize = plan => capPlanBlocks(normalizePlan(plan), maxWindows);
+// —— 通用内存拟合（0.9.17）：底层机制、宿主无关；学习表按宿主存数据，代码里没有任何宿主分支。
+let LAST_MEM_FIT = null;
+export function unitMemoryStoreFile() {
+  return unitMemoryStorePath(process.env);
+}
+function fitPlanViaMemory(plan) {
+  const cfg = memConfig();
+  const store = loadUnitMemory(unitMemoryStoreFile());
+  const unitMb = unitEstimateMb(store, AGENT.agent, cfg);
+  const res = fitBlocks(plan, availableMemoryMb(), unitMb, cfg);
+  LAST_MEM_FIT = {unitMb: res.unitMb, growth: res.blockGrowth, estMb: res.estMb, freeMb: Math.round(res.freeMb), floorMb: res.floorMb, fits: res.fits, merges: res.merges};
+  console.log(describeFit(res));
+  if (!res.fits) {
+    console.warn('[mem-fit] WARNING: even one unit cannot clear the floor (est ' + Math.round(res.estMb) + 'MB, free ' + Math.round(res.freeMb) + 'MB, floor ' + res.floorMb + 'MB); proceeding anyway (work is never blocked) — closing heavy apps would help.');
+  }
+  return {plan: res.blocks, memFit: LAST_MEM_FIT};
+}
+// 辅助窗（交互式看窗）准入上限：与旧公式同形（上限），但用学习画像反推——留不出底线就不放行（0 ⇒ 排队等待）。
+function auxAdmissionLimit(auxCap) {
+  const cfg = memConfig();
+  const store = loadUnitMemory(unitMemoryStoreFile());
+  const unitMb = unitEstimateMb(store, AGENT.agent, cfg);
+  const n = admitCount(availableMemoryMb(), unitMb, cfg);
+  if (n <= 0) return 0;
+  return auxCap ? Math.min(n, auxCap) : n;
+}
+function readSavedBlockCount() {
+  try {
+    const p = path.join(WORKSPACE, 'temp', 'orchestrator', 'runs', String(process.env.ORCH_RUN_ID || ''), 'summary.json');
+    const n = JSON.parse(fs.readFileSync(p, 'utf8'))?.blocks?.length;
+    if (Number.isInteger(n) && n > 0) return n;
+  } catch {}
+  return Math.max(1, Number(process.env.ORCH_MAX_WINDOWS || 0) || 4);
+}
+async function decomposeSafely(request) {
+  const finalize = plan => fitPlanViaMemory(normalizePlan(plan)).plan;   // 0.9.17：内存拟合取代表驱动固定容量压缩
   const hints = resolveHints(); // hints 参与缓存键（moduleToProj/foldRules/tail），防跨项目映射撞缓存
   // 0) 缓存优先：相同请求+相同 hints 的拆块结果永不自动失效（仅 --clear-cache 或删除缓存文件才重置），
   //    命中直接复用 -> 越用越快（与下方 loadDecomposeCache 的“永不自动失效”实现保持一致）。
@@ -1052,7 +1087,7 @@ async function warmupWindow(pidf, token) {
 }
 async function spawnWindowWithRetry(lp, title, pidf, maxRetry = 3, token, reservedByRunner = false) {
   const auxiliaryId="aux-"+path.basename(lp); let coordinator;
-  if(!reservedByRunner){coordinator=coordinatorDir(WORKSPACE);const auxCap=Math.max(0,Number(process.env.ORCH_MAX_WINDOWS||0)||0);const claim=reserve(coordinator,{id:auxiliaryId,keys:["aux:"+token]},auxCap?Math.min(computeMaxWindows(availableMemoryMb()),auxCap):computeMaxWindows(availableMemoryMb()));if(!claim.ok)throw new Error("Window admission waiting: "+claim.reason);}
+  if(!reservedByRunner){coordinator=coordinatorDir(WORKSPACE);const auxCap=Math.max(0,Number(process.env.ORCH_MAX_WINDOWS||0)||0);const auxLimit=auxAdmissionLimit(auxCap);let claim=reserve(coordinator,{id:auxiliaryId,keys:["aux:"+token]},auxLimit);if(!claim.ok){try{release(coordinator,auxiliaryId);}catch{}claim=reserve(coordinator,{id:auxiliaryId,keys:["aux:"+token]},auxLimit);}if(!claim.ok)throw new Error("Window admission waiting: "+claim.reason);}
   // 恢复调用方传入的重试上限（默认 3）：sync 拉起后每次尝试 ~2.5s，重试成本可控，兜底 WT 偶发不弹窗。
   for (let attempt = 1; attempt <= maxRetry; attempt++) {
     spawnVisibleWindow(lp, title, pidf);
@@ -1097,7 +1132,7 @@ function spawnHeadlessUnit(lp, title) {
 }
 async function spawnHeadlessWithRetry(lp, title, pidf, maxRetry = 3, token, reservedByRunner = false) {
   const auxiliaryId="aux-"+path.basename(lp); let coordinator;
-  if(!reservedByRunner){coordinator=coordinatorDir(WORKSPACE);const auxCap=Math.max(0,Number(process.env.ORCH_MAX_WINDOWS||0)||0);const claim=reserve(coordinator,{id:auxiliaryId,keys:["aux:"+token]},auxCap?Math.min(computeMaxWindows(availableMemoryMb()),auxCap):computeMaxWindows(availableMemoryMb()));if(!claim.ok)throw new Error("Window admission waiting: "+claim.reason);}
+  if(!reservedByRunner){coordinator=coordinatorDir(WORKSPACE);const auxCap=Math.max(0,Number(process.env.ORCH_MAX_WINDOWS||0)||0);const auxLimit=auxAdmissionLimit(auxCap);let claim=reserve(coordinator,{id:auxiliaryId,keys:["aux:"+token]},auxLimit);if(!claim.ok){try{release(coordinator,auxiliaryId);}catch{}claim=reserve(coordinator,{id:auxiliaryId,keys:["aux:"+token]},auxLimit);}if(!claim.ok)throw new Error("Window admission waiting: "+claim.reason);}
   // Hidden spawn is deterministic (no OS window manager in the loop), so a
   // single attempt usually confirms; keep the retry budget for cold-start
   // hiccups and parity with the window path.
@@ -2389,9 +2424,8 @@ export async function main() {
     checkDiskSpace({ warnOnly: true });
     if (PLAN_FILE) {
       // 计划文件模式：纯确定性，零 LLM（不读缓存、不写缓存、不调模型）。
-      const capacity = computeMaxWindows(availableMemoryMb());
-      const effective = ledgerEffectivePlan(request, planFromFile(request, loadPlanFile(PLAN_FILE), capacity), capacity);
-      console.log(JSON.stringify({ blocks: effective }, null, 2));
+      const fitted = fitPlanViaMemory(ledgerEffectivePlan(request, planFromFile(request, loadPlanFile(PLAN_FILE), Number.MAX_SAFE_INTEGER), Number.MAX_SAFE_INTEGER)).plan;
+      console.log(JSON.stringify({ blocks: fitted, memFit: LAST_MEM_FIT }, null, 2));
       return;
     }
     requireHost();
@@ -2586,24 +2620,22 @@ export async function main() {
     if(!FORCE_EXECUTE&&isOrchestratorSelfMod(request)){console.log(JSON.stringify({mode:'inline',reason:'Modify the orchestrator in the initiating conversation before opening windows'}));return;}
     // 计划文件模式：调用方已显式给出计划并要求编排——跳过只读定性（零模型调用）；自改文本门与容量门仍在。
     if(!resume&&!FORCE_EXECUTE&&!PLAN_FILE&&await classifyExecutionMode(request)==='inline'){console.log(JSON.stringify({mode:'inline',reason:'Read-only analysis'}));return;}
-    const capacity=computeMaxWindows(availableMemoryMb());
-    if(!resume&&capacity<2&&!FORCE_EXECUTE){
-      console.log(JSON.stringify({mode:'inline',reason:'capacity-below-two-windows',capacity,env:inlineEnvJson({capacity}),request,tasks:requestTasks(request),next:'在发起对话直接执行原始请求；不要再次调用 --run-windows'}));
-      return;
-    }
+    // 0.9.17：固定容量公式退役。容量由计划成型后的内存拟合决定（fitPlanViaMemory）：
+    // 拟合后 1 块 = 无并行 = 交给下方 windowExecutionPolicy 的 single-block/serial 内联交回调用方。
     if(!checkDiskSpace()) {process.exitCode=1;return;}
     // 载体就绪门：pty 载体的引擎必须在启动任何单元前可解析（缺失立即报错，不让单元静默秒退）。
     if(SPAWN_MODE==='headless'){try{assertUnitCarrierReady();}catch(error){console.error(error.message);process.exitCode=1;return;}}
     let preflightPlan;
     if(!resume){
-      preflightPlan=PLAN_FILE?ledgerEffectivePlan(request,planFromFile(request,loadPlanFile(PLAN_FILE),capacity),capacity):await decomposeSafely(request,capacity);
+      preflightPlan=PLAN_FILE?fitPlanViaMemory(ledgerEffectivePlan(request,planFromFile(request,loadPlanFile(PLAN_FILE),Number.MAX_SAFE_INTEGER),Number.MAX_SAFE_INTEGER)).plan:await decomposeSafely(request);
       const policy=windowExecutionPolicy(preflightPlan);
       if(policy.mode==='inline'&&!FORCE_EXECUTE){
-        console.log(JSON.stringify({mode:'inline',reason:policy.reason,capacity,env:inlineEnvJson({capacity}),request,tasks:requestTasks(request),blocks:preflightPlan.map(b=>({title:b.title,type:b.type,dependsOn:b.dependsOn||[],tasks:b.tasks||[]})),next:'在发起对话直接执行原始请求；不要再次调用 --run-windows'}));
+        console.log(JSON.stringify({mode:'inline',reason:policy.reason,capacity:preflightPlan.length,memFit:LAST_MEM_FIT,env:inlineEnvJson({capacity:preflightPlan.length}),request,tasks:requestTasks(request),blocks:preflightPlan.map(b=>({title:b.title,type:b.type,dependsOn:b.dependsOn||[],tasks:b.tasks||[]})),next:'在发起对话直接执行原始请求；不要再次调用 --run-windows'}));
         return;
       }
       if(policy.mode==='inline')console.log('[orchestrator] force-execute: inline gate bypassed ('+policy.reason+'); spawning unit(s) anyway');
     }
+    const capacity=resume?readSavedBlockCount():preflightPlan.length;
     armEnforcement();
     // 残窗收口：resume 前先收掉上次被杀留下的尸体窗（判据见 sweepLeftoverRunWindows），
     // 免得用户对着一排「[已退出进程…]」的窗手动关。
