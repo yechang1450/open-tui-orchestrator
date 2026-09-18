@@ -38,6 +38,13 @@
     ],
     "prompt": [
       "-z"
+    ],
+    "windowPrefix": [
+      "chat",
+      "--tui"
+    ],
+    "windowPrompt": [
+      "-q"
     ]
   },
   "adaptedAt": "2026-09-14T04:33:36.746Z",
