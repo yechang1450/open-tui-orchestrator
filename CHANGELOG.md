@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026.9.18 — version scheme switch (calver)
+
+### Changed
+
+- **Version numbering becomes date-based (`2026.9.18`), same mechanics as before.** Package version and `CORE_VERSION` now mirror each other as `YYYY.M.D` (leading zeros are not valid in strict semver, so `09` is written `9`). Everything else about a round is unchanged: dual-track checks in the gate (docs / seal / measured suite total), reseal, release copy + junction, commit + push, npm publish. The 0.9.18 changes (sampler fix + the 0.9.17 memory-fit concurrency) are all included; this entry only records the numbering switch.
+
 ## 0.9.18 — core 1.16.5
 
 ### Fixed
