@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.9.16 — core 1.16.3
+
+### Fixed
+
+- **Meta-only sentences are dropped deterministically (0.9.15's prompt rule was not enough).** The 0.9.15 live acceptance re-ran the exact dependency request and the real model *still* minted T003 from "必须按上述顺序执行：项目82的产物依赖项目81的产物。" — a prompt rule alone cannot guarantee this. `requestTasks` (the one splitter every downstream consumer derives from: classify prompt, `bindClassifiedTasks`, `ledgerPlan`) now filters meta-only sentences outright: first segment must match a meta prefix (按上述/以上…顺序|先后|要求|依赖, or 以上任务请依次…) **and** carry no concrete payload (no path/file token, no action or business verb). The inventory is never emptied (an all-meta request keeps its single task). Red-capable criterion: `test/meta-task-filter.test.mjs`.
+- **The gate is robust on a busy machine (2026-09-18, user directive: never wait for free RAM).** Two knobs and one honest fallback: `ORCH_GATE_TEST_CONCURRENCY` (default 3; lower ⇒ less memory pressure ⇒ fewer capacity-sensitive reds) and `ORCH_GATE_SUITE_TIMEOUT_MS` (default 900000). When the suite reports reds *with a complete summary*, the gate re-runs each red title's file **in isolation**: all green ⇒ recorded as an environment flake (`[gate] L1 environment flake recorded: …`, observed pass/fail logged; L4's measured total = pass+fail) and L1 passes; any file still red ⇒ real regression, the gate fails. A truncated suite (missing summary, e.g. timeout) can never be flaked green.
+
 ## 0.9.15 — core 1.16.2
 
 ### Fixed

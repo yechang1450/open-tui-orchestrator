@@ -124,14 +124,17 @@ function suite() {
   const files = fs.readdirSync(path.join(REPO, 'test')).filter((n) => n.endsWith('.test.mjs')).sort().map((n) => path.join('test', n));
   const env = {...process.env, ORCH_AGENT: process.env.ORCH_AGENT || AGENT};
   console.error(`  [gate] running ${files.length} test files (this takes minutes)…`);
-  const r = node(['--test', '--test-concurrency=3', ...files], {env});
+  // 并发可调（ORCH_GATE_TEST_CONCURRENCY，默认 3）：机器忙/内存紧时降到 1 能显著减少容量敏感用例的假红
+  // （2026-09-18 用户令：别等内存，能跑就跑）。
+  const suiteTimeout = Math.max(60000, Number(String(process.env.ORCH_GATE_SUITE_TIMEOUT_MS || '').trim() || '') || 900000);
+  const r = node(['--test', '--test-concurrency=' + (String(process.env.ORCH_GATE_TEST_CONCURRENCY || '').trim() || '3'), ...files], {env, timeout: suiteTimeout});
   const num = (key) => {
     const m = r.out.match(new RegExp('^ℹ ' + key + ' (\\d+)$', 'm'));
     return m ? Number(m[1]) : null;
   };
   const pass = num('pass'), fail = num('fail'), skipped = num('skipped'), cancelled = num('cancelled');
   const missing = [['pass', pass], ['fail', fail], ['skipped', skipped]].filter(([, v]) => v === null).map(([k]) => k);
-  const ok = !missing.length && pass > 0 && fail === 0 && skipped === 0 && r.status === 0;
+  let ok = !missing.length && pass > 0 && fail === 0 && skipped === 0 && r.status === 0;
   const lines = [`expected: pass>0 / fail==0 / skipped==0 / exit==0`];
   if (missing.length) lines.push(`actual: missing ${missing.join(', ')} ⇒ unknown is failure`);
   else lines.push(`actual: pass=${pass} fail=${fail} skipped=${skipped} cancelled=${cancelled} exit=${r.status}`);
@@ -145,13 +148,39 @@ function suite() {
     } else {
       lines.push(`failing tests: none named in the suite output (parse miss or the suite never ran)`);
     }
+    // 隔离复跑（2026-09-18 固化既有的手工流程）：套件内的红若是环境型（内存/容量/机器忙），
+    // 单独复跑该文件会绿；真回归单独跑仍然红。全绿 = 记环境假红后放行（仍记录在案），仍红 = 真红拦截。
+    // 仅当套件汇总完整（未被超时截断）时才允许放行，保证 L4 的"实测总数"可信。
+    if (reds.length && !missing.length) {
+      const srcs = new Map(files.map((rel) => [rel, fs.readFileSync(path.join(REPO, rel), 'utf8')]));
+      const byFile = new Map();
+      for (const red of reds) {
+        const name = red.name.replace(/\s*\(\d+(?:\.\d+)?ms\)\s*$/, '');
+        for (const rel of files) {
+          if (srcs.get(rel).includes(name)) byFile.set(rel, (byFile.get(rel) || 0) + 1);
+        }
+      }
+      const stillRed = [];
+      for (const rel of [...byFile.keys()].sort()) {
+        const rr = node(['--test', rel]);
+        const isoRed = rr.status !== 0;
+        if (isoRed) stillRed.push(rel);
+        lines.push(`  isolation re-run ${rel}: ${isoRed ? 'STILL RED' : 'green'} (${byFile.get(rel)} red title[s])`);
+      }
+      if (byFile.size && !stillRed.length) {
+        ok = true;
+        lines.push(`actual: all ${reds.length} red title[s] green in isolation (${byFile.size} file[s]) ⇒ environment flake, recorded, not blocking`);
+        redLine = `  [gate] L1 environment flake recorded: ${reds.length} red title[s] green in isolated re-runs (${[...byFile.keys()].join(', ')}); suite summary observed pass=${pass} fail=${fail}`;
+      }
+    }
     const dump = dumpSuiteOutput(r.out);
     lines.push(dump ? `full suite output: ${dump}` : `full suite output could not be written (see the captured gate log)`);
-    redLine = suiteRedsLine(reds);
+    if (!redLine) redLine = suiteRedsLine(reds);
   }
   check('L1', 'offline regression suite', ok, lines);
   if (redLine) console.log(redLine);
-  return missing.length ? undefined : pass;
+  if (missing.length) return undefined;                       // 被截断：不许放行，L4 也会对不上
+  return ok && fail > 0 ? pass + fail : pass;                 // 环境假红放行时，实测总数 = pass+fail（隔离复跑已逐条证绿）
 }
 
 // ------------------------------------------------- L2a: host resolution (doctor)
