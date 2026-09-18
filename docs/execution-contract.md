@@ -72,3 +72,59 @@ The public entries answer failures the same way for every caller: one `[orchestr
 ## Regression commands
 
 Run npm test in the generic repository. Invoke test/live-codex.mjs by absolute path from the desired workspace for the opt-in 8-window/9-task real-model acceptance. ORCH_LIVE_ENTRY can select the Codex-specific scripts/orchestrate-sdk.mjs entry to run the same acceptance contract. Existing historical result files are not evidence for a changed core version; retain newly generated run IDs and summaries.
+
+
+## Failure policy (three tiers)
+
+Every failure walks three tiers; a bare error is never the end state.
+
+1. **auto** — the engine repairs it on its own and records the accounting (unit stall -> close window -> retry;
+   killed/uncertain units with a `retrySafe` acceptance -> retry; stale leases/tickets -> reclaimed).
+2. **repair** — a known remedy exists and is attempted (path/entry re-probe, unlock-and-retry, single retry on
+   spawn ENOENT, retrySafe classification for idempotent work).
+3. **guidance** — nothing left to try: the output must state the problem, the cause, what was already tried,
+   and exactly what the user should do next (`cause:` / `tried:` / `fix:` / `docs:` lines after the FATAL line).
+
+The first line stays the machine contract — `[orchestrator] FATAL: <reason>` — and no bare stack frames are ever
+emitted (stack only with `ORCH_DEBUG=1`). Guidance lines follow it for humans; machines can keep matching line one.
+
+Acceptance files declare idempotency so tier 1 can retry safely:
+`{"T001": {"checks": [...], "retrySafe": true}}`. Use `retrySafe` only when re-running the task is
+side-effect free (writing files, recomputing) — never for non-idempotent work (sending messages, placing orders).
+
+## Transient failures are absorbed, not reported
+
+A unit that dies quickly with no terminal checkpoint (a `started` checkpoint and nothing after) is a *transient*
+signature: the engine auto-retries it once per block instead of surfacing it as an error. Bounds and the escape
+hatch: `ORCH_TRANSIENT_RETRIES` (default 1), `ORCH_TRANSIENT_WINDOW_MS` (default 180000 ms — a failure that ran
+well past the window is never treated as transient, so real failures are not masked), and `"retrySafe": false`
+vetoes the automatic retry for tasks whose effects are not safe to repeat. `retrySafe: true` keeps its stronger
+meaning (always safe to re-run). Red-capable criterion: `test/transient-retry.test.mjs`.
+
+## Power-cut posture (what survives a real power loss)
+
+A real power cut kills every process at once; nothing can be done at that instant. Stability comes from three
+invariants, and the response is a boot-time convergence — not a heroic repair:
+
+1. **Durable, atomic state.** Ledger and lease writes go `tmp -> fsync -> rename` (`atomicJson` in `leases.mjs`);
+   readers treat a missing or unreadable ledger as *unknown*, never as "finished". Directory-entry fsync is not
+   available on Windows and is intentionally skipped — the rename is the atomic replace.
+2. **Idempotent units.** Acceptance is a content check, so a half-written artifact fails verification and a re-run
+   is free. Rule: only re-checkable work belongs in a unit; non-idempotent effects must declare
+   `{"retrySafe": false}` so the engine never re-runs them by itself.
+3. **A deterministic "who is dead" criterion.** Every run and lease record carries `bootId` (boot time derived from
+   `os.uptime()`, second precision). `bootId !== current` means *certainly from a previous boot*; PIDs are reused
+   across reboots and are never used to prove liveness.
+
+Boot-time convergence (report-only by default):
+
+```
+node scripts/recover-stale.mjs --workspace <dir>            # list interrupted runs + their resume commands
+node scripts/recover-stale.mjs --workspace <dir> --resume   # resume them through the one --resume-run path
+```
+
+Recommended deployment: run the report at logon (Task Scheduler), add `--resume` when unattended. Recovery is
+itself interruptible — if the machine dies again mid-resume the next scan picks it up (bounded, converging).
+
+Resume admission is clamped to *current* free memory (`floor(freeMB/1000)*2`): a busier machine queues blocks in
+waves and never fails a legitimately-created ledger just because memory shrank.

@@ -44,7 +44,7 @@ export function coreInventory(packageRoot = root) {
 
 export function runtimeInventory(packageRoot = root) {
   const files = {};
-  for (const rel of ['cli.mjs', 'package.json', 'repair.mjs']) {
+  for (const rel of ['cli.mjs', 'package.json', 'repair.mjs', 'scripts/recover-stale.mjs']) {
     const file = path.join(packageRoot, rel);
     if (fs.existsSync(file)) walkFile(file, rel, files);
   }

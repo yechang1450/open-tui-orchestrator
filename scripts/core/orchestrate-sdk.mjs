@@ -61,6 +61,7 @@
  */
 import {nativeArgumentLines} from "./native-argv.mjs";
 import {CORE_VERSION, levelWaves, keysOverlap, summaryComplete,requestTasks,bindClassifiedTasks,ledgerPlan,computeMaxWindows,powershellExe,systemToolExe} from "./contracts.mjs";
+import {formatFailureLines} from "./failure-report.mjs";
 import {effectiveUnitCarrier, ptyAvailability} from "./unit-carrier.mjs";
 // 锚定 SystemRoot 的系统工具：裸名会先按进程 cwd（=任意工作区）解析，防二进制投毒。
 const PS_EXE=powershellExe(),WHERE_EXE=systemToolExe("where.exe");
@@ -76,7 +77,7 @@ import {runUnitPlanner,writeUnitLauncher} from './unit-runtime.mjs';
 import {spawnInactiveWindow} from './inactive-window.mjs';
 import {ensureRunGuardian} from './run-guardian.mjs';
 import {lockedForMaintenance,readMaintenanceLock,MAINTENANCE_MESSAGE} from './maintenance-lock.mjs';
-import { networkConfig } from "./network-policy.mjs";
+import { networkConfig, codexNetworkConfig } from "./network-policy.mjs";
 import { spawn, spawnSync } from "node:child_process";
 import {watchRun, boardSummaryLine} from "./run-board.mjs";
 import { resolveAgent, launchArgs } from "./agent.mjs";
@@ -279,7 +280,7 @@ function wtAvailable() {
 // propagates to the spawned window processes, instead of only an implicit code default.
 process.env.ORCH_TUI = process.env.ORCH_TUI || "wt";
 const TUI_MODE = String(process.env.ORCH_TUI).toLowerCase();
-const codex = AGENT.agent==='codex'?new (await import('@openai/codex-sdk')).Codex({ codexPathOverride: CODEX, config: networkConfig }):null;
+const codex = AGENT.agent==='codex'?new (await import('@openai/codex-sdk')).Codex({ codexPathOverride: CODEX, config: codexNetworkConfig() }):null;
 // 让出 CPU：orchestrator（含拆解线程）以 BelowNormal 优先级跑，不抢占系统/其它任务（限速=80% 性能，慢慢跑）。
 try { process.setPriority(6); console.log("[orchestrator] priority=BelowNormal (让出CPU)"); } catch { /* ignore */ }
 function threadBase() {
@@ -2659,11 +2660,11 @@ export async function main() {
   );
 }
 const isMain = process.argv[1] && path.resolve(process.argv[1]).toLowerCase() === fileURLToPath(import.meta.url).toLowerCase();
-// 机器可调用契约：公开入口的失败只回一行 `[orchestrator] FATAL: <原因>`（完整栈帧仅 ORCH_DEBUG=1）。
+// 机器可调用契约：首行保持 `[orchestrator] FATAL: <原因>`（完整栈帧仅 ORCH_DEBUG=1）。
 // 调用方管道里永远不该出现裸 Node 栈帧——数据与诊断分得开，才谈得上「任何 agent 都能调」。
+// 首行之后附 cause/tried/fix/docs 指引（用户令 2026-09-18：能自愈的自愈，修不了的必须给用户出路）。
 export function reportFatal(error, stream = console.error) {
-  const message = error && error.message ? error.message : String(error);
-  stream("[orchestrator] FATAL: " + message);
+  for (const line of formatFailureLines(error)) stream(line);
   if (process.env.ORCH_DEBUG === "1" && error && error.stack) stream(error.stack);
 }
 if (isMain) main().catch((e) => {

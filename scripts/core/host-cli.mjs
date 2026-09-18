@@ -1,5 +1,5 @@
 import fs from 'node:fs';
-import { networkArgs } from './network-policy.mjs';
+import { networkArgs, codexNetworkArgs } from './network-policy.mjs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import {resolvePiHost,piArgs} from './pi-host.mjs';
@@ -199,6 +199,6 @@ export function launchArgs(config, options = {}) {
   // envelope into Codex so project trust and command confirmations cannot stop
   // an authorized TUI window at startup. Restricted callers keep their policy.
   if (sandbox === 'danger-full-access') args.push('--dangerously-bypass-approvals-and-sandbox');
-  args.push('-c', `projects.${JSON.stringify(cwd)}.trust_level="trusted"`, ...networkArgs());
+  args.push('-c', `projects.${JSON.stringify(cwd)}.trust_level="trusted"`, ...codexNetworkArgs());
   return args;
 }

@@ -3,7 +3,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import {fileURLToPath} from 'node:url';
 import {spawn,spawnSync} from 'node:child_process';
-import {keysOverlap,powershellExe} from './contracts.mjs';
+import {keysOverlap,powershellExe,bootId} from './contracts.mjs';
 
 // 锚定 SystemRoot 的 powershell.exe：裸名会先按进程 cwd（任意工作区）解析，防二进制投毒。
 const PS_EXE=powershellExe();
@@ -103,7 +103,11 @@ function acquireCoordinatorMutex(dir,owner,waitMs,script){
 }
 export function atomicJson(file,value){
   fs.mkdirSync(path.dirname(file),{recursive:true});
-  const tmp=file+'.'+process.pid+'.tmp';fs.writeFileSync(tmp,JSON.stringify(value,null,2));
+  const tmp=file+'.'+process.pid+'.tmp';
+  // 断电 P0（2026-09-18）：显式 fsync 再 rename —— 只落页缓存的话，真断电会留下 0 字节/半截 JSON，
+  // 恢复侧就会把合法账本读成损坏。目录项 fsync 在 Windows 上不支持，这里有意跳过（rename 是原子替换）。
+  const fd=fs.openSync(tmp,'w');
+  try{fs.writeFileSync(fd,JSON.stringify(value,null,2));fs.fsyncSync(fd);}finally{fs.closeSync(fd);}
   // Windows: renameSync 不覆盖已存在目标，且目标被杀软/索引器瞬时占用时报 EPERM/EACCES。
   // 单次 remove+rename 仍有窗口，这里做短暂退避重试；非暂时性错误立即上抛，临时文件不残留。
   const sleepSync=sleepFor;
@@ -146,6 +150,9 @@ export function transaction(dir,fn,snapshot=processSnapshot) {
   }
   try {processes=snapshot();let leases=[];try{leases=JSON.parse(fs.readFileSync(file,'utf8'));}catch(e){if(e.code!=='ENOENT')throw e;}
     leases=leases.filter(l=>{
+      // 断电 P0（2026-09-18）：带开机标识且与本次开机不符 ⇒ 确定来自上一次开机，直接回收。
+      // PID 跨重启会重用（可能撞上任意活进程），所以“重启后还活着”这类误判必须由 bootId 拦掉。
+      if(l.bootId!==undefined&&l.bootId!==bootId())return false;
       if(l.launcher)return sameProcess(l.launcher,processes.get(l.launcher.ProcessId));
       if(l.pidFile){let pid=0;try{pid=Number(fs.readFileSync(l.pidFile,'utf8').replace(/^\uFEFF/,''));}catch{};const found=launcherIdentity(pid,l.pidFile,processes);if(found){l.launcher=found;return true;}}
       return sameProcess(l.owner,processes.get(l.owner.ProcessId))||Date.now()-(l.reservedAt||0)<90000;
@@ -169,7 +176,7 @@ export function reserve(dir,rec,capacity,snapshot) {
     const limit=Math.min(capacity,...leases.map(l=>l.capacity||capacity));
     if(leases.length>=limit)return {ok:false,reason:'capacity'};
     if(leases.some(l=>keysOverlap(l.keys,rec.keys)))return {ok:false,reason:'conflict'};
-    leases.push({...rec,owner,capacity,reservedAt:Date.now()});return {ok:true};
+    leases.push({...rec,owner,capacity,reservedAt:Date.now(),bootId:bootId()});return {ok:true};
   },snapshot);
 }
 export function bind(dir,id,launcher,snapshot){return transaction(dir,leases=>{const l=leases.find(l=>l.id===id);if(!l)throw new Error('Reservation expired');l.launcher=launcher;},snapshot);}
@@ -181,9 +188,10 @@ export function claimRun(dir,key) {
   return transaction(dir,(_leases,owner,processes)=>{
     const file=path.join(dir,'run-owners.json');let owners={};
     try{owners=JSON.parse(fs.readFileSync(file,'utf8'));}catch(e){if(e.code!=='ENOENT')throw e;}
-    for(const [id,r] of Object.entries(owners))if(!sameProcess(r.owner,processes.get(r.owner.ProcessId)))delete owners[id];
+    // 断电 P0：上一次开机留下的 run 属主一律回收（PID 跨重启会重用，不能用来判“还活着”）。
+    for(const [id,r] of Object.entries(owners))if((r.bootId!==undefined&&r.bootId!==bootId())||!sameProcess(r.owner,processes.get(r.owner.ProcessId)))delete owners[id];
     if(owners[key])throw new Error('Run already has a live controller');
-    const claim={owner,token:crypto.randomUUID()};owners[key]=claim;atomicJson(file,owners);return claim;
+    const claim={owner,token:crypto.randomUUID(),bootId:bootId()};owners[key]=claim;atomicJson(file,owners);return claim;
   });
 }
 export function releaseRun(dir,key,claim) {
