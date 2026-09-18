@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.9.14 — core 1.16.1
+
+### Added
+
+- **Progress deadline for unproductive units (first-checkpoint deadline).** Measured 2026-09-18 in a live Codex `--mode window` run: an interrupted attempt (the user pressed ESC in the TUI) was retried correctly within seconds — the verdict came from the on-disk checkpoints, not from trying to detect the interrupt, which leaves no trace in the session rollout — but the retry then spent its whole turn analysing the prompt and the orchestrator's own sources instead of doing the task, so the task never reached its first (`started`) checkpoint. The watchdog now enforces the contract's own first step: if the attempt's `checkpoints/` directory has not moved past the spawn moment within `ORCH_UNIT_FIRST_CHECKPOINT_MS` (default 300000 ms; `0` disables), the attempt is closed early with an `unproductive: no task checkpoint within Ns …` reason and retried inside the attempt budget. The stall channel is untouched (a silently frozen unit still ends on `ORCH_UNIT_STALL_MS`). Red-capable criterion: `test/unit-stall.test.mjs` ("… trips the first-checkpoint deadline" — a live unit with a ticking session file that never checkpoints).
+- **Unproductive units are auto-retried once beyond the plain attempt budget.** When every remaining task still has *no* checkpoint at the budget gate — the unit "talked but did not act" — the runner grants one extra attempt (`ORCH_UNPRODUCTIVE_RETRIES`, default 1; `0` disables) and records `unproductiveRetries` in the ledger; once that allowance is spent the budget exhaustion is reported honestly, exactly as before. Red-capable criterion: `test/transient-retry.test.mjs` ("… never writes ANY checkpoint …" with `maxAttempts: 1`).
+- **`[env]` observability lines.** Every run now logs `[env] phase=start|final platform=… node=… free=…MB total=…MB capacity=…`, so environment monitoring (memory headroom and the admission capacity derived from it) is visible in the run's own stdout next to the `[board]` lines.
+
+### Changed
+
+- **Prompt hygiene in the unit body.** The `已独立验收的任务禁止重做：` line is emitted only when there are verified tasks — with an empty list it left a dangling colon that a live model treated as a clue about the harness — and a new hard rule instructs the unit to execute the given commands as-is instead of analysing the prompt's provenance or the orchestrator's implementation (`runner.mjs`).
+
 ## 0.9.13 — core 1.16.0
 
 ### Added

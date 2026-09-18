@@ -61,3 +61,58 @@ test('a live-but-silent unit stalls out, is force-closed and retried instead of 
     fs.rmSync(workspace, {recursive: true, force: true});
   }
 });
+
+// 2026-09-18（codex 现场）：单元活着、会话在动，但整轮只顾分析没动手——连第一个检查点都不写。
+// 判据：会话文件持续前进（stall 通道不允许触发）而尝试文件 mtime 从未越过启动时刻 ⇒
+// 首检查点期限命中 ⇒ 提前收口重跑（而不是等满 stall 期限），账本落 unproductive 理由。
+test('a unit that stays alive but never writes a first checkpoint trips the first-checkpoint deadline', async () => {
+  fs.mkdirSync(family, {recursive: true});
+  const workspace = fs.mkdtempSync(path.join(family, 'first-cp-'));
+  const ps = powershellExe();
+  const kids = [];
+  let spawned = 0, closed = 0;
+  const sessionFile = path.join(workspace, 'ticking-session.jsonl');
+  fs.writeFileSync(sessionFile, 'start\n', 'utf8');
+  const tick = setInterval(() => { try { fs.appendFileSync(sessionFile, 'tick\n'); } catch { /* ignore */ } }, 150);
+  const launcherFor = key => {
+    const lp = path.join(workspace, 'win-launch-' + key + '-cp.ps1');
+    fs.writeFileSync(lp, 'Start-Sleep -Seconds 600\n', 'utf8');
+    const pidf = path.join(workspace, 'window-' + key + '-cp.pid');
+    const child = spawn(ps, ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', lp], {windowsHide: true, stdio: 'ignore'});
+    kids.push(child);
+    fs.writeFileSync(pidf, String(child.pid), 'utf8');
+    return {lp, pidf, rf: path.join(workspace, 'win-' + key + '-cp.result.json')};
+  };
+  const hooks = {
+    plan: async () => [{title: 'A', tasks: [{prompt: '执行甲'}]}],
+    compact: p => p, infer: () => [], prompt: p => p,
+    launcher: launcherFor,
+    spawn: async () => { spawned++; return true; },
+    session: async () => sessionFile,
+    wait: async () => new Promise(() => {}),
+    readPid: pidf => Number(fs.readFileSync(pidf, 'utf8').trim()),
+    exitCode: () => null,
+    register: () => {}, unregister: () => {}, cleanup: () => {}, commit: () => {}, guardian: () => {},
+    close: async pid => { closed++; spawnSync('taskkill', ['/PID', String(pid), '/T', '/F'], {windowsHide: true, timeout: 15000}); },
+  };
+  const prevStall = process.env.ORCH_UNIT_STALL_MS, prevFirst = process.env.ORCH_UNIT_FIRST_CHECKPOINT_MS, prevUnprod = process.env.ORCH_UNPRODUCTIVE_RETRIES;
+  process.env.ORCH_UNIT_STALL_MS = '4000';            // 会话在前进：stall 通道必须不触发
+  process.env.ORCH_UNIT_FIRST_CHECKPOINT_MS = '1000'; // 1 秒内没有首检查点 ⇒ 命中
+  process.env.ORCH_UNPRODUCTIVE_RETRIES = '0';        // 本判据只测期限本身，关掉额外补试
+  try {
+    const sum = await runWindows('执行甲', hooks, {workspace, capacity: 8, runId: 'firstcp', auth: 'test', coordinator: path.join(workspace, 'temp', 'coordinator'), maxAttempts: 2, timeoutMs: 120000});
+    assert.equal(sum.success, false, 'a unit that never starts its first task must not fake success');
+    assert.ok(closed >= 2, 'each unproductive attempt must be closed out');
+    assert.ok(spawned >= 2, 'the block must be retried inside its attempt budget');
+    const reason = String(sum.taskResults.T001?.reason || '');
+    assert.match(reason, /unproductive/i, 'the ledger must carry the unproductive-deadline reason: ' + reason);
+  } finally {
+    clearInterval(tick);
+    if (prevStall === undefined) delete process.env.ORCH_UNIT_STALL_MS; else process.env.ORCH_UNIT_STALL_MS = prevStall;
+    if (prevFirst === undefined) delete process.env.ORCH_UNIT_FIRST_CHECKPOINT_MS; else process.env.ORCH_UNIT_FIRST_CHECKPOINT_MS = prevFirst;
+    if (prevUnprod === undefined) delete process.env.ORCH_UNPRODUCTIVE_RETRIES; else process.env.ORCH_UNPRODUCTIVE_RETRIES = prevUnprod;
+    for (const kid of kids) { try { spawnSync('taskkill', ['/PID', String(kid.pid), '/T', '/F'], {windowsHide: true, timeout: 10000}); } catch { /* best effort */ } }
+    await new Promise(r => setTimeout(r, 300));
+    fs.rmSync(workspace, {recursive: true, force: true});
+  }
+});

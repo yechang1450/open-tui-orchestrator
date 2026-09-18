@@ -33,6 +33,12 @@ file checks require a regular file and optionally sha256; json checks compare sp
 
 A running unit is watched for progress, not just for an exit: checkpoints, the result file and the launcher logs all count as progress. A unit that stays alive without any progress for `ORCH_UNIT_STALL_MS` (default 600000 ms) is declared `stalled: no unit progress for Ns`, closed through the normal teardown path (descendants are killed so the launcher still reaches its own `exit 0` — never a forced kill of the launcher itself), and retried inside the block's attempt budget. `ORCH_UNIT_TIMEOUT_MS` (default 2700000 ms) caps a single unit's lifetime even when progress keeps trickling. Leftover Windows Terminal windows recorded by this run (`win-*.window.json` handles, still owned by Windows Terminal, host without live children) are swept before the runner starts, so killed runs and power cuts do not leave dead panes to close by hand.
 
+## Progress deadline for unproductive units
+
+The contract asks each task to run its `started` checkpoint *before* doing the work, so "no checkpoint at all" is a positive signal: the unit never began. `waitWithStallWatchdog` therefore checks the attempt's `checkpoints/` directory in addition to file-mtime progress. If it has not moved past the spawn moment within `ORCH_UNIT_FIRST_CHECKPOINT_MS` (default 300000 ms; `0` disables), the attempt is closed early with an `unproductive:` reason and retried inside the attempt budget. A unit that checkpoints normally is never touched by this deadline, and a completely frozen unit still ends on the independent `ORCH_UNIT_STALL_MS` channel.
+
+At the budget gate, a block whose remaining tasks *all* still have no checkpoint is granted one extra attempt (`ORCH_UNPRODUCTIVE_RETRIES`, default 1 — set `0` to disable): that signature means the model turned in talk rather than work, which is worth exactly one retry and never more. The ledger records `unproductiveRetries`; when the allowance is spent the block still reports an honest `failed`.
+
 ## Interruption and recovery
 
 The launcher invokes the CLI once. It preserves failure evidence instead of blindly replaying a whole block. The controller independently rechecks every checkpoint and retries only remaining work, with a bounded attempt count (default two per block per controller) and backoff. Replacement windows use the same planned block and cannot exceed global concurrent capacity; verified tasks are omitted from their prompts.

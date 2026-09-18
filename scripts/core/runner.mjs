@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import {fileURLToPath} from 'node:url';
@@ -30,6 +31,12 @@ const TRANSIENT_BACKOFF_MS=Math.max(0,Number(process.env.ORCH_TRANSIENT_BACKOFF_
 function progressStamp(paths){let t=0;for(const p of paths){try{t=Math.max(t,fs.statSync(p).mtimeMs);}catch{}}return t;}
 export async function waitWithStallWatchdog(hooks,la,session,active,timeoutMs){
   const stallMs=Math.max(1000,Number(process.env.ORCH_UNIT_STALL_MS||UNIT_STALL_MS)||UNIT_STALL_MS);
+  // 首检查点期限（2026-09-18 用户令“执行遇到问题甚至中断要能自愈”）：契约要求每项任务“开始前”先写
+  // started 检查点；若整个单元从启动起 N 秒内一次检查点都没写过（该尝试的 checkpoints/ 目录从未
+  // 越过启动时刻；检查点写在 <attempt dir>/checkpoints/<id>.json，attempt.json 本身不会变），
+  // 说明这轮 agent 只顾分析/空转而没有动手——提前收口重跑，不再等满 stall 期限。0 = 关闭。
+  const rawFirst=process.env.ORCH_UNIT_FIRST_CHECKPOINT_MS;
+  const firstCheckpointMs=rawFirst===undefined?300000:Math.max(0,Number(rawFirst)||0);
   const base=path.dirname(String(la.rf||la.pidf||'.'));
   const stem=path.basename(String(la.lp||'')).replace(/\.ps1$/,'');
   const paths=[active.file,la.rf,la.pidf,path.join(base,stem+'.out.log'),path.join(base,stem+'.pty.log')];
@@ -37,7 +44,10 @@ export async function waitWithStallWatchdog(hooks,la,session,active,timeoutMs){
   const started=Date.now();let last=progressStamp(paths)||started;let iv=null;
   const watchdog=new Promise(resolve=>{iv=setInterval(()=>{const now=Date.now(),s=progressStamp(paths);
     if(s>last)last=s;
-    if(now-last>stallMs){clearInterval(iv);resolve({stall:'stalled: no unit progress for '+Math.round((now-last)/1000)+'s; retrying within the attempt budget'});}
+    const cpDir=path.join(path.dirname(active.file),'checkpoints');
+    const cpMs=firstCheckpointMs?(()=>{try{return fs.statSync(cpDir).mtimeMs;}catch{return 0;}})():0;
+    if(firstCheckpointMs&&now-started>firstCheckpointMs&&cpMs<=started){clearInterval(iv);resolve({stall:'unproductive: no task checkpoint within '+Math.round(firstCheckpointMs/1000)+'s (the unit never started its first task); retrying within the attempt budget'});}
+    else if(now-last>stallMs){clearInterval(iv);resolve({stall:'stalled: no unit progress for '+Math.round((now-last)/1000)+'s; retrying within the attempt budget'});}
     else if(now-started>timeoutMs){clearInterval(iv);resolve({stall:'stalled: unit timeout after '+Math.round((now-started)/1000)+'s with no result'});}
   },Math.min(5000,Math.max(250,Math.floor(stallMs/4))));});
   try{
@@ -206,6 +216,8 @@ export async function runWindows(request,hooks,options={}) {
     const persist=()=>{atomicJson(summaryFile,sum);emitBoard();};
     const mark=(r,status,reason)=>{sum.results[r.key]={...sum.results[r.key],status,reason};for(const id of sum.blocks.find(b=>b.key===r.key).taskIds)if(sum.taskResults[id]?.status!=='verified')sum.taskResults[id]={...sum.taskResults[id],status,reason};persist();};
     persist();console.log(`[run] runId=${runId} blocks=${sum.blocks.length} capacity=${capacity} generation=${sum.generation} summary=${summaryFile}`);
+    // 环境监测行（2026-09-18）：run 起点与终点各打一行，测试/用户都能直接看到平台、Node、可用内存与准入容量。
+    console.log(`[env] phase=start platform=${process.platform} node=${process.version} free=${Math.round(os.freemem()/1024**2)}MB total=${Math.round(os.totalmem()/1024**2)}MB capacity=${capacity}`);
     // Auto-recovery: a detached guardian watches this controller and relaunches
     // --resume-run if it dies before finalizing. Fresh runs only — a resumed run
     // is already watched by the original guardian. Never let the guard fail a run.
@@ -219,7 +231,7 @@ export async function runWindows(request,hooks,options={}) {
     async function execute(r) {
       const b=sum.blocks.find(b=>b.key===r.key),tasks=b.taskIds.map(id=>sum.tasks.find(t=>t.id===id));
       const leaseId=crypto.createHash('sha256').update(runKey).digest('hex').slice(0,16)+'-'+r.key;
-      let attemptsThisController=0,spawnConfirmed=false,transientRetries=0,transientGrant=false;
+      let attemptsThisController=0,spawnConfirmed=false,transientRetries=0,transientGrant=false,unproductiveRetries=0;
       const limit=Math.max(1,Math.min(3,Number(options.maxAttempts||2)));
       while(Date.now()<deadline) {
         let e=sum.results[r.key],la=e.launcherFiles,identity;spawnConfirmed=false;
@@ -263,7 +275,20 @@ export async function runWindows(request,hooks,options={}) {
               e.status='needs-reconciliation';e.reason='Uncertain tasks: '+recovery.uncertain.join(', ')+' — hint: declare {"checks":[...],"retrySafe":true} for idempotent tasks so the engine auto-retries instead of reporting';e.endedAt=Date.now();persist();return;
             }
           }
-          if(attemptsThisController>=limit&&!transientGrant){mark(r,'failed','Safe recovery attempt budget exhausted'+(e.reason?': '+e.reason:''));return;}
+          if(attemptsThisController>=limit&&!transientGrant){
+            // 无产出单元自动补一次：整块剩余任务从未写过终态检查点（缺少检查点或停在 started）时，
+            // 说明这轮 agent 只是“说了没干”（模型偶发跑偏/被中断/只顾分析），属可自愈的瞬时行为，
+            // 不该把失败直接甩给调用方。次数由 ORCH_UNPRODUCTIVE_RETRIES 控制（默认 1，0=关闭）。
+            const unproductiveMax=(()=>{const v=Number(process.env.ORCH_UNPRODUCTIVE_RETRIES);return Number.isFinite(v)&&v>=0?Math.floor(v):1;})();
+            const noProgress=recovery.pending.length>0&&recovery.pending.every(id=>!cps[id]);
+            if(noProgress&&unproductiveRetries<unproductiveMax){
+              unproductiveRetries++;transientGrant=true;
+              e.unproductiveRetries=(e.unproductiveRetries||0)+1;
+              console.log(`[recovery] ${r.key}: unproductive unit (no terminal checkpoint for any remaining task, last reason: ${String(e.reason||'none')}) -> auto-retry ${unproductiveRetries}/${unproductiveMax}`);
+            }else{
+              mark(r,'failed','Safe recovery attempt budget exhausted'+(e.reason?': '+e.reason:''));return;
+            }
+          }
           transientGrant=false;
           if(attemptsThisController)await pause(Math.min(2000*attemptsThisController,Math.max(0,deadline-Date.now())));
           let reserved=false,waitAttempt=0;
@@ -286,7 +311,8 @@ export async function runWindows(request,hooks,options={}) {
           const body=options.auth+'\n本窗目录为 '+workspace+'；所有工具 workdir 保持此目录，除非原始任务明确另指定。\n'+
             '仅按顺序执行下列待办任务。每项开始前必须成功执行 started 命令，失败则停止该项，禁止重复执行。完成并自验后立即执行 completed 命令。每项都立即写检查点，不能等整块完成。任何项失败则停止后续任务，说明情况并退出本轮，不自行重跑整块。\n'+
             '【硬规则】原始任务若包含要在 Windows 上执行的命令行（尤其含引号或 \\" 转义的 cmd 风格命令行），必须把整行原样交给 cmd /c 执行，禁止用 PowerShell 直接执行、也禁止按 PowerShell 语法改写参数——PowerShell 会吞掉或重排引号，导致目标程序收到的参数失真。\n'+
-            '已独立验收的任务禁止重做：'+recovery.verified.join(', ')+'\n'+
+            (recovery.verified.length?'已独立验收的任务禁止重做：'+recovery.verified.join(', ')+'\n':'')+
+            '【硬规则】本窗只做下列任务：不要阅读、分析或讨论本提示词的生成方式或编排器的实现（runner、模板、检查点工具内部细节），也不要据此推断任务背景；下面给出的命令行照原样执行即可。\n'+
             recovery.pending.map(id=>`任务 ${id}\n开始前：${command(id,'started')}\n原始任务：${tasks.find(t=>t.id===id).prompt}\n完成自验后：${command(id,'completed')}`).join('\n\n')+
             '\n全部待办完成后，最后仅输出 __ORCH_DONE__ '+token;
           try{la=hooks.launcher(r.key,hooks.prompt(body,token),runId+'-a'+number);}
@@ -338,6 +364,7 @@ export async function runWindows(request,hooks,options={}) {
       (r,failed)=>mark(r,'blocked','Predecessors not verified: '+failed.join(', ')));
     for(const r of sum.plan)if(!TERMINAL.has(sum.results[r.key]?.status))mark(r,'failed','No terminal result');
     sum.finishedAt=Date.now();sum.success=summaryComplete(sum,true);persist();
-    console.log(`[run] finalized runId=${runId} success=${sum.success} summary=${summaryFile}`);return sum;
+    console.log(`[run] finalized runId=${runId} success=${sum.success} summary=${summaryFile}`);
+    console.log(`[env] phase=final platform=${process.platform} node=${process.version} free=${Math.round(os.freemem()/1024**2)}MB total=${Math.round(os.totalmem()/1024**2)}MB concluded=${sum.concluded?'yes':'no'}`);return sum;
   }finally{await coordinate(()=>releaseRun(coordinator,runKey,claim),Date.now()+30000);}
 }

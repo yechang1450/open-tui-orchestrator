@@ -16,7 +16,7 @@ import {powershellExe} from '../scripts/core/contracts.mjs';
 const family = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../temp');
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-function harness({workspace, runId, checksValue, shortLive = true, attempt1Ms = 0}) {
+function harness({workspace, runId, checksValue, shortLive = true, attempt1Ms = 0, attempt1NoCheckpoint = false}) {
   const ps = powershellExe();
   const kids = [];
   let spawned = 0, attempt = 0;
@@ -43,11 +43,13 @@ function harness({workspace, runId, checksValue, shortLive = true, attempt1Ms = 
       attempt++;
       if (attempt === 1) {
         if (attempt1Ms) await sleep(attempt1Ms);
-        spawnSync(process.execPath, [checkpointHelper, attemptFile(1), 'T001', 'started'], {windowsHide: true, timeout: 15000});
+        if (!attempt1NoCheckpoint) spawnSync(process.execPath, [checkpointHelper, attemptFile(1), 'T001', 'started'], {windowsHide: true, timeout: 15000});
         return {done: false, exitCode: 1};                 // 启动即死：无终态检查点
       }
       fs.mkdirSync(path.join(workspace, 'proj-81'), {recursive: true});
       fs.writeFileSync(path.join(workspace, 'proj-81', 'alpha.txt'), 'ALPHA_OK', 'utf8');
+      // 契约要求 started → completed 顺序（缺 started 时 completed 会被检查点工具拒绝）。
+      spawnSync(process.execPath, [checkpointHelper, attemptFile(attempt), 'T001', 'started'], {windowsHide: true, timeout: 15000});
       spawnSync(process.execPath, [checkpointHelper, attemptFile(attempt), 'T001', 'completed'], {windowsHide: true, timeout: 15000});
       fs.writeFileSync(rf, JSON.stringify({done: true, exitCode: 0}), 'utf8');
       return {done: true, exitCode: 0};
@@ -122,6 +124,25 @@ test('a long-running failure is not treated as transient (real failures are neve
   } finally {
     if (prevBackoff === undefined) delete process.env.ORCH_TRANSIENT_BACKOFF_MS; else process.env.ORCH_TRANSIENT_BACKOFF_MS = prevBackoff;
     if (prevWindow === undefined) delete process.env.ORCH_TRANSIENT_WINDOW_MS; else process.env.ORCH_TRANSIENT_WINDOW_MS = prevWindow;
+    await cleanup(workspace, h.kids);
+  }
+});
+
+// 2026-09-18（codex 现场）：单元整轮“只说不干”——连一个检查点都没写（T002 从未 started），
+// 普通预算 1 次用尽就会把失败甩给调用方。新行为：无产出特征成立时自动补一次重试（可 env 关）。
+test('a unit that never writes ANY checkpoint is auto-retried once beyond the plain attempt budget', async () => {
+  fs.mkdirSync(family, {recursive: true});
+  const workspace = fs.mkdtempSync(path.join(family, 'unproductive-'));
+  const h = harness({workspace, runId: 'unproductive', attempt1NoCheckpoint: true});
+  const prevBackoff = process.env.ORCH_TRANSIENT_BACKOFF_MS;
+  process.env.ORCH_TRANSIENT_BACKOFF_MS = '0';
+  try {
+    const sum = await runWindows('执行甲', h.hooks, {workspace, capacity: 4, runId: 'unproductive', auth: 'test', coordinator: path.join(workspace, 'temp', 'coordinator'), acceptanceFile: h.acceptanceFile, maxAttempts: 1, timeoutMs: 60000});
+    assert.equal(sum.success, true, 'a no-checkpoint (talked-but-did-nothing) attempt must be auto-retried, not surfaced; B1=' + JSON.stringify(sum.results.B1).slice(0, 700) + ' T001=' + JSON.stringify(sum.taskResults.T001).slice(0, 300));
+    assert.ok(h.attempts() >= 2, 'the unproductive attempt must be re-run beyond the plain attempt budget');
+    assert.ok((sum.results.B1.unproductiveRetries || 0) >= 1, 'the ledger must show the unproductive auto-retry count');
+  } finally {
+    if (prevBackoff === undefined) delete process.env.ORCH_TRANSIENT_BACKOFF_MS; else process.env.ORCH_TRANSIENT_BACKOFF_MS = prevBackoff;
     await cleanup(workspace, h.kids);
   }
 });
