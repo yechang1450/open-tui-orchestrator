@@ -1,11 +1,18 @@
 import path from 'node:path';
 
+// MSYS/Git-Bash 风格路径（/d/temp/x）对原生进程是"当前盘符相对路径"，会被拼成 D:\d\temp\x。
+// 统一归一为原生形式（D:/temp/x），避免下游 spawn 以无效 cwd 秒死（症状是难以定位的 ENOENT）。
+const msysToNative = (s) => {
+  const m = /^\/([a-zA-Z])\//.exec(s);
+  return m ? `${m[1].toUpperCase()}:/` + s.slice(3) : s;
+};
+
 // Resolve once at the caller's entry point. Never substitute the install directory
 // or CODEX_HOME for the directory that initiated this run.
 export function resolveRuntimeContext(env = process.env, cwd = process.cwd()) {
-  const workspace = path.resolve(cwd, String(env.WORKSPACE_DIR || '').trim() || '.');
+  const workspace = path.resolve(cwd, msysToNative(String(env.WORKSPACE_DIR || '').trim()) || '.');
   const temp = path.join(workspace, 'temp');
-  const override = String(env.ORCH_STATE_DIR || '').trim();
+  const override = msysToNative(String(env.ORCH_STATE_DIR || '').trim());
   const state = override ? resolveStateOverride(temp, override) : path.join(temp, 'orchestrator');
   return { workspace, temp, state };
 }
