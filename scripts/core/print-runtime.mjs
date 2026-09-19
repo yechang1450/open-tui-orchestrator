@@ -42,7 +42,7 @@ export function writeProfileLauncher(config, { key, prompt, suffix, workspace, t
   const rf = path.join(temp, 'win-' + stem + '.result.json');
   const log = path.join(temp, 'win-' + stem + '.out.log');
   fs.writeFileSync(pf, prompt, 'utf8');
-  const args = profileArgs(config, { model: process.env.ORCH_MODEL, effort: process.env.ORCH_EFFORT });
+  const args = profileArgs(config, { model: process.env.ORCH_MODEL, effort: process.env.ORCH_EFFORT, mode: process.env.ORCH_SPAWN_MODE });
   const body = [
     "$ErrorActionPreference = 'Continue'",
     'trap { exit 0 }',
