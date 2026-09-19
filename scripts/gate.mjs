@@ -234,9 +234,9 @@ function consistency(suitePass) {
   if (!ok) lines.push(`core version and the seal disagree ⇒ FAIL`);
 
   const sources = {
-    'README.md': [/core is ([\d.]+), with (\d+)\/(\d+) offline tests passing/, 0, 1, 2],
-    'README-zh.md': [/当前通用核心为 ([\d.]+)，离线回归为 (\d+)\/(\d+) 通过/, 0, 1, 2],
-    'docs/release-policy.md': [/当前源码封印记录通用核心 ([\d.]+)、(\d+) 个核心文件和 (\d+) 个运行时文件。最新离线回归为 (\d+)\/(\d+) 通过/, 0, 3, 4],
+    'README.md': [/core is ([\d.]+(?:-\d+)?), with (\d+)\/(\d+) offline tests passing/, 0, 1, 2],
+    'README-zh.md': [/当前通用核心为 ([\d.]+(?:-\d+)?)，离线回归为 (\d+)\/(\d+) 通过/, 0, 1, 2],
+    'docs/release-policy.md': [/当前源码封印记录通用核心 ([\d.]+(?:-\d+)?)、(\d+) 个核心文件和 (\d+) 个运行时文件。最新离线回归为 (\d+)\/(\d+) 通过/, 0, 3, 4],
   };
   const totals = new Set();
   for (const [rel, [pattern, ci, pi, ti]] of Object.entries(sources)) {

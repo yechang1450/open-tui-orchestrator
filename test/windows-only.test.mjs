@@ -36,7 +36,7 @@ test('a non-Windows platform is refused at the entry with one diagnostic line', 
 test('the platform-neutral entries still work on a non-Windows platform', () => {
   const version = runAsLinux(['--version']);
   assert.equal(version.status, 0, version.stderr || version.stdout);
-  assert.match(version.stdout, /open-tui-orchestrator \d+\.\d+\.\d+ \(core \d+\.\d+\.\d+\)/, version.stdout);
+  assert.match(version.stdout, /open-tui-orchestrator \d+\.\d+\.\d+(?:-\d+)? \(core \d+\.\d+\.\d+(?:-\d+)?\)/, version.stdout);
   const deps = runAsLinux(['--install-deps']);
   assert.equal(deps.status, 0, deps.stderr || deps.stdout);
   assert.match(deps.stdout, /"action":"already-present"/, 'the bootstrap is platform-neutral: ' + deps.stdout);
