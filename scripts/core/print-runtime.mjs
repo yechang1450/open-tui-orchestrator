@@ -72,7 +72,11 @@ export function writeProfileLauncher(config, { key, prompt, suffix, workspace, t
     "if ([string]::IsNullOrWhiteSpace($p)) { Write-Result 2 ''; exit 0 }",
     "$agentArgs = @(" + args.map(quote).join(',') + ') + @($p)',
     ...nativeArgumentLines(),
-    `& ${quote(config.bin)} @agentArgs 2>&1 | ForEach-Object { if ($_ -is [System.Management.Automation.ErrorRecord]) { $_.TargetObject } else { $_ } } | Tee-Object -FilePath $log`,
+    // 2026-09-19：窗口模式让 CLI 裸跑 —— 不接管道（管道会剥掉 ANSI 颜色并把真 TTY 变假，
+    // 表现是整窗单色）。收口靠"盘上验收"，不依赖 stdout 捕获；headless 行为逐字不变。
+    String(process.env.ORCH_SPAWN_MODE||'').toLowerCase()==='window'
+      ? `& ${quote(config.bin)} @agentArgs`
+      : `& ${quote(config.bin)} @agentArgs 2>&1 | ForEach-Object { if ($_ -is [System.Management.Automation.ErrorRecord]) { $_.TargetObject } else { $_ } } | Tee-Object -FilePath $log`,
     '$code = $LASTEXITCODE',
     "$report = ''",
     "if (Test-Path -LiteralPath $log) {",
