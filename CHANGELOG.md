@@ -20,7 +20,7 @@
 
 ### Note
 
-- Version numbers are release dates (`YYYY.M.D`; leading zeros are not valid semver). Additional releases on the same day advance the date number.
+- Version numbers are release dates with a per-day change counter: `YYYY.M.D-N`, where N = the Nth change of that day, auto-incremented, unbounded (e.g. `2026.9.19-1`, `2026.9.19-2`, …). npm treats `-N` as a prerelease, so publishing uses an explicit `--tag latest`; plain `YYYY.M.D` is the legal form for a day with no counter suffix. Never use four-segment forms like `2026.9.19.1` — they are invalid semver and npm silently rewrites them to a wrong date.
 
 ## 2026.9.18 — version scheme switch (calver)
 
