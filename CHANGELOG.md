@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026.9.19-2 — window-entry criteria + docs totals
+
+- Adds red-capable tests for the window entry path (mode plumbing), MSYS-style path normalization, and the hermes profile window declaration (suite total 339/339).
+- Release chain publishes `-N` versions with an explicit `--tag latest` (no manual rescue needed).
+
+
 ## 2026.9.19-1 — first use of the per-day counter scheme (docs-only)
 
 - No code change vs 2026.9.20 (the fully verified build): this release carries the version-scheme documentation (`YYYY.M.D-N`, N = the Nth change of that day, auto-incremented) and the auto-numbering tool. Publishing `-N` versions uses an explicit `--tag latest` so installs are unchanged.
