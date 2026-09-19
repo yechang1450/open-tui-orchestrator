@@ -1509,7 +1509,7 @@ function writeInteractiveLauncher(title, prompt, sfx) {
             "            # 在窗口刚拿到任务 prompt、agent 还没产出任何结果时就把这条『用户消息』误判成完成汇报，随即自关窗、丢任务。",
             "            # 层级化：watchdog(爷爷)只认 TUI 窗(儿子)是否完成任务——只要 TUI 窗输出 __ORCH_DONE__ <token> 就认为收尾。",
             "            # watchdog 只认 TUI 窗(儿子)输出 __ORCH_DONE__ <token> 即收尾；不再有任何 SUBAGENTS_DONE 后缀。",
-            "            $done = ($tail | Where-Object { ($_ -match 'agent_message|\"role\":\"assistant\"') -and $_.Contains('__ORCH_DONE__') -and $_.Contains($token) } | Select-Object -Last 1)",
+            "            $done = ($tail | Where-Object { ($_ -match 'agent_message|\"role\":\"assistant\"') -and ($_ -match ('__ORCH_DONE__\\s*' + $token)) } | Select-Object -Last 1)",
     "            if ($done) {",
     "                Ensure-ResultDir; try { Set-Content -LiteralPath ($resultFile + '.self-closed') -Value '1' -Encoding ASCII } catch { }",
     "                # 递归杀净 launcher 的全部后代（agent 树）：绝不强杀 launcher 自身；agent 已退出(无后代)则函数直接跳过。",
