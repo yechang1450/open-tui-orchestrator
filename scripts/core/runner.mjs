@@ -417,9 +417,9 @@ export async function runWindows(request,hooks,options={}) {
           await coordinate(()=>release(coordinator,e.leaseId||leaseId),Date.now()+30000);
           await recordUnitPeakIfReady(la, r.key, active.token, options.agent || sum.agent || 'caller', peakSampled);
           hooks.unregister(e.leaseId||leaseId);if(la)hooks.cleanup(la);
-          // 2026-09-19：单元收尾后立刻扫残窗（含"launcher 已死、WT 面板赖着"的僵尸窗）——
-          // 旧清扫只在 run 启动/恢复时跑，导致非零退出后的残留面板要等下一次 run 才被收。
-          try{await hooks.sweep?.();}catch{}
+          // 2026-09-19：单元收尾后扫残窗（含"launcher 已死、WT 面板赖着"的僵尸窗）——只扫本单位自己那一扇（stem 过滤），
+          // 绝不触碰并行中的其它窗：全域扫会在旁窗忙碌判定失败时误杀活窗。
+          try{await hooks.sweep?.(active.token?String(active.token):'');}catch{}
           e.endedAt=Date.now();active.endedAt=e.endedAt;active.exitCode=e.exitCode;
           collectVerification(sum,checks,workspace);persist();
         }
