@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026.9.19-1 — first use of the per-day counter scheme (docs-only)
+
+- No code change vs 2026.9.20 (the fully verified build): this release carries the version-scheme documentation (`YYYY.M.D-N`, N = the Nth change of that day, auto-incremented) and the auto-numbering tool. Publishing `-N` versions uses an explicit `--tag latest` so installs are unchanged.
+
+
 ## 2026.9.20 — real TUI windows for profiled hosts (color + close-on-acceptance + queue visibility)
 
 - hermes window mode now renders the real interactive TUI (chat --tui --yolo --no-restore-cwd -q) in a Windows Terminal at the project directory; the launcher runs the CLI bare so ANSI colors survive; disk-verified acceptance is the settle condition ("close on acceptance"), so no self-exit and no stdout capture are needed.
