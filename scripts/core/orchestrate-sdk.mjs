@@ -1942,8 +1942,8 @@ export function leftoverWindowHandles(tmpDir) {
   }
   return [...new Set(handles)];
 }
-async function sweepLeftoverRunWindows() {
-  const entries = runWindowEntries(TMP);
+async function sweepLeftoverRunWindows(onlyStem = "") {
+  const entries = runWindowEntries(TMP).filter((e) => !onlyStem || String(e.stem || "").includes(String(onlyStem)));
   if (!entries.length) return 0;
   const pairs = entries.map((e) => "@('" + e.hwnd.replace(/'/g, "''") + "','" + e.stem.replace(/'/g, "''") + "')").join(",");
   const script =
@@ -2648,7 +2648,7 @@ export async function main() {
       session:(AGENT.config.profile&&SPAWN_MODE==='window')?null:(AGENT.agent!=='codex'?async(_token,_timeout,rf)=>rf:waitForSessionFile),
       wait:AGENT.agent!=='codex'?(async(_session,timeout,rf,_token,pidf)=>waitAdapterResult(rf,timeout,pidf)):waitTaskComplete,exitCode:readExitCode,
       register:r=>updateWindows(ws=>[...ws,r]),commit:commitReservation,unregister:cancelReservation,close:closeWindowByPid,
-      sweep:()=>sweepLeftoverRunWindows(),
+      sweep:(stem)=>sweepLeftoverRunWindows(stem),
       guardian:g=>ensureRunGuardian({...g,agent:AGENT.agent,env:process.env}),
       cleanup:la=>{const wsRoot=(()=>{const r=path.resolve(WORKSPACE);return r.endsWith(path.sep)?r:r+path.sep;})();for(const f of [la.lp,la.pf,la.pidf,la.rf,la.pidf+'.self-closed',la.rf+'.self-closed',String(la.lp||'').replace(/\.ps1$/,'.pty.log')])try{const resolved=path.resolve(String(f||''));if(resolved.startsWith(wsRoot))rmSync(resolved,{force:true});}catch{}}
     },{workspace:WORKSPACE,capacity,resume,agent:AGENT.agent,unitProfile:AGENT.config.unit||null,modelPlan:MODEL_PLAN,runId:process.env.ORCH_RUN_ID,acceptanceFile:process.env.ORCH_ACCEPTANCE_FILE,timeoutMs:POLL_TIMEOUT_MS,auth:readAuthPrompt(),plan:preflightPlan,spawnMode:SPAWN_MODE,spawnStaggerMs:Math.max(0,Number(process.env.ORCH_WINDOW_STAGGER_MS||0)||0),windowCap:Math.max(0,Number(process.env.ORCH_MAX_WINDOWS||0)||0)||undefined});
