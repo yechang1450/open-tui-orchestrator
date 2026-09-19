@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026.9.19-3 — actionable queue-timeout message
+
+- The window-slot wait now reports its last reason, elapsed time and next steps when it times out (machine-level contention, not a unit failure); queue waits already log [queue] lines. Semantics verified: waiting on `capacity`/`conflict` is correct and must never be "degraded" into unsafe parallel writing.
+
+
 ## 2026.9.19-2 — window-entry criteria + docs totals
 
 - Adds red-capable tests for the window entry path (mode plumbing), MSYS-style path normalization, and the hermes profile window declaration (suite total 339/339).
