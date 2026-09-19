@@ -1516,7 +1516,9 @@ function writeInteractiveLauncher(title, prompt, sfx) {
     "                Kill-LauncherTree $rootPid",
     "                exit 0",
     "            }",
-            "            $report = ($tail | Where-Object { ($_ -match 'agent_message|\"role\":\"assistant\"') -and $_.Contains($token) -and $false /* 2026-09-19 根治：token+完成 弱判据会错杀活窗（任务提示词与进行中消息天然同时含二者），已废 */ } | Select-Object -Last 1)",
+    // 2026-09-19 根治：token+完成 弱判据会错杀活窗（任务提示词与进行中消息天然同时含二者）。
+    // 判据已废（改用永假串，保持 PS 语法纯净；注释只放在 JS 层，PS 不认 /* */）。完成只认 ① __ORCH_DONE__ 标记 或 ③ 结构化 task_complete。
+            "            $report = ($tail | Where-Object { ($_ -match 'agent_message|\"role\":\"assistant\"') -and $_.Contains($token) -and $_.Contains('__NEVER_TOKEN_DONE__') } | Select-Object -Last 1)",
     "            if ($report) {",
     "                # 命中即收窗：rollout 中最后一条含本窗 token+完成 的 assistant 消息即最终汇报（模板要求最终汇报以 token 开头、禁止中途输出未完状态），出现即写强标记并结束，无需等 1.5s 稳定。",
     "                Ensure-ResultDir; try { Set-Content -LiteralPath ($resultFile + '.self-closed') -Value '1' -Encoding ASCII } catch { }",
