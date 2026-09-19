@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026.9.19-4 — codex window root fixes (long-standing exit-1 mystery solved)
+
+- **Root cause found and fixed**: the window watchdog accepted any assistant message containing the block token *and the word 完成* as a completion report — the task prompt itself satisfies both, so the first in-progress message killed its own window (random victim among concurrent windows, 8-25s deaths, empty checkpoints). Completion now requires the `__ORCH_DONE__` marker or a structured task_complete event only.
+- Fixed my own regression: a C-style comment inside the launcher body is not PowerShell syntax and crashed every window at parse time; comment moved to the JS layer.
+- Leftover windows (WT keeps non-zero panes) are now swept after **every unit teardown**, not only at the next run start.
+- New red-capable guards: no word-heuristic regression, no stray C-style comments in the launcher body (suite 341/341).
+
+
 ## 2026.9.19-3 — actionable queue-timeout message
 
 - The window-slot wait now reports its last reason, elapsed time and next steps when it times out (machine-level contention, not a unit failure); queue waits already log [queue] lines. Semantics verified: waiting on `capacity`/`conflict` is correct and must never be "degraded" into unsafe parallel writing.
