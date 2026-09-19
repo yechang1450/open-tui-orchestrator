@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026.9.20 — real TUI windows for profiled hosts (color + close-on-acceptance + queue visibility)
+
+- hermes window mode now renders the real interactive TUI (chat --tui --yolo --no-restore-cwd -q) in a Windows Terminal at the project directory; the launcher runs the CLI bare so ANSI colors survive; disk-verified acceptance is the settle condition ("close on acceptance"), so no self-exit and no stdout capture are needed.
+- Window-slot waits log [queue] lines; the release-criterion version assertion reads CORE_VERSION (no per-release test edits).
+- Calver rule: same-day re-releases advance the date number.
+
+
 ## 2026.9.19 — hermes TUI window leg + hygiene
 
 ### Added
