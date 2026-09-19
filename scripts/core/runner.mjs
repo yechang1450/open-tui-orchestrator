@@ -340,10 +340,10 @@ export async function runWindows(request,hooks,options={}) {
           let reserved=false,waitAttempt=0;
           while(Date.now()<deadline) {
             const result=await coordinate(()=>reserve(coordinator,{id:leaseId,runId,keys:r.keys},windowCap),deadline);
-            if(result.ok){reserved=true;break;}
+            if(result.ok){reserved=true;if(waitAttempt)console.log(`[queue] ${r.key}: window slot acquired after ${waitAttempt} wait(s)`);break;}
             // 排队退避（指数+抖动）：不再每秒重试；等待状态仅在理由变化时重写，少刷账本。
             const waitMsg='Waiting for '+result.reason,cur=sum.results[r.key];
-            if(!cur||cur.status!=='waiting'||cur.reason!==waitMsg)mark(r,'waiting',waitMsg);
+            if(!cur||cur.status!=='waiting'||cur.reason!==waitMsg){mark(r,'waiting',waitMsg);console.log(`[queue] ${r.key}: ${waitMsg} — backing off (wait #${waitAttempt+1}); waiting is normal under machine-level contention, not a hang`);}
             await pause(Math.min(waitBackoffMs(waitAttempt++,WAIT_BACKOFF),Math.max(0,deadline-Date.now())));
           }
           if(!reserved){mark(r,'timeout','Window capacity/resource wait timed out');return;}
