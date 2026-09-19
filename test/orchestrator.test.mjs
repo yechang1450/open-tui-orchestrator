@@ -563,8 +563,10 @@ test('runtime: watchdog closes on __ORCH_DONE__ <token> alone; sub-agent complet
   const { lp, pidf, pf } = writeInteractiveLauncher('subcut', 'task\n\n【本块唯一标识】S1-abc 完成', 'x');
   try {
     const body = fs.readFileSync(lp, 'utf8');
-    // 1) watchdog done-detection must match __ORCH_DONE__ <token> without requiring SUBAGENTS_DONE
-    assert.ok(body.includes("$_.Contains('__ORCH_DONE__') -and $_.Contains($token)"), 'watchdog must close on __ORCH_DONE__ <token> alone');
+    // 1) watchdog done-detection must match the CONTIGUOUS form __ORCH_DONE__ <own token>
+    //    (two separate Contains() cross-matched foreign tokens via shared files like manifest.json -> multi-window friendly fire);
+    //    must not require a SUBAGENTS_DONE suffix.
+    assert.ok(body.includes("($_ -match ('__ORCH_DONE__\\s*' + $token))"), 'watchdog must close on the contiguous __ORCH_DONE__ <token> form only');
     assert.doesNotMatch(body, /\$spawnedAgent -eq \$false -or \$_.Contains\('SUBAGENTS_DONE'\)/, 'watchdog must not require SUBAGENTS_DONE suffix');
     // 2) the done-detection must NOT be gated on a SUBAGENTS_DONE marker
     assert.doesNotMatch(body, /Contains\('SUBAGENTS_DONE'\)/, 'watchdog must not depend on SUBAGENTS_DONE in the rollout');
