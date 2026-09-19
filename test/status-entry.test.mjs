@@ -9,7 +9,7 @@ test('public CLI --version is read-only and never resolves an agent CLI',()=>{
  const file=fileURLToPath(new URL('../cli.mjs',import.meta.url));
  const result=spawnSync(process.execPath,[file,'--version'],{env:{...process.env,ORCH_CLI:'D:/nope/definitely-missing-orch-test.exe'},encoding:'utf8',windowsHide:true,timeout:20000});
  assert.equal(result.status,0,result.stderr);
- assert.match(result.stdout,/^open-tui-orchestrator \d+\.\d+\.\d+ \(core \d+\.\d+\.\d+\)$/m);
+ assert.match(result.stdout,/^open-tui-orchestrator \d+\.\d+\.\d+(?:-\d+)? \(core \d+\.\d+\.\d+(?:-\d+)?\)$/m);
 });
 test('public SDK status dispatch returns an actual read-only status, not usage',{skip:CODEX_CLI_SKIP},()=>{
  const file=fileURLToPath(new URL('../scripts/orchestrate-sdk.mjs',import.meta.url));
