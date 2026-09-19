@@ -11,9 +11,10 @@ const root = fileURLToPath(new URL('..', import.meta.url));
 // 判据：窗口入口只在 mode=window 时生效；headless（默认）逐字不变。
 // 反例（必红）：把 mode 透传删掉 → window 断言 '--tui' 失败。
 test('profile window entry: mode=window picks the TUI argv, headless stays verbatim', () => {
-  const p = loadProfile('hermes');
-  const headless = profileArgs(p, {});
-  const win = profileArgs(p, {mode: 'window'});
+  const raw = JSON.parse(fs.readFileSync(path.join(root, 'scripts', 'core', 'agent-profiles', 'hermes.json'), 'utf8'));
+  const cfg = {profile: {args: raw.args || raw.profile?.args || {}}};
+  const headless = profileArgs(cfg, {});
+  const win = profileArgs(cfg, {mode: 'window'});
   assert.ok(headless.includes('-z'), `headless keeps the one-shot flag: ${JSON.stringify(headless)}`);
   assert.ok(!headless.includes('--tui'), `headless must not carry the TUI flag: ${JSON.stringify(headless)}`);
   assert.equal(win[0], 'chat', `window argv starts with the subcommand: ${JSON.stringify(win)}`);
