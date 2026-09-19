@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026.9.19-5 — multi-window friendly fire: root-caused and fixed
+
+- The window watchdog matched `__ORCH_DONE__` and the block token with two separate Contains() — an agent printing a shared file (manifest.json carries every token) satisfied both on ONE line for a FOREIGN token, so the first four-window run killed three of its own siblings. Completion now requires the contiguous form `__ORCH_DONE__ <own token>`. Verified: 4/4 windows survive, verify rc=0.
+- The per-teardown leftover sweep is scoped to the finished unitu2019s own window stem (a full-TMP sweep could close live sibling windows).
+
+
 ## 2026.9.19-4 — codex window root fixes (long-standing exit-1 mystery solved)
 
 - **Root cause found and fixed**: the window watchdog accepted any assistant message containing the block token *and the word 完成* as a completion report — the task prompt itself satisfies both, so the first in-progress message killed its own window (random victim among concurrent windows, 8-25s deaths, empty checkpoints). Completion now requires the `__ORCH_DONE__` marker or a structured task_complete event only.
