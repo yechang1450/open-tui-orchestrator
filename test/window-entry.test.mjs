@@ -41,7 +41,12 @@ test('runtime context normalizes MSYS-style paths instead of mangling them', (t)
 
 // 判据：Linux/macOS 上 /d/temp/ws 就是普通绝对路径，必须原样保留（不得被改写成 D:/temp/ws）。
 // 反例（必红）：去掉 msysToNative 里的平台判断 → workspace 变成 <cwd>/D:/temp/ws。
-test('runtime context leaves POSIX absolute paths untouched', () => {
+// 该语义只在 POSIX 平台成立（Windows 上 /d/... 会按当前盘符解析），Windows 上跳过并给出说明。
+test('runtime context leaves POSIX absolute paths untouched', (t) => {
+  if (process.platform === 'win32') {
+    t.skip('POSIX 绝对路径语义只在 Linux/macOS 成立；Windows 见上一条（MSYS 归一）');
+    return;
+  }
   const r = resolveRuntimeContext(
     {WORKSPACE_DIR: '/d/temp/ws', ORCH_STATE_DIR: '/d/temp/ws/temp/orchestrator'},
     '/tmp'
