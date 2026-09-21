@@ -7,6 +7,21 @@
 - **Windows Terminal** — recommended; `--doctor` reports `terminal: "wt"` or falls back to `conhost`.
 - **One supported agent CLI, already installed and logged in**: Codex, pi, opencode, Kimi Code, Claude Code, or the version-pinned OpenClaw. The orchestrator drives the CLI you already use; it never installs, upgrades or substitutes one.
 
+### Other platforms (Linux / macOS)
+
+The product refuses to run outside Windows by design, and so does its test suite: ~70 of 230 cases
+drive the Windows runtime (visible TUI carrier, process snapshot, PowerShell launchers). Running
+`npm test` on Linux/macOS therefore stops immediately with one platform diagnostic instead of a wall
+of failures. Two escape hatches exist:
+
+```bash
+npm run test:portable                  # platform-neutral cases only (path normalization, profile argv)
+ORCH_TEST_ALLOW_NON_WINDOWS=1 npm test # run everything anyway; many Windows-only failures expected
+```
+
+Platform-neutral behaviour is asserted for POSIX too (a `/d/temp/ws` path must stay untouched on
+Linux/macOS; the MSYS/Git-Bash rewrite is asserted on Windows and skipped with a reason elsewhere).
+
 ## Install (npm registry)
 
 ```powershell
