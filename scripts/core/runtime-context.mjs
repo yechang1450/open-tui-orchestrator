@@ -4,8 +4,10 @@ import path from 'node:path';
 // 统一归一为原生形式（D:/temp/x），避免下游 spawn 以无效 cwd 秒死（症状是难以定位的 ENOENT）。
 // 只在 Windows 上成立：Linux/macOS 的 /d/temp/x 就是普通绝对路径，照原样返回，
 // 否则会被拼成 /d/temp/x 之外的怪路径（例如 <cwd>/D:/temp/x）。
-const msysToNative = (s) => {
-  if (process.platform !== 'win32') return s;
+// 平台可注入（默认当前平台）：两种语义（Windows 归一 / POSIX 原样）都要能在**任何**平台上被判定，
+// 否则 Windows 上就有一个"永远跳过、永远不会红"的盲区（2026-09-22：gate 的 L1 要求 skipped==0）。
+export const msysToNative = (s, platform = process.platform) => {
+  if (platform !== 'win32') return s;
   const m = /^\/([a-zA-Z])\//.exec(s);
   return m ? `${m[1].toUpperCase()}:/` + s.slice(3) : s;
 };
