@@ -172,9 +172,6 @@ export async function adaptAgent({ id, cli, env = process.env, live = true, comm
         ...env, ORCH_AGENT: id, ORCH_CLI: located.source || located.bin, ORCH_AGENT_PROFILES_DIR: profilesDir(env),
         ORCH_ACCEPTANCE_FILE: path.join(ws, 'acceptance.json'), ORCH_MAINTENANCE_LOCK: path.join(ws, 'no-lock.json'),
         ORCH_MAX_POLL_MS: '300000', WORKSPACE_DIR: ws, ORCH_STATE_DIR: path.join(ws, 'temp', 'orchestrator'),
-        // 一次性验收工作区：协调器必须留在本工作区，否则这次 smoke 会把机器级 HKCU 定位器钉到
-        // 一个随后被删掉的临时目录上（真实用户的下一次运行就会对着死路径建协调器）。
-        ORCH_COORDINATOR_DIR: path.join('temp', 'orchestrator', 'coordinator'),
         // 块级验收是非交互自动化：显式钉 headless，绝不继承本壳 ORCH_SPAWN_MODE（不弹窗、判据不随壳变色）。
         ORCH_SPAWN_MODE: 'headless',
       };

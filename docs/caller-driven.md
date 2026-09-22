@@ -108,8 +108,7 @@ Every public entry fails closed the same way — one line, no Node stack:
 
 ## Boundaries
 
-- read-only entries (`--tasks`, `--plan`, `--status`, `--watch`, `--doctor`, `--verify-run`, `--clear-cache`) need no host identity, and their **stdout stays pure data** (progress and diagnostics go to stderr, so a caller can `JSON.parse` it directly);
-- an unrecognised entry (`--frobnicate`) is refused with one `FATAL: Unknown entry: …` line and exit 1 — a typo can never read as a successful run that did nothing;
+- read-only entries (`--tasks`, `--status`, `--watch`, `--doctor`, `--verify-run`, `--clear-cache`) need no host identity;
 - action entries still respect the maintenance lock, and the inline gate still returns single-block / serial plans to the initiating conversation unless `orch` / `--force-exec` is used deliberately;
 - an explicit unit command is arbitrary code execution under the caller's existing authorization: the orchestrator forwards permissions and never widens them.
 

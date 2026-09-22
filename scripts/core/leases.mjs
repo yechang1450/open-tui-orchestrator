@@ -80,41 +80,26 @@ export function sweepStaleMutexTickets(dir,{ttlMs=mutexTicketTtlMs(),now=Date.no
   let removed=0;
   try{
     for(const name of fs.readdirSync(dir)){
-      if(!/^lock-[0-9a-f-]+\.(ready|release|status)$/.test(name))continue;
+      if(!/^lock-[0-9a-f-]+\.(ready|release)$/.test(name))continue;
       const full=path.join(dir,name);
       try{if(now-fs.statSync(full).mtimeMs>=ttlMs){fs.rmSync(full,{force:true});removed++;}}catch{}
     }
   }catch{}
   return removed;
 }
-// 取一次内核互斥：PS 侧等 waitMs，JS 侧按 waitMs + 启动/退出余量设界。失败时按 waitMs 有界返回，
-// 由调用方决定重试。
-// 等待是同步阻塞的（Atomics.wait），事件回调在阻塞期间不会运行，所以这里**不能**靠 'exit' 事件判早退；
-// 但"PS 已经收场"这件事必须能立刻看见（2026-09-22：满载套件里 PS 提前收场而 JS 干等满 60s×3，几十处
-// 假红、单条用例 189s），因此用两条同步通道：
-//   ① 状态票：PS 异常收场时写 <ticket>.status（busy-timeout / owner-gone / hold-ceiling / error:…）；
-//   ② 便宜的活性探针：process.kill(pid,0) 判子进程是否还在（ESRCH = 没了），把"没起来/被杀了"也识别出来。
+// 取一次内核互斥：PS 侧等 waitMs，JS 侧按 waitMs + 启动/退出余量设界。
+// 注意：等待是同步阻塞的（Atomics.wait），事件回调在阻塞期间不会运行——所以这里**不能**依赖
+// 'exit' 事件判早退（旧实现就是干等满 30s）。失败时按 waitMs 有界返回，由调用方决定重试。
 function acquireCoordinatorMutex(dir,owner,waitMs,script){
   const ticket=path.join(dir,'lock-'+crypto.randomUUID());
-  const statusFile=ticket+'.status';
-  let spawnError=null;
   const child=spawn(PS_EXE,['-NoProfile','-File',script,'-Directory',dir,'-Ticket',ticket,'-Owner',String(owner.ProcessId),'-Started',owner.Started],{windowsHide:true,stdio:'ignore'});
-  child.on('error',error=>{spawnError=error;});child.unref();
+  child.on('error',()=>{});child.unref();
   const deadline=Date.now()+waitMs+2500;
-  const readStatus=()=>{try{return String(fs.readFileSync(statusFile,'utf8')).trim();}catch{return '';}};
-  const childAlive=()=>{try{process.kill(child.pid,0);return true;}catch(error){return !error||error.code!=='ESRCH';}};
-  let reason='';
-  while(!fs.existsSync(ticket+'.ready')){
-    reason=readStatus();
-    if(reason)break;
-    if(!childAlive()){reason=spawnError?'holder failed to start: '+spawnError.message:'holder exited before ready';break;}
-    if(Date.now()>=deadline){reason='no ready within '+(waitMs+2500)+'ms';break;}
-    sleepFor(25);
-  }
+  while(!fs.existsSync(ticket+'.ready')&&Date.now()<deadline)sleepFor(25);
   const ready=fs.existsSync(ticket+'.ready');
   const release=()=>{try{fs.writeFileSync(ticket+'.release','release');}catch{}};
-  const discard=()=>{for(const suffix of ['.ready','.release','.status'])try{fs.rmSync(ticket+suffix,{force:true});}catch{}};
-  return {ready,release,discard,reason:ready?'':reason};
+  const discard=()=>{for(const suffix of ['.ready','.release'])try{fs.rmSync(ticket+suffix,{force:true});}catch{}};
+  return {ready,release,discard};
 }
 export function atomicJson(file,value){
   fs.mkdirSync(path.dirname(file),{recursive:true});
@@ -158,17 +143,12 @@ export function transaction(dir,fn,snapshot=processSnapshot) {
       // 失败路径的锁票清理延后到事件循环恢复之后（阻塞等待期间 setTimeout 也不会跑）；
       // 真正兜底的是 sweepStaleMutexTickets 的按龄回收。
       setTimeout(candidate.discard,3000).unref?.();
-      if(attempt>=tries)throw new Error('Coordinator mutex acquisition failed (waited '+waitMs+'ms x'+(attempt+1)+(candidate.reason?'; '+candidate.reason:'')+'; tune ORCH_MUTEX_WAIT_MS / ORCH_MUTEX_RETRIES / ORCH_MUTEX_HOLD_MAX_MS)');
+      if(attempt>=tries)throw new Error('Coordinator mutex acquisition failed (waited '+waitMs+'ms x'+(attempt+1)+'; tune ORCH_MUTEX_WAIT_MS / ORCH_MUTEX_RETRIES)');
       sleepFor(waitBackoffMs(attempt,{base:250,max:2000}));
     }
     unlock=()=>held.release();
   }
-  try {
-    // 关键（2026-09-22）：持锁期间**不再**做全表快照。processSnapshot 是一次 machine-wide CIM 查询
-    // （满载机器上几秒~十几秒），锁内执行会把每个排队者的等待预算吃光——3 并发套件里几十处
-    // "waited 60000ms x3" 假红的真根因。锁前那份快照本来就够用：下面的筛选只回答"属主还在不在"，
-    // 几百毫秒的偏差最多让一条刚死的租约多留一轮，代价远小于在锁里做全表查询。
-    let leases=[];try{leases=JSON.parse(fs.readFileSync(file,'utf8'));}catch(e){if(e.code!=='ENOENT')throw e;}
+  try {processes=snapshot();let leases=[];try{leases=JSON.parse(fs.readFileSync(file,'utf8'));}catch(e){if(e.code!=='ENOENT')throw e;}
     leases=leases.filter(l=>{
       // 断电 P0（2026-09-18）：带开机标识且与本次开机不符 ⇒ 确定来自上一次开机，直接回收。
       // PID 跨重启会重用（可能撞上任意活进程），所以“重启后还活着”这类误判必须由 bootId 拦掉。

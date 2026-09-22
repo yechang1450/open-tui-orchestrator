@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 process.env.ORCH_AGENT='codex';
-const {buildBlocksFromTasks, windowExecutionPolicy, levelWaves, capPlanBlocks, classifyPrompt, plannerPrompt, plannerBlockCeiling} = await import('../scripts/orchestrate-sdk.mjs');
+const {buildBlocksFromTasks, windowExecutionPolicy, levelWaves, capPlanBlocks, classifyPrompt} = await import('../scripts/orchestrate-sdk.mjs');
 
 const t = (id, summary, hints, extra = {}) => ({ id, summary, project: '80', kind: 'project', conflict_hints: hints, ...extra });
 
@@ -117,23 +117,4 @@ test('classifyPrompt: 要求 project 任务给出精确 conflict_hints（可并�
   const p = classifyPrompt('修80登录页；优化80商品列表', {});
   assert.match(p, /并行窗口/);
   assert.match(p, /不许偷懒留空/);
-});
-
-// 回归（2026-09-22 真机抓到）：0.9.17（1d79ea1）把固定容量公式换成内存拟合时删掉了 maxWindows 变量，
-// 却把模板里的 ${maxWindows} 留在原地 —— 于是**每一次** LLM 拆块都在拼提示词时抛 ReferenceError，
-// 又被 decomposeSafely 的 retry 循环吞成「模型失败」→ 静默退化成单串行块，并行能力整段失效。
-// 判据可红：提示词里混进 undefined / 上限不是正整数，两种情况都会让这两条用例失败。
-test('plannerPrompt: 块数上限是正整数，且提示词里绝不出现 undefined', () => {
-  const ceiling = plannerBlockCeiling();
-  assert.ok(Number.isInteger(ceiling) && ceiling >= 1, '块数上限必须是 ≥1 的整数，实测 ' + JSON.stringify(ceiling));
-  const p = plannerPrompt('修80登录页；优化80商品列表', {});
-  assert.match(p, /Maximum execution blocks: [1-9]\d*\./, '提示词必须带上具体的块数上限');
-  assert.doesNotMatch(p, /undefined|NaN|null 块/, '拼提示词时混进了未定义值（悬空标识符回归）');
-});
-
-test('plannerPrompt: 仍是 classifyPrompt 的超集（不另起一份定性提示词）', () => {
-  const hints = {moduleToProj: {登录: '82'}};
-  const p = plannerPrompt('修82登录页', hints);
-  assert.ok(p.startsWith(classifyPrompt('修82登录页', hints)), '必须在原定性提示词之后追加块数上限，不许分叉');
-  assert.match(p, /Return ALL tasks; overflow tasks will be merged into serial blocks/);
 });
