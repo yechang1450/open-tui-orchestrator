@@ -60,7 +60,7 @@
  * ============================================================================
  */
 import {nativeArgumentLines} from "./native-argv.mjs";
-import {CORE_VERSION, levelWaves, keysOverlap, summaryComplete,requestTasks,bindClassifiedTasks,ledgerPlan,computeMaxWindows,powershellExe,systemToolExe} from "./contracts.mjs";
+import {CORE_VERSION, levelWaves, keysOverlap, summaryComplete,requestTasks,bindClassifiedTasks,ledgerPlan,computeMaxWindows,powershellExe,systemToolExe,isMachineReadableEntry} from "./contracts.mjs";
 import {memConfig, loadUnitMemory, saveUnitMemory, recordUnitPeak, unitEstimateMb, admitCount, fitBlocks, describeFit, unitMemoryStorePath} from "./unit-memory.mjs";
 import {formatFailureLines} from "./failure-report.mjs";
 import {effectiveUnitCarrier, ptyAvailability} from "./unit-carrier.mjs";
@@ -171,8 +171,12 @@ const PY_DIR = (() => { try { const p = String(process.env.PYTHON || ""); return
 // node --test 下由 inheritHostModelEffort 自行豁免（NODE_TEST_CONTEXT）。
 // 机器可读入口（--doctor/--tasks/--status/--watch/--verify-run 等）的 stdout 只允许纯数据：
 // 档位解读性输出一律让位——信息已进 doctor 字段与 summary 留痕。
-const MACHINE_READABLE = process.argv.slice(2).some((a) => /^--(doctor|tasks|status|watch|verify-run|version|help|install-deps)$/.test(a) || a === '-h');
-const noteModel = (line) => { if (!MACHINE_READABLE) console.log(line); };
+const MACHINE_READABLE = isMachineReadableEntry();
+// 诊断/进度行：机器可读入口（--plan/--tasks/--doctor/--status/--watch/--verify-run/…）的 stdout 必须是
+// 纯数据，所以这些行一律走 stderr；交互式入口照旧走 stdout，操作者的观感不变。
+// （2026-09-22 第 3 轮全表面扫描实测：--plan 的 disk/mem-fit 行、--doctor/--tasks 的网络策略行曾混进 stdout。）
+const diag = (line) => { if (MACHINE_READABLE) console.error(line); else console.log(line); };
+const noteModel = (line) => diag(line);
 let MODEL_PLAN = {model:null,effort:null,modelSource:'none',effortSource:'none'};
 if (!AGENT_ERROR) try {
   const explicitModel = String(process.env.ORCH_MODEL || '').trim() || null;
@@ -504,7 +508,7 @@ function fitPlanViaMemory(plan) {
   const unitMb = unitEstimateMb(store, AGENT.agent, cfg);
   const res = fitBlocks(plan, availableMemoryMb(), unitMb, cfg);
   LAST_MEM_FIT = {unitMb: res.unitMb, growth: res.blockGrowth, estMb: res.estMb, freeMb: Math.round(res.freeMb), floorMb: res.floorMb, fits: res.fits, merges: res.merges};
-  console.log(describeFit(res));
+  diag(describeFit(res));
   if (!res.fits) {
     console.warn('[mem-fit] WARNING: even one unit cannot clear the floor (est ' + Math.round(res.estMb) + 'MB, free ' + Math.round(res.freeMb) + 'MB, floor ' + res.floorMb + 'MB); proceeding anyway (work is never blocked) — closing heavy apps would help.');
   }
@@ -990,7 +994,7 @@ function checkDiskSpace(opts = {}) {
       console.warn("[orchestrator] WARN: low disk space (" + freeMB + "MB free < " + minMB + "MB) at " + wsPath + "; TUI window/temp may fail.");
       return true;
     }
-    console.log("[orchestrator] disk: workspace " + wsPath + " free=" + freeMB + "MB (min " + minMB + "MB / hard " + hardMB + "MB)");
+    diag("[orchestrator] disk: workspace " + wsPath + " free=" + freeMB + "MB (min " + minMB + "MB / hard " + hardMB + "MB)");
     return true;
   } catch (e) {
     console.warn("[orchestrator] WARN: could not stat workspace disk (" + (e && e.message ? e.message : String(e)) + "); skipping space check.");
@@ -2740,6 +2744,13 @@ export async function main() {
       try { rmSync(out, { force: true }); console.log("[orchestrator] temp artifacts cleaned (used-and-discarded)"); } catch { /* ignore */ }
     }
     return;
+  }
+  // fail-closed（2026-09-22 第 3 轮）：认不出的入口一律响亮失败。
+  // 旧行为是「打印 Usage 后 exit 0」——机器调用方把拼错的旗标（如 --watch-run）读成一次
+  // 成功运行，什么都没做却说 done，正是公开契约里最危险的一种静默。裸请求（不带 --）仍旧
+  // 打 Usage，那是交互式误用的提示，不是机器调用。
+  if (typeof mode === "string" && mode.startsWith("--")) {
+    throw new Error("Unknown entry: " + mode + " (nothing was executed; run --help for the entry list)");
   }
   console.log(
     "Usage:\n" +

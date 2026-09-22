@@ -5,6 +5,13 @@ import {spawnSync} from 'node:child_process';
 import os from 'node:os';
 
 export const CORE_VERSION = '2026.9.19-5';
+// 机器可读入口（stdout 只出数据，见 README「机器可读入口 stdout 保持纯数据」）：
+// 这些入口的进度/诊断一律走 stderr，免得调用方 JSON.parse(stdout) 被一行提示打断。
+// 共用一个判据（引擎与网络策略层都按它决定输出流），避免两处各写一份正则各自漂移。
+export const MACHINE_READABLE_ENTRY = /^--(doctor|tasks|plan|status|watch|verify-run|version|help|install-deps)$/;
+export function isMachineReadableEntry(argv = process.argv.slice(2)) {
+  return Array.isArray(argv) && argv.some((arg) => MACHINE_READABLE_ENTRY.test(String(arg)) || arg === '-h');
+}
 export const SUCCESS = new Set(['verified']);
 export const TERMINAL = new Set(['verified','failed','blocked','cancelled','awaiting-verification','preflight-failed','popup-failed','timeout','needs-reconciliation']);
 
