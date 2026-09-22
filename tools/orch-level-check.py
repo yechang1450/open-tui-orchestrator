@@ -31,8 +31,9 @@ import time
 from pathlib import Path
 
 REPO = Path(os.path.expanduser("~/.tools/open-tui-orchestrator"))
-NODE_BIN = Path(os.path.expanduser("~/.tools/node24-fresh"))
-SUITE_CMD = "ORCH_AGENT=codex PATH=~/.tools/node24-fresh:$PATH node --test --test-concurrency=3 test/*.test.mjs"
+NODE_BIN = Path(r"C:\Program Files\nodejs")  # 2026-09-22: node24-fresh removed; system node
+CODEX_BIN = r"C:\Users\<user>\.tools\open-tui-orchestrator\scripts\node_modules\@openai\codex-win32-x64\vendor\x86_64-pc-windows-msvc\bin"
+SUITE_CMD = "ORCH_AGENT=codex PATH='C:/Program Files/nodejs:C:/Users/<user>/.tools/open-tui-orchestrator/scripts/node_modules/@openai/codex-win32-x64/vendor/x86_64-pc-windows-msvc/bin:$PATH node --test --test-concurrency=3 test/*.test.mjs"
 DEFAULT_LOG = Path("D:/temp/orch-level/L1-suite.log")
 LOG_PATH = DEFAULT_LOG
 LOG_EXPLICIT = False
@@ -81,7 +82,7 @@ def run_suite(out_log: Path) -> int:
     env = dict(os.environ)
     env["ORCH_AGENT"] = "codex"
     env["ORCH_SPAWN_MODE"] = "headless"  # 非交互自动化显式钉 headless：判据不得随本壳变色（零弹窗）
-    env["PATH"] = str(NODE_BIN) + os.pathsep + env.get("PATH", "")
+    env["PATH"] = str(NODE_BIN) + os.pathsep + CODEX_BIN + os.pathsep + env.get("PATH", "")
     node = str(NODE_BIN / "node.exe") if os.name == "nt" else "node"
     files = [str(p) for p in sorted(REPO.glob("test/*.test.mjs"))]
     head = subprocess.run(["git", "-C", str(REPO), "log", "-1", "--format=%h"], capture_output=True, text=True).stdout.strip()
@@ -112,7 +113,7 @@ def doctor() -> int:
     node = str(NODE_BIN / "node.exe") if os.name == "nt" else "node"
     env = dict(os.environ)
     env["ORCH_SPAWN_MODE"] = "headless"  # 非交互自动化显式钉 headless：判据不得随本壳变色（零弹窗）
-    env["PATH"] = str(NODE_BIN) + os.pathsep + env.get("PATH", "")
+    env["PATH"] = str(NODE_BIN) + os.pathsep + CODEX_BIN + os.pathsep + env.get("PATH", "")
     p = subprocess.run([node, "cli.mjs", "--agent", "codex", "--doctor"], capture_output=True, text=True, env=env, cwd=str(REPO))
     body = p.stdout + p.stderr
     m = re.search(r'"hostError"\s*:\s*(null|"[^"]*")', body)
@@ -132,7 +133,7 @@ def verify_missing() -> int:
     node = str(NODE_BIN / "node.exe") if os.name == "nt" else "node"
     env = dict(os.environ)
     env["ORCH_SPAWN_MODE"] = "headless"  # 非交互自动化显式钉 headless：判据不得随本壳变色（零弹窗）
-    env["PATH"] = str(NODE_BIN) + os.pathsep + env.get("PATH", "")
+    env["PATH"] = str(NODE_BIN) + os.pathsep + CODEX_BIN + os.pathsep + env.get("PATH", "")
     p = subprocess.run([node, "cli.mjs", "--verify-run", "nosuch-run-entj"], capture_output=True, text=True, env=env, cwd=str(REPO))
     out = p.stdout + p.stderr
     frames = len(re.findall(r"at (?:Object|Module|\.\.\/|file://)", out)) + len(re.findall(r"node:fs", out))
