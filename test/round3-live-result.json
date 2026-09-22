@@ -1,0 +1,88 @@
+{
+  "passed": true,
+  "round": "2026-09-22 round 3 real-machine scenarios",
+  "coreVersion": "2026.9.19-5",
+  "coreHash": "cf603cc583e8d00e80666f86913bceada8a0cb06b35e00577520923d896b077f",
+  "node": "v24.19.0",
+  "offline": {
+    "suite": "361/361",
+    "gate": "ORCH_GATE: PASS (5 criteria)"
+  },
+  "scenarios": [
+    {
+      "id": "S1-dual-headless",
+      "runId": "s1-dual",
+      "agent": "codex",
+      "unit": "adapter (real codex CLI, ConPTY carrier)",
+      "spawnMode": "headless",
+      "workspace": "%TEMP%\\orch-t4-ws (a path pre-trusted in the user's config.toml)",
+      "request": "在 proj-81 目录创建 hello.txt…；在 proj-84 目录创建 world.txt…",
+      "passed": true,
+      "blocks": 2,
+      "capacity": 2,
+      "memFit": "units=2 unitMb=99 growth=0.15 estMb=198 freeMb=15148 floorMb=256 fits=true merges=none",
+      "bothBlocksRunningTogether": true,
+      "board": "0/2 verified [B1▶ B2▶] → 2/2 verified [B1✓ B2✓] finalized success=true",
+      "taskResults": {"T001": "verified", "T002": "verified"},
+      "receipts": ["proj-81/hello.txt => hello", "proj-84/world.txt => world"],
+      "visibleWindows": 0,
+      "elapsedSec": 92.5
+    },
+    {
+      "id": "S2-visible-window-untrusted",
+      "runId": "s2-untrusted",
+      "agent": "codex",
+      "spawnMode": "window",
+      "workspace": "%TEMP%\\o2o-exec3\\untrusted-ws (deliberately NOT in config.toml trust list)",
+      "passed": true,
+      "observations": [
+        "two visible Windows Terminal popups really appeared: proj-81 [VISIBLE hwnd=0xF408C8 rect=165,172,1574,925 foreground=true], proj-84 [VISIBLE hwnd=0xDD07CE rect=166,196,1599,949 foreground=true]",
+        "both blocks went to ▶ running and produced ZERO task checkpoints for 200s: the in-window codex was sitting on the 'do you trust this directory' prompt",
+        "the engine never faked success (no verified tasks)",
+        "found and fixed while observing: the session-less wait branch had only the run ceiling (ORCH_UNIT_TIMEOUT_MS, 45 min default) and no first-checkpoint deadline, so the ledger sat at ▶ running without naming the cause"
+      ],
+      "productChange": "scripts/core/runner.mjs: the session-less branch now applies the same first-checkpoint deadline as the session branch (ORCH_UNIT_FIRST_CHECKPOINT_MS, default 300 s, 0 = off) and reports 'unproductive: no task checkpoint within Ns …'"
+    },
+    {
+      "id": "S3-kill-controller-then-manual-resume",
+      "runId": "s3-resume",
+      "unit": "caller-supplied command (barrier slow unit)",
+      "passed": true,
+      "controllerCrashInjected": true,
+      "kill": "taskkill /F /PID <controller> (no /T: the surviving carrier/unit must be left alive — that IS a lost controller)",
+      "ledgerAfterKill": {"finishedAt": null, "B1": "verified", "B2": "running"},
+      "manualResume": true,
+      "generation": 2,
+      "resumeElapsedSec": 13,
+      "success": true,
+      "adoptedSurvivingUnit": true,
+      "noRedeployOfFinishedWork": true,
+      "b1Attempts": 1,
+      "b2Attempts": 1,
+      "adoptionEvidence": "B2 kept the generation-1 token (…B2-a1-00004dae7362) with a single start/done pair spanning the kill; B1's attempts stayed 1"
+    },
+    {
+      "id": "S4-capacity-at-limit-and-over-limit",
+      "unit": "caller-supplied command (8 s slow unit)",
+      "passed": true,
+      "atLimit": {
+        "runId": "s4-exact",
+        "capacity": 2,
+        "queueWaitLines": 0,
+        "bothUnitsStartedWithinMs": 1,
+        "success": true,
+        "elapsedSec": 17
+      },
+      "overLimit": {
+        "runId": "s4-over",
+        "windowCap": 1,
+        "queueWaitLines": 1,
+        "queueLine": "[queue] B2: Waiting for capacity — backing off (wait #1); waiting is normal under machine-level contention, not a hang",
+        "acquiredLine": "[queue] B2: window slot acquired after 4 wait(s)",
+        "serializedUnitWindows": ["10:33:41.594→10:33:49.763", "10:33:53.091→10:34:01.274"],
+        "success": true,
+        "elapsedSec": 26
+      }
+    }
+  ]
+}

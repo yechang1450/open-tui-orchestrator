@@ -78,6 +78,9 @@ test('capacity waiters back off: two blocks serialize through one window, run st
     env.ORCH_SPAWN_MODE = 'headless';
     env.WORKSPACE_DIR = ws;
     env.ORCH_STATE_DIR = path.join(ws, 'temp', 'orchestrator');
+    // 协调器跟工作区走（理由同 caller-driven）：本用例删掉 NODE_TEST_CONTEXT 走真实入口，不钉住就会
+    // 落到机器级 HKCU 定位器，与并发测试文件共用窗口槽位池，"第二块必须排队"的判据会被别人的槽位搅乱。
+    env.ORCH_COORDINATOR_DIR = path.join('temp', 'orchestrator', 'coordinator');
     env.ORCH_MAINTENANCE_LOCK = path.join(ws, 'no-lock.json');
     env.ORCH_MAX_POLL_MS = '120000';
     env.ORCH_UNIT_CMD_FILE = unitFile;

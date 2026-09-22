@@ -127,13 +127,35 @@ test('stale mutex tickets are reclaimed by age while fresh ones survive',()=>{
 });
 
 test('a completed transaction leaves no mutex ticket files behind',winOnly,async()=>{
- fs.mkdirSync(family,{recursive:true});const dir=fs.mkdtempSync(path.join(family,'mutex-hygiene-'));
- try{
-  await transaction(dir,()=>({ok:true}));
-  const deadline=Date.now()+5000;
-  while(fs.readdirSync(dir).some(n=>/^lock-/.test(n))&&Date.now()<deadline)await pause(50);
-  assert.deepEqual(fs.readdirSync(dir).filter(n=>/^lock-/.test(n)),[],'tickets must be reclaimed, not leaked');
- }finally{fs.rmSync(dir,{recursive:true,force:true});}
+  fs.mkdirSync(family,{recursive:true});const dir=fs.mkdtempSync(path.join(family,'mutex-hygiene-'));
+  try{
+   await transaction(dir,()=>({ok:true}));
+   const deadline=Date.now()+5000;
+   while(fs.readdirSync(dir).some(n=>/^lock-/.test(n))&&Date.now()<deadline)await pause(50);
+   assert.deepEqual(fs.readdirSync(dir).filter(n=>/^lock-/.test(n)),[],'tickets must be reclaimed, not leaked');
+  }finally{fs.rmSync(dir,{recursive:true,force:true});}
+});
+
+// 现象（2026-09-22）：PS 侧等超时后自己收场，JS 侧却看不到任何信号，只能干等满 waitMs+2500 才重试
+// ——满载套件里几十处 "waited 60000ms x3" 假红、单条用例 189s，而真因（这一轮其实是 busy-timeout）
+// 完全不可见。现在 PS 把结论写进状态票，JS 立刻失败并把它写进错误行；失败路径同样不留票。
+test('a failed acquisition reports the PS-side reason and still reclaims its tickets',winOnly,async()=>{
+  fs.mkdirSync(family,{recursive:true});const dir=fs.mkdtempSync(path.join(family,'mutex-reason-'));
+  const holder=await holdCoordinatorMutex(dir);
+  try{
+   process.env.ORCH_MUTEX_WAIT_MS='1200';process.env.ORCH_MUTEX_RETRIES='0';
+   let error=null;try{transaction(dir,()=>({ok:true}));}catch(e){error=e;}
+   assert.ok(error,'a held mutex must fail the transaction');
+   assert.match(error.message,/Coordinator mutex acquisition failed/);
+   assert.match(error.message,/busy-timeout/,'the error must carry the PS-side verdict, not just the wait budget');
+  }finally{
+   delete process.env.ORCH_MUTEX_WAIT_MS;delete process.env.ORCH_MUTEX_RETRIES;
+   holder.release();await holder.exited;
+   const deadline=Date.now()+8000;
+   while(fs.readdirSync(dir).some(n=>/^lock-/.test(n))&&Date.now()<deadline)await pause(50);
+   assert.deepEqual(fs.readdirSync(dir).filter(n=>/^lock-/.test(n)),[],'a failed acquisition must still reclaim its tickets');
+   fs.rmSync(dir,{recursive:true,force:true});
+  }
 });
 
 // 入口即回收：解析协调器目录时顺带按龄回收，保证「空闲时也不会长期积压」——被强杀的 PS 跑不到

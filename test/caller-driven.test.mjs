@@ -63,6 +63,10 @@ function callEnv({ws, unitFile, planFile, acceptance, extra = {}}) {
   env.ORCH_SPAWN_MODE = 'headless';
   env.WORKSPACE_DIR = ws;
   env.ORCH_STATE_DIR = path.join(ws, 'temp', 'orchestrator');
+  // 协调器（窗口槽位租约 + 内核互斥）必须跟着测试工作区走。本用例刻意删掉 NODE_TEST_CONTEXT 去走真实
+  // 入口，若不显式钉住就会落到机器级 HKCU 定位器：并发跑的几个测试文件共用同一个槽位池，互相抢容量
+  // 直到把本 run 的 120s 预算耗光（2026-09-22 实测：两条任务都 timeout，reason 指向 capacity）。
+  env.ORCH_COORDINATOR_DIR = path.join('temp', 'orchestrator', 'coordinator');
   env.ORCH_MAINTENANCE_LOCK = path.join(ws, 'no-maintenance-lock.json');
   env.ORCH_MAX_POLL_MS = '120000';
   // 0.9.17 内存拟合：测试要确定性 ⇒ 钉住单元估算与硬底（否则分块形状随机器当时内存漂移），
@@ -247,7 +251,10 @@ test('a unit without checkpoints or a failing unit can never fake success', asyn
 
     // 没有检查点（连 started 都不写）：任务停在无凭证状态，绝不是 verified
     const envNoCp = callEnv({ws, unitFile, planFile: plan, acceptance, extra: {FAKE_UNIT_NO_CHECKPOINTS: '1'}});
-    const r1 = spawnSync(process.execPath, [CLI, '--run-id', 'caller-fake', '--run-windows', REQUEST], {cwd: ws, env: envNoCp, encoding: 'utf8', windowsHide: true, timeout: 240000});
+    // 预算 360s：本用例的两个 run 是套件里最重的一对（每个块 3 次尝试 × 2 块，单跑实测 ~70-90s）。
+    // 2026-09-22 实测：240s 在满载并发下被击穿——真因是采样器管道劫持了引擎退出（已治本，见
+    // test/unit-memory-sampler.test.mjs），预算同时放宽到 ~4x 余量，避免把真实跑动读成挂起。
+    const r1 = spawnSync(process.execPath, [CLI, '--run-id', 'caller-fake', '--run-windows', REQUEST], {cwd: ws, env: envNoCp, encoding: 'utf8', windowsHide: true, timeout: 360000});
     assert.equal(r1.status, 1, r1.stdout);
     const sum1 = readSummary(ws, 'caller-fake');
     assert.equal(sum1.success, false);
@@ -257,7 +264,7 @@ test('a unit without checkpoints or a failing unit can never fake success', asyn
     // 单元直接失败（非零退出、无产物、无完成标记）：验收即失败，零假成功
     const ws2 = fs.mkdtempSync(path.join(family, 'caller-fail-'));
     const envFail = callEnv({ws: ws2, unitFile, planFile: plan, acceptance, extra: {FAKE_UNIT_FAIL: '1'}});
-    const r2 = spawnSync(process.execPath, [CLI, '--run-id', 'caller-fail', '--run-windows', REQUEST], {cwd: ws2, env: envFail, encoding: 'utf8', windowsHide: true, timeout: 240000});
+    const r2 = spawnSync(process.execPath, [CLI, '--run-id', 'caller-fail', '--run-windows', REQUEST], {cwd: ws2, env: envFail, encoding: 'utf8', windowsHide: true, timeout: 360000});
     assert.equal(r2.status, 1, r2.stdout);
     const sum2 = readSummary(ws2, 'caller-fail');
     assert.equal(sum2.success, false);
