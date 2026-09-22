@@ -116,14 +116,20 @@ export async function identityWithGrace(hooks,la,{graceMs=10000,intervalMs=800}=
   if(lastError)throw lastError;
   return null;
 }
-export async function waitForProcessExit(expected,{timeoutMs=5000,intervalMs=100,snapshot=processSnapshot}={}) {
+// 退出判定的口径（2026-09-22 修）：**读不到**不等于**还在**。
+// 旧实现里一次快照失败（满载下 CIM 查询超过每次 3s 的预算、"Cannot verify process identities"）
+// 直接 `return false`，调用方把它当成"launcher 还活着"⇒ 整块假失败
+//（实测 reason="Launcher still alive; lease retained"，而那个 powershell 其实早就 exit 0 了）。
+// 现在：拿不到快照就是"不知道"，继续轮询到期限；只有**拿到快照且它说进程不在/换了身份**才算退出。
+// 同时把默认期限从 5s 提到 15s（上限），单次查询预算 8s——满负载下 PS 收尾本来就可能要几秒。
+export async function waitForProcessExit(expected,{timeoutMs=15000,intervalMs=250,snapshot=processSnapshot}={}) {
   if(!expected||!Number.isFinite(Number(expected.ProcessId)))return true;
   const timeout=Math.max(0,Math.min(15000,Number(timeoutMs)||0)),interval=Math.max(10,Math.min(1000,Number(intervalMs)||100));
   const deadline=Date.now()+timeout;
   while(true){
     let current;
-    try{current=snapshot(Math.min(3000,Math.max(1,deadline-Date.now())));}catch{return false;}
-    if(!sameProcess(expected,current?.get(Number(expected.ProcessId))))return true;
+    try{current=snapshot(Math.min(8000,Math.max(1,deadline-Date.now())));}catch{current=null;}
+    if(current&&!sameProcess(expected,current.get(Number(expected.ProcessId))))return true;
     if(Date.now()>=deadline)return false;
     await pause(Math.min(interval,Math.max(1,deadline-Date.now())));
   }
