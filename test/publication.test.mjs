@@ -10,7 +10,9 @@ const source = fileURLToPath(new URL('..', import.meta.url));
 const repair = path.join(source, 'repair.mjs');
 
 test('repair validates and publishes a clean CLI package', () => {
-  const family = path.join('D:\\temp', 'orchestrator');
+  // 临时产物落在本仓 temp/ 下：写死 `D:\temp` 只是作者机器的习惯，没有 D: 盘的机器第一步就 ENOENT
+  //（2026-09-22 本机实测：ENOENT mkdir 'D:\temp\orchestrator'）。
+  const family = path.join(source, 'temp');
   fs.mkdirSync(family, {recursive: true});
   const root = fs.mkdtempSync(path.join(family, 'publication-'));
   // publish 期间 repair.mjs 会礼貌性上锁（礼让并发引擎）；锁路径必须是本用例私有的，
