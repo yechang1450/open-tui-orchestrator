@@ -43,7 +43,7 @@
     "run-board.mjs": "ee98dac04d2babe68ff3c0a88f40547a380188ed8de7135cf54c9a0f469ae9e3",
     "run-guardian.mjs": "e1b2b17663c0a9a8a408e8a25484b87adcf7144f4d08f81c03d736a704feda6b",
     "runner.mjs": "b4a9a28cb85e9244bec07ccd652faec3a1c2645e6279d5c893bfdf2f4864c78e",
-    "runtime-context.mjs": "324f92941c126aa525d2239662da20e7472832a306c122cfbe66f1c476489c43",
+    "runtime-context.mjs": "d2b7aeed76d469e9e8e377e6b95880280793e7502c5424fa0f41e41f98b4c58b",
     "unit-carrier.mjs": "462b4512910a458815a1d5f7c1bce2e0e43e53e0511f5be3e13f118c879aeb48",
     "unit-command.mjs": "93791c8e1d5ce7ccd87a9eb2a78438961faa723cb445535cadfef1254f1168ff",
     "unit-memory-sampler.ps1": "9852cbe22d6876ec14a685064be0678fac497431cff7100aac3007fb0985a27f",
@@ -52,7 +52,7 @@
   },
   "runtimeFiles": {
     "cli.mjs": "8b6817604286769142d0620ed8da96d433596e84362cee66594e099c88f1a1c4",
-    "package.json": "f70a5a8b7ecc7f0e5209e98ff4765b79d98128fa5a50d63a68277797d0abdfbe",
+    "package.json": "7440b12a3fb789190f0f5770ba259b6221ef4baf2e7f594837609ce965d6038b",
     "repair.mjs": "5a456b42560bfa21fd1e66ccdff7416f88e82fe711db5c04279717e73275a076",
     "scripts/recover-stale.mjs": "c6dfecdfd7621b77999b710127aa1f5e3b444032bc0e2f91ec95f94c07c59f97",
     "scripts/adapt.mjs": "20209c74212d334ea5aa1dfe35816a1b7a4b7f0415eb27c5a1975925dbbd10c5",
@@ -99,7 +99,7 @@
     "scripts/core/run-board.mjs": "ee98dac04d2babe68ff3c0a88f40547a380188ed8de7135cf54c9a0f469ae9e3",
     "scripts/core/run-guardian.mjs": "e1b2b17663c0a9a8a408e8a25484b87adcf7144f4d08f81c03d736a704feda6b",
     "scripts/core/runner.mjs": "b4a9a28cb85e9244bec07ccd652faec3a1c2645e6279d5c893bfdf2f4864c78e",
-    "scripts/core/runtime-context.mjs": "324f92941c126aa525d2239662da20e7472832a306c122cfbe66f1c476489c43",
+    "scripts/core/runtime-context.mjs": "d2b7aeed76d469e9e8e377e6b95880280793e7502c5424fa0f41e41f98b4c58b",
     "scripts/core/unit-carrier.mjs": "462b4512910a458815a1d5f7c1bce2e0e43e53e0511f5be3e13f118c879aeb48",
     "scripts/core/unit-command.mjs": "93791c8e1d5ce7ccd87a9eb2a78438961faa723cb445535cadfef1254f1168ff",
     "scripts/core/unit-memory-sampler.ps1": "9852cbe22d6876ec14a685064be0678fac497431cff7100aac3007fb0985a27f",
@@ -113,13 +113,14 @@
     "scripts/open-tui-orchestrator-force.mjs": "d343662f3856c02231222cdae35b75ced0f46747e96b8b3fa7b5aecc07f6d91e",
     "scripts/open-tui-orchestrator-preflight.mjs": "cec145e4dd1bfcc1ec6462a3c1d29eeda0f9c0e155792a8a98ab98530c2dcda3",
     "scripts/orchestrate-sdk.mjs": "812b937381103a447b8ae32b13c1b7b00efae266b33f31b921d2bf2a789bd74a",
-    "scripts/package-lock.json": "a74e3fa808ddd67d8de21278e1d4dc318bc4d238334ef00030c7d6104d5cf995",
-    "scripts/package.json": "a6b02f2ff7d3f0d6dd28a1cd7882277dcb51957feb199574dbc8e0927f0a5663",
+    "scripts/package-lock.json": "4e1cfb679d150f2c5fd7a96c34aa82fa7354515605d30d1f3bfd4e6ae952ae4e",
+    "scripts/package.json": "0ee1939c2a2d6f32922d389d24f4d6f1014e627a0a6f3f061c9c049f44edaf04",
     "scripts/platform-guard.mjs": "3b0996ebf972bca764b6ee758f2501eaaf45531395521e0fd920abf0f1e5f80f",
     "scripts/poll-windows.mjs": "f6a629e4af5b5ab108464962af469359200c841e2546f2c071f0d3eaac48397c",
     "scripts/release-integrity.mjs": "e3afc8e3ab10991c317641b6316aee94be98e7607e8c836d82c71abd73a64d4b",
     "scripts/runtime-context.mjs": "deb2671a6f36e428e452c9dc03b1add6f94ccbb4533c0018efc8e3c778a55045",
     "scripts/sdk-dependency-check.mjs": "39815046e13d4cc17462b12e34643d32812c845ca1884dd64d3bfeed47cc5ebb",
+    "scripts/test-platform-guard.mjs": "d4f0078f5a34664d87ea404a8de0475f65c3da7e448a58f81b16fb6802276cb5",
     "scripts/todo-list.mjs": "050234b9e5cb1220d2a3f2f4da8fb6372472d22c81e67fdeb995864a1556a228"
   }
 }
