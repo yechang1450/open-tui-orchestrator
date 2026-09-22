@@ -26,24 +26,35 @@ const UNIT_TIMEOUT_MS=Math.max(5000,Number(process.env.ORCH_UNIT_TIMEOUT_MS||270
 function unitPeakFile(la, key, token) {
   return la ? path.join(path.dirname(String(la.pidf)), 'unit-peak-' + key + '-' + String(token || 'x').slice(-8) + '.json') : '';
 }
-function startUnitSampler(la, key, token, rootPid) {
+// 采样器是**账外**产物（内存画像，fail-open），绝不能让它的寿命绑住引擎进程：
+// 2026-09-22 实测，Node 的 `child.unref()` 只解绑子进程句柄、**不解绑管道**，所以
+// `stdio:['ignore','ignore','pipe']` 会让父进程一直活到采样器退出（实测：子进程活 20s，
+// 父进程陪满 20.17s）。于是「引擎跑完 → 采样器还在忙」会被上层（如测试的 spawnSync、
+// 机器的调用方）读成「整条命令没结束」，重载下把一次全绿套件拖成假红。
+// 修法：采样器 stderr 直接落文件（无管道，与守护进程同一套写法），并把根进程的**启动时刻**
+// 一并交给它——裸 pid 不是身份，Windows 复用 pid 会让采样器对着陌生人轮询满 -MaxMs。
+export function startUnitSampler(la, key, token, rootPid, rootStarted) {
   try {
     if (!la || !Number.isInteger(rootPid) || rootPid <= 0) {
       console.error('[mem] sampler skipped (rootPid=' + String(rootPid) + ', la=' + (la ? 'yes' : 'no') + ')');
       return false;
     }
     const sampler = path.join(path.dirname(fileURLToPath(import.meta.url)), 'unit-memory-sampler.ps1');
+    const errLog = unitPeakFile(la, key, token) + '.stderr.txt';
+    const args = ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', sampler, '-RootPid', String(rootPid), '-OutFile', unitPeakFile(la, key, token), '-IntervalMs', '6000'];
+    if (rootStarted) args.push('-RootStarted', String(rootStarted));
     // 2026-09-18 实测定论：detached:true 会让 PS 子进程在 Windows 上静默死掉（一行不执行、不报错、不退出）
     // —— 去 detached，做普通子进程（引擎寿命 ≥ 单元寿命，采样器随单元结束自然收尾）。
-    const child = spawn(powershellExe(), ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', sampler, '-RootPid', String(rootPid), '-OutFile', unitPeakFile(la, key, token), '-IntervalMs', '6000'], {windowsHide: true, stdio: ['ignore', 'ignore', 'pipe']});
-    // 采样器的 stderr 落盘（2026-09-18：静默失败排查用；引擎先退出也尽量写）。
+    let errFd = 'ignore';
     try {
-      const errLog = unitPeakFile(la, key, token) + '.stderr.txt';
-      child.stderr.on('data', (buf) => { try { fs.appendFileSync(errLog, buf); } catch {} });
+      errFd = fs.openSync(errLog, 'a');
     } catch {}
+    const child = spawn(powershellExe(), args, {windowsHide: true, stdio: ['ignore', 'ignore', errFd]});
+    if (typeof errFd === 'number') { try { fs.closeSync(errFd); } catch {} }
     child.unref();
     console.log('[mem] sampler started pid=' + String(child.pid) + ' root=' + rootPid + ' out=' + unitPeakFile(la, key, token));
-    return true;
+    // 返回采样器 pid（真值）：调用方拿它做「已经在采样」的标记，测试拿它收尾，不留孤儿进程。
+    return Number(child.pid) || true;
   } catch (error) {
     console.error('[mem] sampler failed to start: ' + String(error && error.message));
     return false;
@@ -393,7 +404,7 @@ export async function runWindows(request,hooks,options={}) {
           if(identity||fs.existsSync(la.rf)) {
             e.status='running';persist();
             // 0.9.17：单元起来了 ⇒ 挂通用采样器（拿根 pid 收进程树峰值；成败都不影响编排）。
-            peakSampled=startUnitSampler(la, r.key, active.token, Number(identity?.ProcessId||hooks.readPid(la.pidf)))||peakSampled;
+            peakSampled=startUnitSampler(la, r.key, active.token, Number(identity?.ProcessId||hooks.readPid(la.pidf)), identity?.Started)||peakSampled;
             const session=hooks.session?await hooks.session('【本块唯一标识】'+active.token,Math.min(90000,Math.max(0,deadline-Date.now())),la.rf):null;
             const unitBudget=Math.max(0,Math.min(deadline,Date.now()+UNIT_TIMEOUT_MS)-Date.now());
             let waited;

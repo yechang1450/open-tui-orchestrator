@@ -510,6 +510,21 @@ function fitPlanViaMemory(plan) {
   }
   return {plan: res.blocks, memFit: LAST_MEM_FIT};
 }
+// 规划提示词里的「最大执行块数」：与准入上限同源（学习画像 + 剩余内存）。
+// 它只是让模型别为凑窗口预算而漏任务的**软上限**——真正的压缩由 fitPlanViaMemory 在计划成型后决定；
+// 因此这里永远返回 ≥1 的正整数（0 会让提示词退化成「最多 0 块」这种自相矛盾的指令）。
+export function plannerBlockCeiling() {
+  return Math.max(1, auxAdmissionLimit(0));
+}
+// 完整规划提示词（定性提示词 + 块数上限）= 送给拆块模型的那一段。
+// 抽成纯函数是为了让「提示词里混进 undefined」这种**自身代码缺陷**在回归里可红：
+// 2026-09-22 实测，0.9.17（1d79ea1）把固定容量公式换成内存拟合时删掉了 maxWindows 变量，
+// 却把模板里的 ${maxWindows} 留在原地，于是每次 LLM 拆块都在这里抛 ReferenceError，
+// 被重试循环吞成「decompose LLM failed」→ 静默退化成单串行块（并行能力整段失效且只有一行 warn）。
+export function plannerPrompt(request, hints = {}) {
+  return classifyPrompt(request, hints) +
+    `\nMaximum execution blocks: ${plannerBlockCeiling()}. Return ALL tasks; overflow tasks will be merged into serial blocks. Never omit tasks to meet the window budget.`;
+}
 // 辅助窗（交互式看窗）准入上限：与旧公式同形（上限），但用学习画像反推——留不出底线就不放行（0 ⇒ 排队等待）。
 function auxAdmissionLimit(auxCap) {
   const cfg = memConfig();
@@ -554,12 +569,14 @@ async function decomposeSafely(request) {
   // 2) 两段式：LLM 定性（扁平任务清单）→ 确定性分块引擎。失败/超时则重试。
   // hints 已上移到函数开头解析（参与缓存键）。
   const attempts = Math.max(1, Number(process.env.ORCH_DECOMPOSE_RETRIES || 2));
+  // 提示词在重试循环**外**构建：自身代码缺陷（悬空标识符等）必须立刻响亮失败，
+  // 绝不能被「模型/网络失败」的 retry+autosafe 兜底吞成一次静默的降级。
+  const prompt = plannerPrompt(request, hints);
   let lastErr = "";
   let seenNoJson = false;
   for (let i = 0; i < attempts; i++) {
     try {
-      const res = await runThreadPrompt(classifyPrompt(request, hints) +
-        `\nMaximum execution blocks: ${maxWindows}. Return ALL tasks; overflow tasks will be merged into serial blocks. Never omit tasks to meet the window budget.`, { sandboxMode: "read-only" });
+      const res = await runThreadPrompt(prompt, { sandboxMode: "read-only" });
       // 模型侧失败（额度用尽/未登录/弱网）以前会被吞掉：只留下「no JSON in classify output: (no valid JSON)」，
       // 读起来像解析 bug，而真正的原因在 runThreadPrompt 的 errored/warnings 里。把它带出来
       // （一行、有界），调用方与操作者才可能自己排障——2026-09-15 真机（codex 额度耗尽）实测缺这一口。
@@ -582,6 +599,9 @@ async function decomposeSafely(request) {
       lastErr = lastErr || "(extracted empty plan)";
       if (i === attempts - 1) throw new Error(lastErr);
     } catch (e) {
+      // ReferenceError = 未定义标识符，只可能来自我们自己的代码（模型输出永远触发不了它）：
+      // 重试与 autosafe 兜底都救不了它，只会把「并行拆块整段失效」伪装成一次模型抽风。
+      if (e instanceof ReferenceError) throw e;
       if(/Unknown dependency|Self dependency|Cyclic dependencies|Ambiguous block identity/.test(e.message||""))throw e;
       lastErr = e && e.message ? e.message : String(e);
     }
