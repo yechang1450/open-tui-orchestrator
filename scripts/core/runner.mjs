@@ -412,16 +412,31 @@ export async function runWindows(request,hooks,options={}) {
             else {
               // 2026-09-18：TUI 窗不会自己退（如 hermes chat --tui）⇒ 以「盘上验收已满足」作为合法 done
               //（"看验收就收窗"）：每 10s 检查本块任务是否已被盘上证据全数验证；是 ⇒ 收口并关窗（finally 里统一关）。
+              // 2026-09-22（第 3 轮 S2 真机实测）：这条路原来**只有**运行上限（默认 45min），没有首检查点期限。
+              // 实测场景：未受信任工作区里 codex 停在"是否信任本目录"的可见提示上 ⇒ 宿主会话文件永远不会出现
+              //（session=null 走这里）⇒ 账本 200s+ 停在 ▶ running，既不说真因也不重试，直到 45 分钟上限。
+              // 补上与 stall 看门狗**同源**的首检查点期限（默认 300s，0=关闭）：一个单元连第一项任务都没开工，
+              // 就该像会话路径一样收口重跑并在 reason 里说清，而不是把调用方吊在运行上限上。
               const endAt=Date.now()+unitBudget;
               let done=false,exitCode=null;
+              const rawFirst=process.env.ORCH_UNIT_FIRST_CHECKPOINT_MS;
+              const firstCheckpointMs=rawFirst===undefined?300000:Math.max(0,Number(rawFirst)||0);
+              const cpDir=path.join(path.dirname(active.file),'checkpoints');
+              const cpDirMtime=()=>{try{return fs.statSync(cpDir).mtimeMs;}catch{return 0;}};
+              const waitStarted=Date.now();
+              let stall=null;
               while(Date.now()<endAt){
                 if(fs.existsSync(la.rf)){done=true;exitCode=hooks.exitCode(la.rf);break;}
                 const cps=blockCheckpoints(e,b,sum);
                 const rec=recoveryTasks(tasks,cps,checks,workspace);
                 if(rec.verified.length===tasks.length){done=true;exitCode=0;break;}
+                if(firstCheckpointMs&&Date.now()-waitStarted>firstCheckpointMs&&cpDirMtime()<=waitStarted){
+                  stall='unproductive: no task checkpoint within '+Math.round(firstCheckpointMs/1000)+'s (the unit never started its first task; a hidden TUI can be sitting on a prompt that needs a human); retrying within the attempt budget';
+                  break;
+                }
                 await pause(10000);
               }
-              waited={result:{done,exitCode}};
+              waited=stall?{stall}:{result:{done,exitCode}};
             }
             if(waited.stall){e.status='failed';e.reason=waited.stall;}
             else {const result=waited.result||{};e.exitCode=result.exitCode??hooks.exitCode(la.rf);e.status=result.done?'awaiting-verification':'timeout';}
