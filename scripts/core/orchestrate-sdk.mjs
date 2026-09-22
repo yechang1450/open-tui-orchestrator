@@ -60,7 +60,7 @@
  * ============================================================================
  */
 import {nativeArgumentLines} from "./native-argv.mjs";
-import {CORE_VERSION, levelWaves, keysOverlap, summaryComplete,requestTasks,bindClassifiedTasks,ledgerPlan,computeMaxWindows,powershellExe,systemToolExe} from "./contracts.mjs";
+import {CORE_VERSION, levelWaves, keysOverlap, summaryComplete,requestTasks,bindClassifiedTasks,ledgerPlan,computeMaxWindows,powershellExe,systemToolExe,isMachineReadableEntry} from "./contracts.mjs";
 import {memConfig, loadUnitMemory, saveUnitMemory, recordUnitPeak, unitEstimateMb, admitCount, fitBlocks, describeFit, unitMemoryStorePath} from "./unit-memory.mjs";
 import {formatFailureLines} from "./failure-report.mjs";
 import {effectiveUnitCarrier, ptyAvailability} from "./unit-carrier.mjs";
@@ -171,8 +171,12 @@ const PY_DIR = (() => { try { const p = String(process.env.PYTHON || ""); return
 // node --test 下由 inheritHostModelEffort 自行豁免（NODE_TEST_CONTEXT）。
 // 机器可读入口（--doctor/--tasks/--status/--watch/--verify-run 等）的 stdout 只允许纯数据：
 // 档位解读性输出一律让位——信息已进 doctor 字段与 summary 留痕。
-const MACHINE_READABLE = process.argv.slice(2).some((a) => /^--(doctor|tasks|status|watch|verify-run|version|help|install-deps)$/.test(a) || a === '-h');
-const noteModel = (line) => { if (!MACHINE_READABLE) console.log(line); };
+const MACHINE_READABLE = isMachineReadableEntry();
+// 诊断/进度行：机器可读入口（--plan/--tasks/--doctor/--status/--watch/--verify-run/…）的 stdout 必须是
+// 纯数据，所以这些行一律走 stderr；交互式入口照旧走 stdout，操作者的观感不变。
+// （2026-09-22 第 3 轮全表面扫描实测：--plan 的 disk/mem-fit 行、--doctor/--tasks 的网络策略行曾混进 stdout。）
+const diag = (line) => { if (MACHINE_READABLE) console.error(line); else console.log(line); };
+const noteModel = (line) => diag(line);
 let MODEL_PLAN = {model:null,effort:null,modelSource:'none',effortSource:'none'};
 if (!AGENT_ERROR) try {
   const explicitModel = String(process.env.ORCH_MODEL || '').trim() || null;
@@ -504,11 +508,26 @@ function fitPlanViaMemory(plan) {
   const unitMb = unitEstimateMb(store, AGENT.agent, cfg);
   const res = fitBlocks(plan, availableMemoryMb(), unitMb, cfg);
   LAST_MEM_FIT = {unitMb: res.unitMb, growth: res.blockGrowth, estMb: res.estMb, freeMb: Math.round(res.freeMb), floorMb: res.floorMb, fits: res.fits, merges: res.merges};
-  console.log(describeFit(res));
+  diag(describeFit(res));
   if (!res.fits) {
     console.warn('[mem-fit] WARNING: even one unit cannot clear the floor (est ' + Math.round(res.estMb) + 'MB, free ' + Math.round(res.freeMb) + 'MB, floor ' + res.floorMb + 'MB); proceeding anyway (work is never blocked) — closing heavy apps would help.');
   }
   return {plan: res.blocks, memFit: LAST_MEM_FIT};
+}
+// 规划提示词里的「最大执行块数」：与准入上限同源（学习画像 + 剩余内存）。
+// 它只是让模型别为凑窗口预算而漏任务的**软上限**——真正的压缩由 fitPlanViaMemory 在计划成型后决定；
+// 因此这里永远返回 ≥1 的正整数（0 会让提示词退化成「最多 0 块」这种自相矛盾的指令）。
+export function plannerBlockCeiling() {
+  return Math.max(1, auxAdmissionLimit(0));
+}
+// 完整规划提示词（定性提示词 + 块数上限）= 送给拆块模型的那一段。
+// 抽成纯函数是为了让「提示词里混进 undefined」这种**自身代码缺陷**在回归里可红：
+// 2026-09-22 实测，0.9.17（1d79ea1）把固定容量公式换成内存拟合时删掉了 maxWindows 变量，
+// 却把模板里的 ${maxWindows} 留在原地，于是每次 LLM 拆块都在这里抛 ReferenceError，
+// 被重试循环吞成「decompose LLM failed」→ 静默退化成单串行块（并行能力整段失效且只有一行 warn）。
+export function plannerPrompt(request, hints = {}) {
+  return classifyPrompt(request, hints) +
+    `\nMaximum execution blocks: ${plannerBlockCeiling()}. Return ALL tasks; overflow tasks will be merged into serial blocks. Never omit tasks to meet the window budget.`;
 }
 // 辅助窗（交互式看窗）准入上限：与旧公式同形（上限），但用学习画像反推——留不出底线就不放行（0 ⇒ 排队等待）。
 function auxAdmissionLimit(auxCap) {
@@ -554,12 +573,14 @@ async function decomposeSafely(request) {
   // 2) 两段式：LLM 定性（扁平任务清单）→ 确定性分块引擎。失败/超时则重试。
   // hints 已上移到函数开头解析（参与缓存键）。
   const attempts = Math.max(1, Number(process.env.ORCH_DECOMPOSE_RETRIES || 2));
+  // 提示词在重试循环**外**构建：自身代码缺陷（悬空标识符等）必须立刻响亮失败，
+  // 绝不能被「模型/网络失败」的 retry+autosafe 兜底吞成一次静默的降级。
+  const prompt = plannerPrompt(request, hints);
   let lastErr = "";
   let seenNoJson = false;
   for (let i = 0; i < attempts; i++) {
     try {
-      const res = await runThreadPrompt(classifyPrompt(request, hints) +
-        `\nMaximum execution blocks: ${maxWindows}. Return ALL tasks; overflow tasks will be merged into serial blocks. Never omit tasks to meet the window budget.`, { sandboxMode: "read-only" });
+      const res = await runThreadPrompt(prompt, { sandboxMode: "read-only" });
       // 模型侧失败（额度用尽/未登录/弱网）以前会被吞掉：只留下「no JSON in classify output: (no valid JSON)」，
       // 读起来像解析 bug，而真正的原因在 runThreadPrompt 的 errored/warnings 里。把它带出来
       // （一行、有界），调用方与操作者才可能自己排障——2026-09-15 真机（codex 额度耗尽）实测缺这一口。
@@ -582,6 +603,9 @@ async function decomposeSafely(request) {
       lastErr = lastErr || "(extracted empty plan)";
       if (i === attempts - 1) throw new Error(lastErr);
     } catch (e) {
+      // ReferenceError = 未定义标识符，只可能来自我们自己的代码（模型输出永远触发不了它）：
+      // 重试与 autosafe 兜底都救不了它，只会把「并行拆块整段失效」伪装成一次模型抽风。
+      if (e instanceof ReferenceError) throw e;
       if(/Unknown dependency|Self dependency|Cyclic dependencies|Ambiguous block identity/.test(e.message||""))throw e;
       lastErr = e && e.message ? e.message : String(e);
     }
@@ -970,7 +994,7 @@ function checkDiskSpace(opts = {}) {
       console.warn("[orchestrator] WARN: low disk space (" + freeMB + "MB free < " + minMB + "MB) at " + wsPath + "; TUI window/temp may fail.");
       return true;
     }
-    console.log("[orchestrator] disk: workspace " + wsPath + " free=" + freeMB + "MB (min " + minMB + "MB / hard " + hardMB + "MB)");
+    diag("[orchestrator] disk: workspace " + wsPath + " free=" + freeMB + "MB (min " + minMB + "MB / hard " + hardMB + "MB)");
     return true;
   } catch (e) {
     console.warn("[orchestrator] WARN: could not stat workspace disk (" + (e && e.message ? e.message : String(e)) + "); skipping space check.");
@@ -2720,6 +2744,13 @@ export async function main() {
       try { rmSync(out, { force: true }); console.log("[orchestrator] temp artifacts cleaned (used-and-discarded)"); } catch { /* ignore */ }
     }
     return;
+  }
+  // fail-closed（2026-09-22 第 3 轮）：认不出的入口一律响亮失败。
+  // 旧行为是「打印 Usage 后 exit 0」——机器调用方把拼错的旗标（如 --watch-run）读成一次
+  // 成功运行，什么都没做却说 done，正是公开契约里最危险的一种静默。裸请求（不带 --）仍旧
+  // 打 Usage，那是交互式误用的提示，不是机器调用。
+  if (typeof mode === "string" && mode.startsWith("--")) {
+    throw new Error("Unknown entry: " + mode + " (nothing was executed; run --help for the entry list)");
   }
   console.log(
     "Usage:\n" +

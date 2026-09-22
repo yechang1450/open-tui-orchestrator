@@ -107,6 +107,9 @@ test('a profiled agent runs end-to-end through orch (forced unit, acceptance ver
     spawnSync(process.execPath, [path.join(root, 'scripts', 'adapt.mjs'), '--agent', 'fakeprint', '--cli', s.fake, '--profiles-dir', s.profiles, '--no-commit'], { encoding: 'utf8', windowsHide: true, timeout: 120000 });
     fs.writeFileSync(path.join(ws, 'acceptance.json'), JSON.stringify({T001: [{type: 'json', path: 'receipt.json', equals: {ok: true}}]}));
     const env = {...process.env, ORCH_AGENT: 'fakeprint', ORCH_CLI: s.fake, ORCH_AGENT_PROFILES_DIR: s.profiles, ORCH_ACCEPTANCE_FILE: path.join(ws, 'acceptance.json'), ORCH_MAINTENANCE_LOCK: path.join(ws, 'no-lock.json'), ORCH_MAX_POLL_MS: '120000', WORKSPACE_DIR: ws, ORCH_STATE_DIR: path.join(ws, 'temp', 'orchestrator'),
+      // 协调器（槽位租约/内核互斥）钉在本工作区：本用例删掉 NODE_TEST_CONTEXT 走真实入口，
+      // 不钉住就与并发测试文件共用机器级槽位池（2026-09-22 起统一如此）。
+      ORCH_COORDINATOR_DIR: path.join('temp', 'orchestrator', 'coordinator'),
       // 非交互自动化显式钉 headless：本机用户级 ORCH_SPAWN_MODE 不得让套件弹窗或变色。
       ORCH_SPAWN_MODE: 'headless'};
     delete env.NODE_TEST_CONTEXT;

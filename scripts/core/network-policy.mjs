@@ -3,6 +3,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import {isMachineReadableEntry} from './contracts.mjs';
 export const networkConfig = Object.freeze({
   model_provider: 'orchestrator-openai-https',
   model_providers: {
@@ -40,7 +41,10 @@ export function codexProviderMode({ env = process.env } = {}) {
 export function codexNetworkArgs(options) {
   const mode = codexProviderMode(options);
   if (mode === 'on') return networkArgs();
-  console.log('[orchestrator] codex network policy skipped: config.toml declares a custom model_provider (ORCH_CODEX_NETWORK_POLICY=auto)');
+  // 机器可读入口（--doctor/--tasks/--plan/--status/--watch/…）的 stdout 必须是纯数据：
+  // 这行"策略跳过"属于诊断，改走 stderr，别把 JSON 打断（2026-09-22 第 3 轮全表面扫描实测）。
+  const note = '[orchestrator] codex network policy skipped: config.toml declares a custom model_provider (ORCH_CODEX_NETWORK_POLICY=auto)';
+  if (isMachineReadableEntry()) console.error(note); else console.log(note);
   return [];
 }
 export function codexNetworkConfig(options) {

@@ -44,7 +44,7 @@ try {
 const engine = bootstrapInstallDeps ? null : await import('./core/orchestrate-sdk.mjs');
 export const {
   main, reportFatal, buildPsArrayLit, capPlanBlocks, buildWindowWaves, applyAuthPromptPolicy, readTail,
-  classifyBlockComplexity, classifyExecutionMode, appendModelEffortArgs, genericProjectSplit,
+  classifyBlockComplexity, classifyExecutionMode, appendModelEffortArgs, genericProjectSplit, plannerPrompt, plannerBlockCeiling,
   trySingleBlock, conflictByKeys, loadCachedDecompose, buildBlocksFromTasks, resolveHints,
   extractTasks, classifyPrompt, buildBlockPrompt, levelWaves, decomposeHash, checkDiskSpace,
   readPidFile, pidAliveCheck, closeWindowByPid, windowGenuinelyPopped, windowVerdictOk, leftoverWindowHandles, runWindowEntries, inlineEnvJson, extractResult, extractUsage,
