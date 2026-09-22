@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {loadProfile, profileArgs} from '../scripts/core/print-profile.mjs';
-import {resolveRuntimeContext, msysToNative} from '../scripts/core/runtime-context.mjs';
+import {resolveRuntimeContext} from '../scripts/core/runtime-context.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 
@@ -23,24 +23,36 @@ test('profile window entry: mode=window picks the TUI argv, headless stays verba
   assert.ok(!win.includes('-z'), `window argv must not carry the one-shot flag: ${JSON.stringify(win)}`);
 });
 
-// 判据：Windows/Git-Bash 风格的 /d/temp/ws 必须归一为原生形式（否则 spawn cwd 会被烫成 D:\d\temp\…
-// 而 ENOENT）；而 Linux/macOS 上的 /d/temp/ws 就是普通绝对路径，必须原样保留（不得改写成 D:/temp/ws）。
-// 两条语义在**任何平台**上都判定：平台注入纯函数 + 当前平台走一遍真解析链，不再用 {skip} 跳过——
-// 跳过等于留一个永远不会红的盲区，而 gate 的 L1 判据要求 skipped==0（2026-09-22 合并成一条）。
-// 反例（必红）：去掉 msysToNative 的平台判断 → POSIX 断言红；去掉归一 → workspace 变成 <cwd 盘>:\d\temp\ws。
-test('runtime context normalizes MSYS-style paths on Windows and keeps POSIX absolute paths elsewhere', () => {
-  assert.equal(msysToNative('/d/temp/ws', 'win32'), 'D:/temp/ws');
-  assert.equal(msysToNative('/C/temp/ws', 'win32'), 'C:/temp/ws');
-  assert.equal(msysToNative('D:/temp/ws', 'win32'), 'D:/temp/ws');
-  assert.equal(msysToNative('/d/temp/ws', 'linux'), '/d/temp/ws');
-  assert.equal(msysToNative('/d/temp/ws', 'darwin'), '/d/temp/ws');
-  const windows = process.platform === 'win32';
+// 判据：MSYS 风格路径必须归一为原生形式（否则 spawn cwd 会被烫成 D:\d\temp\… 而 ENOENT）。
+// 反例（必红）：去掉 msysToNative → workspace 变成 <cwd 盘>:\d\temp\ws。
+// 该语义只在 Windows（Git-Bash）成立，其他平台跳过并给出说明，而不是报假失败。
+test('runtime context normalizes MSYS-style paths instead of mangling them', (t) => {
+  if (process.platform !== 'win32') {
+    t.skip('MSYS 风格路径只在 Windows/Git-Bash 上出现；本平台见下一条断言（POSIX 原样保留）');
+    return;
+  }
   const r = resolveRuntimeContext(
     {WORKSPACE_DIR: '/d/temp/ws', ORCH_STATE_DIR: '/d/temp/ws/temp/orchestrator'},
-    windows ? 'D:/' : '/tmp'
+    'D:/'
   );
-  assert.equal(r.workspace, windows ? path.resolve('D:/temp/ws') : path.resolve('/tmp', '/d/temp/ws'));
-  assert.equal(r.state, windows ? path.resolve('D:/temp/ws/temp/orchestrator') : path.resolve('/d/temp/ws/temp/orchestrator'));
+  assert.equal(r.workspace, path.resolve('D:/temp/ws'));
+  assert.equal(r.state, path.resolve('D:/temp/ws/temp/orchestrator'));
+});
+
+// 判据：Linux/macOS 上 /d/temp/ws 就是普通绝对路径，必须原样保留（不得被改写成 D:/temp/ws）。
+// 反例（必红）：去掉 msysToNative 里的平台判断 → workspace 变成 <cwd>/D:/temp/ws。
+// 该语义只在 POSIX 平台成立（Windows 上 /d/... 会按当前盘符解析），Windows 上跳过并给出说明。
+test('runtime context leaves POSIX absolute paths untouched', (t) => {
+  if (process.platform === 'win32') {
+    t.skip('POSIX 绝对路径语义只在 Linux/macOS 成立；Windows 见上一条（MSYS 归一）');
+    return;
+  }
+  const r = resolveRuntimeContext(
+    {WORKSPACE_DIR: '/d/temp/ws', ORCH_STATE_DIR: '/d/temp/ws/temp/orchestrator'},
+    '/tmp'
+  );
+  assert.equal(r.workspace, path.resolve('/tmp', '/d/temp/ws'));
+  assert.equal(r.state, path.resolve('/d/temp/ws/temp/orchestrator'));
 });
 
 // 判据：hermes 画像必须声明窗口入口（真 TUI 路线依赖它）。

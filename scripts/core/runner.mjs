@@ -26,35 +26,24 @@ const UNIT_TIMEOUT_MS=Math.max(5000,Number(process.env.ORCH_UNIT_TIMEOUT_MS||270
 function unitPeakFile(la, key, token) {
   return la ? path.join(path.dirname(String(la.pidf)), 'unit-peak-' + key + '-' + String(token || 'x').slice(-8) + '.json') : '';
 }
-// 采样器是**账外**产物（内存画像，fail-open），绝不能让它的寿命绑住引擎进程：
-// 2026-09-22 实测，Node 的 `child.unref()` 只解绑子进程句柄、**不解绑管道**，所以
-// `stdio:['ignore','ignore','pipe']` 会让父进程一直活到采样器退出（实测：子进程活 20s，
-// 父进程陪满 20.17s）。于是「引擎跑完 → 采样器还在忙」会被上层（如测试的 spawnSync、
-// 机器的调用方）读成「整条命令没结束」，重载下把一次全绿套件拖成假红。
-// 修法：采样器 stderr 直接落文件（无管道，与守护进程同一套写法），并把根进程的**启动时刻**
-// 一并交给它——裸 pid 不是身份，Windows 复用 pid 会让采样器对着陌生人轮询满 -MaxMs。
-export function startUnitSampler(la, key, token, rootPid, rootStarted) {
+function startUnitSampler(la, key, token, rootPid) {
   try {
     if (!la || !Number.isInteger(rootPid) || rootPid <= 0) {
       console.error('[mem] sampler skipped (rootPid=' + String(rootPid) + ', la=' + (la ? 'yes' : 'no') + ')');
       return false;
     }
     const sampler = path.join(path.dirname(fileURLToPath(import.meta.url)), 'unit-memory-sampler.ps1');
-    const errLog = unitPeakFile(la, key, token) + '.stderr.txt';
-    const args = ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', sampler, '-RootPid', String(rootPid), '-OutFile', unitPeakFile(la, key, token), '-IntervalMs', '6000'];
-    if (rootStarted) args.push('-RootStarted', String(rootStarted));
     // 2026-09-18 实测定论：detached:true 会让 PS 子进程在 Windows 上静默死掉（一行不执行、不报错、不退出）
     // —— 去 detached，做普通子进程（引擎寿命 ≥ 单元寿命，采样器随单元结束自然收尾）。
-    let errFd = 'ignore';
+    const child = spawn(powershellExe(), ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', sampler, '-RootPid', String(rootPid), '-OutFile', unitPeakFile(la, key, token), '-IntervalMs', '6000'], {windowsHide: true, stdio: ['ignore', 'ignore', 'pipe']});
+    // 采样器的 stderr 落盘（2026-09-18：静默失败排查用；引擎先退出也尽量写）。
     try {
-      errFd = fs.openSync(errLog, 'a');
+      const errLog = unitPeakFile(la, key, token) + '.stderr.txt';
+      child.stderr.on('data', (buf) => { try { fs.appendFileSync(errLog, buf); } catch {} });
     } catch {}
-    const child = spawn(powershellExe(), args, {windowsHide: true, stdio: ['ignore', 'ignore', errFd]});
-    if (typeof errFd === 'number') { try { fs.closeSync(errFd); } catch {} }
     child.unref();
     console.log('[mem] sampler started pid=' + String(child.pid) + ' root=' + rootPid + ' out=' + unitPeakFile(la, key, token));
-    // 返回采样器 pid（真值）：调用方拿它做「已经在采样」的标记，测试拿它收尾，不留孤儿进程。
-    return Number(child.pid) || true;
+    return true;
   } catch (error) {
     console.error('[mem] sampler failed to start: ' + String(error && error.message));
     return false;
@@ -127,20 +116,14 @@ export async function identityWithGrace(hooks,la,{graceMs=10000,intervalMs=800}=
   if(lastError)throw lastError;
   return null;
 }
-// 退出判定的口径（2026-09-22 修）：**读不到**不等于**还在**。
-// 旧实现里一次快照失败（满载下 CIM 查询超过每次 3s 的预算、"Cannot verify process identities"）
-// 直接 `return false`，调用方把它当成"launcher 还活着"⇒ 整块假失败
-//（实测 reason="Launcher still alive; lease retained"，而那个 powershell 其实早就 exit 0 了）。
-// 现在：拿不到快照就是"不知道"，继续轮询到期限；只有**拿到快照且它说进程不在/换了身份**才算退出。
-// 同时把默认期限从 5s 提到 15s（上限），单次查询预算 8s——满负载下 PS 收尾本来就可能要几秒。
-export async function waitForProcessExit(expected,{timeoutMs=15000,intervalMs=250,snapshot=processSnapshot}={}) {
+export async function waitForProcessExit(expected,{timeoutMs=5000,intervalMs=100,snapshot=processSnapshot}={}) {
   if(!expected||!Number.isFinite(Number(expected.ProcessId)))return true;
   const timeout=Math.max(0,Math.min(15000,Number(timeoutMs)||0)),interval=Math.max(10,Math.min(1000,Number(intervalMs)||100));
   const deadline=Date.now()+timeout;
   while(true){
     let current;
-    try{current=snapshot(Math.min(8000,Math.max(1,deadline-Date.now())));}catch{current=null;}
-    if(current&&!sameProcess(expected,current.get(Number(expected.ProcessId))))return true;
+    try{current=snapshot(Math.min(3000,Math.max(1,deadline-Date.now())));}catch{return false;}
+    if(!sameProcess(expected,current?.get(Number(expected.ProcessId))))return true;
     if(Date.now()>=deadline)return false;
     await pause(Math.min(interval,Math.max(1,deadline-Date.now())));
   }
@@ -404,7 +387,7 @@ export async function runWindows(request,hooks,options={}) {
           if(identity||fs.existsSync(la.rf)) {
             e.status='running';persist();
             // 0.9.17：单元起来了 ⇒ 挂通用采样器（拿根 pid 收进程树峰值；成败都不影响编排）。
-            peakSampled=startUnitSampler(la, r.key, active.token, Number(identity?.ProcessId||hooks.readPid(la.pidf)), identity?.Started)||peakSampled;
+            peakSampled=startUnitSampler(la, r.key, active.token, Number(identity?.ProcessId||hooks.readPid(la.pidf)))||peakSampled;
             const session=hooks.session?await hooks.session('【本块唯一标识】'+active.token,Math.min(90000,Math.max(0,deadline-Date.now())),la.rf):null;
             const unitBudget=Math.max(0,Math.min(deadline,Date.now()+UNIT_TIMEOUT_MS)-Date.now());
             let waited;
@@ -412,31 +395,16 @@ export async function runWindows(request,hooks,options={}) {
             else {
               // 2026-09-18：TUI 窗不会自己退（如 hermes chat --tui）⇒ 以「盘上验收已满足」作为合法 done
               //（"看验收就收窗"）：每 10s 检查本块任务是否已被盘上证据全数验证；是 ⇒ 收口并关窗（finally 里统一关）。
-              // 2026-09-22（第 3 轮 S2 真机实测）：这条路原来**只有**运行上限（默认 45min），没有首检查点期限。
-              // 实测场景：未受信任工作区里 codex 停在"是否信任本目录"的可见提示上 ⇒ 宿主会话文件永远不会出现
-              //（session=null 走这里）⇒ 账本 200s+ 停在 ▶ running，既不说真因也不重试，直到 45 分钟上限。
-              // 补上与 stall 看门狗**同源**的首检查点期限（默认 300s，0=关闭）：一个单元连第一项任务都没开工，
-              // 就该像会话路径一样收口重跑并在 reason 里说清，而不是把调用方吊在运行上限上。
               const endAt=Date.now()+unitBudget;
               let done=false,exitCode=null;
-              const rawFirst=process.env.ORCH_UNIT_FIRST_CHECKPOINT_MS;
-              const firstCheckpointMs=rawFirst===undefined?300000:Math.max(0,Number(rawFirst)||0);
-              const cpDir=path.join(path.dirname(active.file),'checkpoints');
-              const cpDirMtime=()=>{try{return fs.statSync(cpDir).mtimeMs;}catch{return 0;}};
-              const waitStarted=Date.now();
-              let stall=null;
               while(Date.now()<endAt){
                 if(fs.existsSync(la.rf)){done=true;exitCode=hooks.exitCode(la.rf);break;}
                 const cps=blockCheckpoints(e,b,sum);
                 const rec=recoveryTasks(tasks,cps,checks,workspace);
                 if(rec.verified.length===tasks.length){done=true;exitCode=0;break;}
-                if(firstCheckpointMs&&Date.now()-waitStarted>firstCheckpointMs&&cpDirMtime()<=waitStarted){
-                  stall='unproductive: no task checkpoint within '+Math.round(firstCheckpointMs/1000)+'s (the unit never started its first task; a hidden TUI can be sitting on a prompt that needs a human); retrying within the attempt budget';
-                  break;
-                }
                 await pause(10000);
               }
-              waited=stall?{stall}:{result:{done,exitCode}};
+              waited={result:{done,exitCode}};
             }
             if(waited.stall){e.status='failed';e.reason=waited.stall;}
             else {const result=waited.result||{};e.exitCode=result.exitCode??hooks.exitCode(la.rf);e.status=result.done?'awaiting-verification':'timeout';}

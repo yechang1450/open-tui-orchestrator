@@ -32,9 +32,6 @@ function setup() {
   fs.writeFileSync(acceptance, JSON.stringify({ T001: [{ type: 'json', path: 'receipt.json', equals: { ok: true } }] }));
   const lockFile = path.join(ws, 'no-lock.json');
   const base = { ...process.env, ORCH_AGENT: 'kimi', ORCH_CLI: fake, ORCH_ACCEPTANCE_FILE: acceptance, ORCH_MAINTENANCE_LOCK: lockFile, ORCH_MAX_POLL_MS: '120000',
-    // 协调器（槽位租约/内核互斥）钉在本工作区：本用例删掉 NODE_TEST_CONTEXT 走真实入口，
-    // 不钉住就与并发测试文件共用机器级槽位池，谁先占满谁的窗口就排队（2026-09-22 起统一如此）。
-    ORCH_COORDINATOR_DIR: path.join('temp', 'orchestrator', 'coordinator'),
     // 非交互自动化显式钉 headless：本机用户级 ORCH_SPAWN_MODE 不得让套件弹窗或变色。
     ORCH_SPAWN_MODE: 'headless' };
   delete base.WORKSPACE_DIR; delete base.ORCH_STATE_DIR; delete base.NODE_TEST_CONTEXT;
