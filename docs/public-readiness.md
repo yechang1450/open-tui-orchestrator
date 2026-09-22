@@ -60,3 +60,11 @@ gh repo edit yechang1450/open-tui-orchestrator --visibility public --accept-visi
 4. ~~信任/安全声明定稿 + `SECURITY.md` + `CONTRIBUTING.md`~~ ✅ 2026-09-14
 5. 干净环境首次验收（第 7 项）——**你的部分**，过了即可对外说「可以用」
 6. ~~0.9.9 上架（`latest` 刷新）~~ ✅ 2026-09-17 00:27 +08：发布前 `gate.mjs --all` PASS（5 判据 · 295/295）→ `npm publish` → registry 回读（`version=0.9.9`、shasum `4dc01c89…`、integrity `sha512-ceuO3vJb…`）＋ 冷装三步（含 `--install-deps` 幂等复跑）＋ `npx` 烟测全绿；证据 `D:/temp/orch-coldinstall-099/npm-publish-099-smoke.log`。
+
+## 发布记录追加：0.9.22-1（2026-09-22 21:12 +08）
+
+- 版本：`open-tui-orchestrator@0.9.22-1`（`latest` 已显式刷新为它）；内容＝当日 6 个修复提交（协调器互斥机制缺陷 / LLM 拆块静默降级 / 测试隔离 / 退出判定 / 采样器把用例读成超时 / CLI 全覆盖），仓库 HEAD `c3727bc`。
+- 发布前实测：`npm test` **361/361**（exit 0）、`node scripts/gate.mjs --all` **PASS — 5 criteria**（L4 双轨校验 core=0.9.22-1 sealCore=0.9.22-1、三文档一致 361/361、实测 361）、封印 `schema 2 / 47 核心 + 71 运行时`。
+- 包面：99 文件、packed 377.1 kB、unpacked 888.0 kB、shasum `6fe0be6206e9ebf2c638007d7051a7e819aded40`、tag `latest`。
+- registry 回读：`npm view` → `version = 0.9.22-1`、`dist-tags = { latest: 0.9.22-1 }`；tarball 直链 HTTP 200（377140 B）；`npx --yes open-tui-orchestrator@0.9.22-1 --version` → `open-tui-orchestrator 0.9.22-1 (core 0.9.22-1)`。
+- 注意：包版本从日期制 `2026.9.19-5` 回到 `0.9.22-1`（semver 上低于 2026.x），`latest` 是用 `--tag latest` **显式**刷新的；`0.9.22-1` 带预发布段，npm 要求显式 tag，否则 EPUBLISHPRERELEASE。
