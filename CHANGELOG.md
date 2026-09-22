@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.9.22-1 — 套件全绿 + 真机闭环 + 版本号回到 0.9.x
+
+- **版本号**：包版本与 `CORE_VERSION` 同步从日期制 `2026.9.19-5` 回到 `0.9.22-1`（两处镜像，gate 的双轨校验一并更新：README / README-zh / release-policy 的"当前版本"行）。
+- **内容**＝本日 6 个修复提交的全量：协调器互斥机制缺陷（满载假红 / 干等盲区 / 锁内全表快照，外加 `ORCH_MUTEX_HOLD_MAX_MS` 与状态票真因）、LLM 拆块静默降级（`plannerPrompt` 悬空变量 `maxWindows` → 并行能力整段失效）、测试隔离（`ORCH_COORDINATOR_DIR` 显式钉住，不再共用机器级槽位池）、退出判定（"读不到快照"不再当成"进程还在"）、采样器（裸 pid 判活 + stdio 管道把整条用例读成超时 → stderr 落文件 + 进程树按启动时刻锚定）、CLI 全覆盖（机器可读入口 stdout 纯数据、未知入口 fail-closed、无会话分支补首检查点期限）。
+- **实测**：离线回归 **361/361**、`gate --all` **PASS（5 判据）**、真机四场景（双任务并行 / 可见窗未受信任 / 强杀续跑 / 容量上限与超限）证据见 `test/round3-live-result.json`。
+
+
 ## 2026.9.19-5 — multi-window friendly fire: root-caused and fixed
 
 - The window watchdog matched `__ORCH_DONE__` and the block token with two separate Contains() — an agent printing a shared file (manifest.json carries every token) satisfied both on ONE line for a FOREIGN token, so the first four-window run killed three of its own siblings. Completion now requires the contiguous form `__ORCH_DONE__ <own token>`. Verified: 4/4 windows survive, verify rc=0.
