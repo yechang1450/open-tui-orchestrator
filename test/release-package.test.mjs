@@ -7,7 +7,9 @@ import {spawnSync} from 'node:child_process';
 import {verifyRelease} from '../scripts/release-integrity.mjs';
 
 const source=fileURLToPath(new URL('..',import.meta.url));
-const family=path.join('D:\\temp','orchestrator');
+// 临时产物一律落在本仓 temp/ 下：写死的 `D:\temp` 只是作者机器的习惯，换一台没有 D: 盘的机器
+// 第一步 mkdir 就 ENOENT（2026-09-22 本机实测：ENOENT mkdir 'D:\temp\orchestrator'，本文件两条用例全红）。
+const family=path.join(source,'temp');
 
 test('published generic package keeps polling usable and diagnoses missing SDK',()=>{
   fs.mkdirSync(family,{recursive:true});

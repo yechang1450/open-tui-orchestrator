@@ -63,6 +63,10 @@ function callEnv({ws, unitFile, planFile, acceptance, extra = {}}) {
   env.ORCH_SPAWN_MODE = 'headless';
   env.WORKSPACE_DIR = ws;
   env.ORCH_STATE_DIR = path.join(ws, 'temp', 'orchestrator');
+  // 协调器（窗口槽位租约 + 内核互斥）必须跟着测试工作区走。本用例刻意删掉 NODE_TEST_CONTEXT 去走真实
+  // 入口，若不显式钉住就会落到机器级 HKCU 定位器：并发跑的几个测试文件共用同一个槽位池，互相抢容量
+  // 直到把本 run 的 120s 预算耗光（2026-09-22 实测：两条任务都 timeout，reason 指向 capacity）。
+  env.ORCH_COORDINATOR_DIR = path.join('temp', 'orchestrator', 'coordinator');
   env.ORCH_MAINTENANCE_LOCK = path.join(ws, 'no-maintenance-lock.json');
   env.ORCH_MAX_POLL_MS = '120000';
   // 0.9.17 内存拟合：测试要确定性 ⇒ 钉住单元估算与硬底（否则分块形状随机器当时内存漂移），
