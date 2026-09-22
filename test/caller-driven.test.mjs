@@ -251,7 +251,10 @@ test('a unit without checkpoints or a failing unit can never fake success', asyn
 
     // 没有检查点（连 started 都不写）：任务停在无凭证状态，绝不是 verified
     const envNoCp = callEnv({ws, unitFile, planFile: plan, acceptance, extra: {FAKE_UNIT_NO_CHECKPOINTS: '1'}});
-    const r1 = spawnSync(process.execPath, [CLI, '--run-id', 'caller-fake', '--run-windows', REQUEST], {cwd: ws, env: envNoCp, encoding: 'utf8', windowsHide: true, timeout: 240000});
+    // 预算 360s：本用例的两个 run 是套件里最重的一对（每个块 3 次尝试 × 2 块，单跑实测 ~70-90s）。
+    // 2026-09-22 实测：240s 在满载并发下被击穿——真因是采样器管道劫持了引擎退出（已治本，见
+    // test/unit-memory-sampler.test.mjs），预算同时放宽到 ~4x 余量，避免把真实跑动读成挂起。
+    const r1 = spawnSync(process.execPath, [CLI, '--run-id', 'caller-fake', '--run-windows', REQUEST], {cwd: ws, env: envNoCp, encoding: 'utf8', windowsHide: true, timeout: 360000});
     assert.equal(r1.status, 1, r1.stdout);
     const sum1 = readSummary(ws, 'caller-fake');
     assert.equal(sum1.success, false);
@@ -261,7 +264,7 @@ test('a unit without checkpoints or a failing unit can never fake success', asyn
     // 单元直接失败（非零退出、无产物、无完成标记）：验收即失败，零假成功
     const ws2 = fs.mkdtempSync(path.join(family, 'caller-fail-'));
     const envFail = callEnv({ws: ws2, unitFile, planFile: plan, acceptance, extra: {FAKE_UNIT_FAIL: '1'}});
-    const r2 = spawnSync(process.execPath, [CLI, '--run-id', 'caller-fail', '--run-windows', REQUEST], {cwd: ws2, env: envFail, encoding: 'utf8', windowsHide: true, timeout: 240000});
+    const r2 = spawnSync(process.execPath, [CLI, '--run-id', 'caller-fail', '--run-windows', REQUEST], {cwd: ws2, env: envFail, encoding: 'utf8', windowsHide: true, timeout: 360000});
     assert.equal(r2.status, 1, r2.stdout);
     const sum2 = readSummary(ws2, 'caller-fail');
     assert.equal(sum2.success, false);
