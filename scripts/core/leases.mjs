@@ -139,6 +139,17 @@ export function atomicJson(file,value){
   try{fs.rmSync(tmp,{force:true});}catch{}
   throw lastError;
 }
+// 状态文件读取的统一口径（与引擎 loadJson 同一条规矩）：**只有真的不存在**才算「首次运行」，
+// 截断/半写/非 JSON 一律 fail-closed 并点名文件。裸 JSON.parse 会把 SyntaxError 直接甩给调用方
+// （实测：'Expected \':\' after property name in JSON at position 9'——既不说是哪个文件，也不说是什么状态），
+// 与项目自己的机器调用方契约（一条能指向文件的 FATAL）不符。
+export function readState(file,fallback){
+  try{return JSON.parse(fs.readFileSync(file,'utf8'));}
+  catch(error){
+    if(error&&error.code==='ENOENT')return fallback;
+    throw new Error('Invalid orchestration state: '+file+' ('+((error&&error.message)||String(error))+')');
+  }
+}
 export function transaction(dir,fn,snapshot=processSnapshot) {
   fs.mkdirSync(dir,{recursive:true});const lock=path.join(dir,'mutex.json'),file=path.join(dir,'leases.json');
   let processes=snapshot();const owner=processes.get(process.pid);
@@ -168,7 +179,7 @@ export function transaction(dir,fn,snapshot=processSnapshot) {
     // （满载机器上几秒~十几秒），锁内执行会把每个排队者的等待预算吃光——3 并发套件里几十处
     // "waited 60000ms x3" 假红的真根因。锁前那份快照本来就够用：下面的筛选只回答"属主还在不在"，
     // 几百毫秒的偏差最多让一条刚死的租约多留一轮，代价远小于在锁里做全表查询。
-    let leases=[];try{leases=JSON.parse(fs.readFileSync(file,'utf8'));}catch(e){if(e.code!=='ENOENT')throw e;}
+    let leases=readState(file,[]);
     leases=leases.filter(l=>{
       // 断电 P0（2026-09-18）：带开机标识且与本次开机不符 ⇒ 确定来自上一次开机，直接回收。
       // PID 跨重启会重用（可能撞上任意活进程），所以“重启后还活着”这类误判必须由 bootId 拦掉。
@@ -206,8 +217,8 @@ export function prepare(dir,id,pidFile){return transaction(dir,leases=>{const l=
 
 export function claimRun(dir,key) {
   return transaction(dir,(_leases,owner,processes)=>{
-    const file=path.join(dir,'run-owners.json');let owners={};
-    try{owners=JSON.parse(fs.readFileSync(file,'utf8'));}catch(e){if(e.code!=='ENOENT')throw e;}
+    const file=path.join(dir,'run-owners.json');
+    const owners=readState(file,{});
     // 断电 P0：上一次开机留下的 run 属主一律回收（PID 跨重启会重用，不能用来判“还活着”）。
     for(const [id,r] of Object.entries(owners))if((r.bootId!==undefined&&r.bootId!==bootId())||!sameProcess(r.owner,processes.get(r.owner.ProcessId)))delete owners[id];
     if(owners[key])throw new Error('Run already has a live controller');
@@ -216,7 +227,7 @@ export function claimRun(dir,key) {
 }
 export function releaseRun(dir,key,claim) {
   return transaction(dir,()=>{
-    const file=path.join(dir,'run-owners.json');const owners=JSON.parse(fs.readFileSync(file,'utf8'));
+    const file=path.join(dir,'run-owners.json');const owners=readState(file,{});
     if(owners[key]?.token===claim.token){delete owners[key];atomicJson(file,owners);}
   });
 }

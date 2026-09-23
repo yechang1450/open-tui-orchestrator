@@ -661,13 +661,43 @@ function loadPlanFile(file) {
   catch (error) { throw new Error('PLAN_FILE_UNREADABLE: ' + resolved + ' (' + (error?.message || String(error)) + ')'); }
   let doc;
   try { doc = JSON.parse(String(raw).replace(/^\uFEFF/, '')); }
-  catch (error) { throw new Error('PLAN_FILE_INVALID: not valid JSON (' + (error?.message || String(error)) + ')'); }
+  catch (error) { throw planFileError(resolved, 'not valid JSON (' + (error?.message || String(error)) + ')'); }
   const blocks = Array.isArray(doc?.blocks) ? doc.blocks : null;
   const tasks = Array.isArray(doc?.tasks) ? doc.tasks : null;
-  if (blocks && tasks) throw new Error('PLAN_FILE_INVALID: provide either blocks or tasks, not both');
-  if (!blocks && !tasks) throw new Error('PLAN_FILE_INVALID: expected {tasks:[...]} or {blocks:[...]}');
-  if ((blocks && !blocks.length) || (tasks && !tasks.length)) throw new Error('PLAN_FILE_INVALID: the supplied list is empty');
+  if (blocks && tasks) throw planFileError(resolved, 'provide either blocks or tasks, not both');
+  if (!blocks && !tasks) throw planFileError(resolved, 'expected {tasks:[...]} or {blocks:[...]}');
+  if ((blocks && !blocks.length) || (tasks && !tasks.length)) throw planFileError(resolved, 'the supplied list is empty');
+  // 元素级结构校验（2026-09-23 line B 实测的两类旧行为：① blocks:[null] / tasks:[null] 会被分块引擎
+  // 以裸 TypeError 崩掉——'Cannot read properties of null (reading 'title')'，既不点名文件也不点名项；
+  // ② 类型错的字段被静默吃下，例如 conflictKeys:"file:x" 被展开成逐字符 key，冲突门被悄悄削弱）。
+  // 判据来自 docs/caller-driven.md 的硬规则：plan 文件是调用方输入，畸形必须点名文件与项后拒绝。
+  if (blocks) blocks.forEach((block, i) => validatePlanBlock(block, i, resolved));
+  if (tasks) tasks.forEach((task, i) => {
+    if (!task || typeof task !== 'object' || Array.isArray(task) || typeof task.id !== 'string' || !task.id.trim())
+      throw planFileError(resolved, 'tasks[' + i + '] must be an object with a non-empty string id');
+  });
   return { tasks, blocks };
+}
+function planFileError(file, detail) { return new Error('PLAN_FILE_INVALID: ' + detail + ' (file: ' + file + ')'); }
+function validatePlanBlock(block, i, file) {
+  const at = 'blocks[' + i + ']';
+  if (!block || typeof block !== 'object' || Array.isArray(block)) throw planFileError(file, at + ' must be an object');
+  if (block.title !== undefined && (typeof block.title !== 'string' || !block.title.trim())) throw planFileError(file, at + '.title must be a non-empty string');
+  if (block.type !== undefined && !['independent', 'linked'].includes(block.type)) throw planFileError(file, at + '.type must be independent|linked');
+  for (const field of ['conflictKeys', 'dependsOn']) {
+    const value = block[field];
+    if (value !== undefined && (!Array.isArray(value) || value.some(v => typeof v !== 'string'))) throw planFileError(file, at + '.' + field + ' must be an array of strings');
+  }
+  // tasks 缺省/为空仍走既有口径（覆盖不足 ⇒ 回退成一条串行块），这里只拦「存在但类型错」的元素。
+  if (block.tasks !== undefined) {
+    if (!Array.isArray(block.tasks)) throw planFileError(file, at + '.tasks must be an array');
+    block.tasks.forEach((task, j) => {
+      const tat = at + '.tasks[' + j + ']';
+      if (!task || typeof task !== 'object' || Array.isArray(task)) throw planFileError(file, tat + ' must be an object');
+      if (task.prompt !== undefined && typeof task.prompt !== 'string') throw planFileError(file, tat + '.prompt must be a string');
+      if (task.id !== undefined && (typeof task.id !== 'string' || !task.id.trim())) throw planFileError(file, tat + '.id must be a non-empty string');
+    });
+  }
 }
 function planFromFile(request, doc, capacity, hints = resolveHints()) {
   const blocks = doc.tasks
@@ -2099,7 +2129,15 @@ function loadJson(file, fallback) {
   // different: treating it as an empty registry could bypass the capacity or
   // conflict gate and start too many windows. Fail closed after the bounded
   // atomic-replace grace period instead of silently discarding state.
-  if (lastError?.code === "ENOENT") return fallback;
+  // 2026-09-23（line B 实测）：Windows 上「路径中间那一节不是目录」（例如 temp/orchestrator 被同名文件
+  // 占住）读文件报的也是 ENOENT，与「文件还没生成」同码——旧写法于是把它当成首次运行，静默回一份空注册表
+  // （--status 打印 "(none)"、退出码 0）。只有**目录确实在、文件确实不在**才算首次运行，其余一律 fail-closed。
+  if (lastError?.code === "ENOENT") {
+    let firstRun = false;
+    try { firstRun = statSync(path.dirname(file)).isDirectory() && !existsSync(file); }
+    catch { firstRun = true; } // 目录本身不存在 = 真正的工作区首次运行
+    if (firstRun) return fallback;
+  }
   throw new Error("Invalid orchestration state: " + file);
 }
 function saveJson(file, data) {

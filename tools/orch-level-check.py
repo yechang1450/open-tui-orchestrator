@@ -168,10 +168,14 @@ def consistency(log_path: Path = DEFAULT_LOG, log_explicit: bool = False) -> int
 
     # 每处口径行：正则 + 命中的组下标 (核心版本, 回归总数分子, 分母)——release-policy 的 43/62 是
     # 封印计数，不是回归总数，早年写法在这里把两组混过（2026-09-14 判据自身修）。
+    # 版本号可能带 `-N` 后缀（现行核心是 `0.9.22-1`）：旧模式写死 `([\d.]+)` 时三处口径行
+    # 全部"未找到"⇒ 在一个完全对账的仓上判 FAIL（2026-09-23 实测）。与 scripts/gate.mjs 的
+    # `([\d.]+(?:-\d+)?)` 对齐，钉住两种版本写法。
+    V = r"([\d.]+(?:-\d+)?)"
     sources = {
-        "README.md": (r"core is ([\d.]+), with (\d+)/(\d+) offline tests passing", 0, 1, 2),
-        "README-zh.md": (r"当前通用核心为 ([\d.]+)，离线回归为 (\d+)/(\d+) 通过", 0, 1, 2),
-        "docs/release-policy.md": (r"当前源码封印记录通用核心 ([\d.]+)、(\d+) 个核心文件和 (\d+) 个运行时文件。最新离线回归为 (\d+)/(\d+) 通过", 0, 3, 4),
+        "README.md": (r"core is " + V + r", with (\d+)/(\d+) offline tests passing", 0, 1, 2),
+        "README-zh.md": (r"当前通用核心为 " + V + r"，离线回归为 (\d+)/(\d+) 通过", 0, 1, 2),
+        "docs/release-policy.md": (r"当前源码封印记录通用核心 " + V + r"、(\d+) 个核心文件和 (\d+) 个运行时文件。最新离线回归为 (\d+)/(\d+) 通过", 0, 3, 4),
     }
     counts = set()
     for rel, (pattern, ci, pi, ti) in sources.items():
