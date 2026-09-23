@@ -76,3 +76,11 @@ gh repo edit yechang1450/open-tui-orchestrator --visibility public --accept-visi
 - 包面：99 文件、packed 381.8 kB、unpacked 898.3 kB、shasum `f0390578710e447896ce9c1789d7286d2272e438`、integrity `sha512-qKYPWMJtYzC3mnreivb2muI3PDSsVP9onpr2aqj1nWCTqkAsgr++Mef8Tu59yQTR65sKezzPyUlTBQRl2CikyA==`、tag `latest`。
 - registry 回读：`npm view @0.9.22-2` → `version = 0.9.22-2`、`dist-tags = { latest: 0.9.22-2 }`；`npx --yes --registry https://registry.npmjs.org open-tui-orchestrator@0.9.22-2 --version` → `open-tui-orchestrator 0.9.22-2 (core 0.9.22-2)`；全局安装已同步 `0.9.22-2`。
 - 注意：`0.9.22-2` 带预发布段，npm 要求显式 `--tag latest`；首个 PUT 回 202（processing），约 5 分钟后 registry 生效；npmmirror 同步有延迟（npx/install 需显式 `--registry https://registry.npmjs.org` 或等镜像）。
+
+## 发布记录追加：0.9.24-1（2026-09-24 上午 +08）
+
+- 版本：`open-tui-orchestrator@0.9.24-1`（`latest` 已显式刷新为它）；内容＝公开入口 fail-closed 收口的正式版号（与 0.9.22-2 同内容：引导面先于上下文解析、工作区/spawn 失败契约、`leases.readState` fail-closed、验收契约与 plan 文件元素级校验、`loadJson` ENOENT 歧义治理）；仓库 HEAD `8a19de1`。
+- 发布前实测：离线套件 **370/370**、`node scripts/gate.mjs --all` **PASS — 5 criteria**（L4 双轨校验 core=0.9.24-1 sealCore=0.9.24-1、三文档一致 370/370、实测 370）、封印 `schema 2 / 47 核心 + 71 运行时`。
+- 包面：99 文件、unpacked 900.8 kB、shasum `2b43596cb831fe16f780956b783677e477c1cf20`、integrity `sha512-tnG5LLNU81+ojOqsdNqt063KMQpQryHrVcXt1tcWBMUZgdxdILy70Fu8z2CeWHHx0UkAEAipNakhKpRCw6z6Hg==`、tag `latest`。
+- registry 回读：`npm view` → `version = 0.9.24-1`、`dist-tags = { latest: 0.9.24-1 }`；`npx --yes --registry https://registry.npmjs.org open-tui-orchestrator@0.9.24-1 --version` → `open-tui-orchestrator 0.9.24-1 (core 0.9.24-1)`；全局安装已同步 `0.9.24-1`。
+- 注意：`0.9.24-1` 带预发布段，npm 需显式 `--tag latest`；PUT 回 202 后约 5 分钟 registry 生效；npmmirror 有同步延迟。
