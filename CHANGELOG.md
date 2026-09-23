@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.9.24-1 — 公开入口 fail-closed 收口（正式版号推进）
+
+- 版本号推进至 `0.9.24-1`（带预发布段，npm 需 `--tag latest` 显式刷新）。
+- 内容＝0.9.22-2 的全部收口：`--install-deps`/`--help` 先于运行上下文解析（坏 `ORCH_STATE_DIR` 不再吃掉自救入口）；`resolveRuntimeContext` 异常、`--workspace` 非目录、子进程 spawn ENOENT 统一走单行 `[orchestrator] FATAL: <原因>`（`ORCH_DEBUG=1` 才附栈帧，坏工作区点名路径）；`leases.readState` fail-closed（只有 ENOENT 视为首次运行，截断/半写/非 JSON 点名文件）；验收契约 `ACCEPTANCE_UNREADABLE` / `ACCEPTANCE_INVALID` 点名；plan 文件元素级校验（null 元素/类型错字段点名拒绝）；`loadJson` 区分「文件未生成」与「路径中间节不是目录」的 ENOENT。
+- 发布前实测：离线套件 **370/370**、`node scripts/gate.mjs --all` **PASS — 5 criteria**、封印 `schema 2 / 47 核心 + 71 运行时`。
+
 ## 0.9.22-2 — 公开入口 fail-closed 收口 + 边界鲁棒性回归
 
 - **CLI 失败契约贯通**（`cli.mjs`）：`--install-deps`/`--help` 先于运行上下文解析（坏 `ORCH_STATE_DIR` 不再吃掉自救入口）；`resolveRuntimeContext` 异常、`--workspace` 指向非目录、子进程 `spawn ENOENT` 一律走单行 `[orchestrator] FATAL: <原因>`（`ORCH_DEBUG=1` 才附栈帧），坏工作区会点名路径。
