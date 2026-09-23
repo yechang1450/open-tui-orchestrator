@@ -26,7 +26,10 @@ test('repair validates and publishes a clean CLI package', () => {
 
     const publish = spawnSync(process.execPath, [repair, '--target', root], {cwd: source, env: repairEnv, encoding: 'utf8', windowsHide: true, timeout: 30000});
     assert.equal(publish.status, 0, publish.stderr || publish.stdout);
-    const published = path.join(root, 'open-tui-orchestrator');
+    // repair.mjs 把发行副本命名为**源目录名**（`<target>/<basename(source)>`），所以判据必须跟它同源：
+    // 写死 'open-tui-orchestrator' 会让任何换名 checkout（CI/审计沙箱/`-main` 压缩包）得到两条假红
+    //（实测：同一 commit 换名后 release.json ENOENT，套件 359/361）。
+    const published = path.join(root, path.basename(path.resolve(source)));
     assert.deepEqual(verifyRelease(published), verifyRelease(source));
     for (const name of ['.git', 'node_modules', 'temp', 'coverage']) {
       assert.equal(fs.existsSync(path.join(published, name)), false, `published package contains ${name}`);

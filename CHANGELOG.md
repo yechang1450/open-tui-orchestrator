@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.9.22-2 — 公开入口 fail-closed 收口 + 边界鲁棒性回归
+
+- **CLI 失败契约贯通**（`cli.mjs`）：`--install-deps`/`--help` 先于运行上下文解析（坏 `ORCH_STATE_DIR` 不再吃掉自救入口）；`resolveRuntimeContext` 异常、`--workspace` 指向非目录、子进程 `spawn ENOENT` 一律走单行 `[orchestrator] FATAL: <原因>`（`ORCH_DEBUG=1` 才附栈帧），坏工作区会点名路径。
+- **状态/账本读取 fail-closed**（`scripts/core/leases.mjs`）：新增 `readState()`——只有 ENOENT 视为首次运行，截断/半写/非 JSON 点名文件报错；`leases.json` 与 `run-owners.json` 全面接入。
+- **验收契约错误点名**（`scripts/core/runner.mjs`）：`loadChecks()` 对不可读/畸形文件回 `ACCEPTANCE_UNREADABLE` / `ACCEPTANCE_INVALID: <file>`，并兼容 BOM。
+- **plan 文件元素级校验 + 注册表读取歧义治理**（`scripts/core/orchestrate-sdk.mjs`）：`blocks`/`tasks` 元素结构逐项校验（null 元素、类型错字段点名拒绝，不再被静默吃下）；`loadJson` 区分「文件未生成」与「路径中间节不是目录」的 ENOENT，后者不再被当成首次运行回空注册表。
+- **回归**：新增 `test/boundaries-robustness.test.mjs`；离线套件 **370/370** 全绿，`cli-surface` / `publication` / `release-package` 用例同步更新；README / README-zh / release-policy 版本与计数口径同步，封印随 `release-integrity --seal` 重签为 0.9.22-2。
+
 ## 0.9.22-1 — 套件全绿 + 真机闭环 + 版本号回到 0.9.x
 
 - **版本号**：包版本与 `CORE_VERSION` 同步从日期制 `2026.9.19-5` 回到 `0.9.22-1`（两处镜像，gate 的双轨校验一并更新：README / README-zh / release-policy 的"当前版本"行）。

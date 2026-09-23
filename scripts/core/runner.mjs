@@ -153,7 +153,31 @@ export function runDirectory(workspace,runId) {
   if(!/^[a-zA-Z0-9_-]{1,100}$/.test(runId||''))throw new Error('A valid --run-id is required');
   return path.join(workspace,'temp','orchestrator','runs',runId);
 }
-function loadChecks(file){return file?JSON.parse(fs.readFileSync(file,'utf8')):{};}
+// 调用方给的验收契约与运行自带的账本一样是**输入文件**：畸形必须点名文件，不能甩裸 JSON 偏移
+// （实测旧行为：'Expected \',\' or \'}\' after property value in JSON at position 23'——不知道是哪个文件坏了）。
+// 运行目录里那份 acceptance.json 缺失仍按「没有父级验收」处理（既有语义：任务停在 awaiting-verification）。
+function loadChecks(file){
+  if(!file)return {};
+  let raw;
+  try{raw=fs.readFileSync(file,'utf8');}
+  catch(error){
+    if(error&&error.code==='ENOENT')return {};
+    throw new Error('ACCEPTANCE_UNREADABLE: '+file+' ('+((error&&error.message)||String(error))+')');
+  }
+  try{return JSON.parse(String(raw).replace(/^\uFEFF/,''));}
+  catch(error){throw new Error('ACCEPTANCE_INVALID: '+file+' ('+((error&&error.message)||String(error))+')');}
+}
+// 运行账本（summary.json）的读取口径：缺失 = 找不到这个 run（既有话术），**损坏 = 点名文件的账本错误**。
+function readRunLedger(file,runId){
+  let raw;
+  try{raw=fs.readFileSync(file,'utf8');}
+  catch(error){
+    if(error&&error.code==='ENOENT')throw new Error('Run not found: '+runId+' (no summary.json in '+path.dirname(file)+')');
+    throw new Error('Invalid run ledger: '+file+' ('+((error&&error.message)||String(error))+')');
+  }
+  try{return JSON.parse(String(raw).replace(/^\uFEFF/,''));}
+  catch(error){throw new Error('Invalid run ledger: '+file+' ('+((error&&error.message)||String(error))+')');}
+}
 // 验收契约（含 command 类检查，会以控制器权限执行）在创建时锚定哈希：run 目录可被窗内 agent 写入，
 // resume/verify 回读前比对，篡改即拒绝——不让被改写的 acceptance.json 借恢复流程获得执行权。
 function checksHash(checks){return crypto.createHash('sha256').update(JSON.stringify(checks||{})).digest('hex');}
@@ -199,7 +223,7 @@ export function verifyRun(workspace,runId,acceptanceFile) {
   const dir=runDirectory(workspace,runId),file=path.join(dir,'summary.json');
   // 机器可调用契约：未知 run 必须 fail-closed 且只回一行可读诊断（不许裸栈帧/ENOENT 甩路径）。
   if(!fs.existsSync(file))throw new Error('Run not found: '+runId+' (no summary.json in '+dir+')');
-  const sum=JSON.parse(fs.readFileSync(file,'utf8'));
+  const sum=readRunLedger(file,runId);
   if(sum.runId!==runId||!sum.finishedAt)throw new Error('Run is not finalized');
   if(sum.protocol===2)validateRecoverySummary(sum);
   const checks=loadChecks(acceptanceFile||path.join(dir,'acceptance.json'));
@@ -229,7 +253,7 @@ export async function runWindows(request,hooks,options={}) {
     let checks;
     if(options.resume) {
       if(!fs.existsSync(summaryFile))throw new Error('Run not found: '+runId+' (no summary.json in '+dir+')');
-      sum=JSON.parse(fs.readFileSync(summaryFile,'utf8'));
+      sum=readRunLedger(summaryFile,runId);
       if(sum.protocol!==2||!Array.isArray(sum.plan))throw new Error('This run has no recoverable task checkpoints');
       if((sum.agent||'codex')!==(options.agent||'codex'))throw new Error('Resume agent must match the saved run');
       if(path.resolve(sum.workspace)!==workspace||sum.runId!==runId)throw new Error('Run workspace/identity mismatch');

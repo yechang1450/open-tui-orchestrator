@@ -210,3 +210,58 @@ test('a caller-supplied plan file makes --plan fully deterministic — no host, 
     assert.equal(r.frames.length, 0, r.all);
   });
 });
+
+// 2026-09-23 审计轮：入口自己（解析运行上下文 / 解析工作区）此前不在失败契约之内——
+// resolveRuntimeContext 在 cli.mjs 顶层未捕获，坏 ORCH_STATE_DIR 会把 7 帧 Node 栈甩给机器调用方；
+// 工作区不是目录时则只回 Node 的 `spawn <node.exe> ENOENT`。下面三条把这段入口面钉住。
+// 红例：把 cli.mjs 的 try/catch 或工作区预检去掉 ⇒ 前两条必红（栈帧 = 7）。
+test('a broken runtime context fails closed with one FATAL line and zero stack frames', () => {
+  withWorkspace('context-refuse', (ws) => {
+    // 越界状态目录：必须留在 workspace/temp 下（scripts/core/runtime-context.mjs 的既有契约）。
+    const outside = path.join(ws, '..', 'orchestrator-outside-' + path.basename(ws));
+    for (const argv of [['--status'], ['--doctor'], ['--tasks', REQUEST], ['--plan', REQUEST]]) {
+      const r = run(ws, argv, {ORCH_STATE_DIR: outside}, 60000);
+      assert.equal(r.status, 1, `${argv[0]} must fail closed: ` + r.all);
+      assert.match(r.stderr, /^\[orchestrator\] FATAL: /m, `${argv[0]}: ` + r.all);
+      assert.equal(r.frames.length, 0, `${argv[0]} leaked a Node stack: ` + r.all);
+      assert.equal(r.stdout.trim(), '', `${argv[0]} must not print data when it refuses: ` + r.all);
+    }
+  });
+});
+
+test('--help and --install-deps stay reachable when the runtime context is broken', () => {
+  withWorkspace('context-neutral', (ws) => {
+    // 这三个入口是排障用的中立面（scripts/platform-guard.mjs 的 PLATFORM_NEUTRAL_ARGS 同义）：
+    // 环境本身坏掉（越界状态目录）时它们仍必须可用，否则用户连自救入口都够不着。
+    const outside = path.join(ws, '..', 'orchestrator-outside-' + path.basename(ws));
+    const help = run(ws, ['--help'], {ORCH_STATE_DIR: outside}, 60000);
+    assert.equal(help.status, 0, help.all);
+    assert.ok(help.stdout.includes('--doctor') && help.stdout.includes('--install-deps'), help.stdout.slice(0, 200));
+    const deps = run(ws, ['--install-deps'], {ORCH_STATE_DIR: outside}, 300000);
+    assert.equal(deps.frames.length, 0, deps.all);
+    assert.doesNotMatch(deps.all, /FATAL/, 'the bootstrap entry must not be gated by the runtime context: ' + deps.all);
+    const shim = path.join(root, 'scripts', 'node_modules', '@openai', 'codex-sdk', 'package.json');
+    if (fs.existsSync(shim)) {
+      // 依赖已在位：幂等回报、stdout 纯数据、不联网。
+      assert.equal(deps.status, 0, deps.all);
+      assert.equal(JSON.parse(deps.stdout).action, 'already-present', deps.stdout);
+    }
+  });
+});
+
+test('a workspace that is not a directory refuses with one readable line (never a raw spawn ENOENT)', () => {
+  const ws = workDir('not-a-directory');
+  try {
+    const file = path.join(ws, 'note.txt');
+    fs.writeFileSync(file, 'this is a file, not a workspace\n');
+    const missing = path.join(ws, 'does-not-exist');
+    for (const target of [file, missing]) {
+      // cwd 不存在时 Node 只回 `spawn <node.exe> ENOENT`：既不指出哪个路径错，也不符合 FATAL 契约。
+      const r = run(ws, ['--agent', 'codex', '--doctor'], {WORKSPACE_DIR: target, ORCH_STATE_DIR: path.join(target, 'temp', 'orchestrator')}, 60000);
+      assert.equal(r.status, 1, r.all);
+      assert.match(r.stderr, /^\[orchestrator\] FATAL: Workspace is not a directory/m, r.all);
+      assert.doesNotMatch(r.all, /ENOENT/, 'a raw spawn ENOENT must never reach the caller: ' + r.all);
+      assert.equal(r.frames.length, 0, r.all);
+    }
+  } finally { cleanup(ws); }
+});

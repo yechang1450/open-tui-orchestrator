@@ -21,7 +21,9 @@ test('published generic package keeps polling usable and diagnoses missing SDK',
   try{
     const publish=spawnSync(process.execPath,[path.join(source,'repair.mjs'),'--target',root],{cwd:source,env:repairEnv,encoding:'utf8',windowsHide:true,timeout:30000});
     assert.equal(publish.status,0,publish.stderr||publish.stdout);
-    const pkg=path.join(root,'open-tui-orchestrator');
+    // 发行副本的目录名 = 源目录名（repair.mjs 的既有语义）：判据不得写死 `open-tui-orchestrator`，
+    // 否则换名 checkout 下这条用例假红（release.json ENOENT）。
+    const pkg=path.join(root,path.basename(path.resolve(source)));
     assert.deepEqual(verifyRelease(pkg),verifyRelease(source));
     const poll=spawnSync(process.execPath,[path.join(pkg,'scripts','poll-windows.mjs'),'--run-id','package-test','--timeoutMs','0'],{cwd:source,encoding:'utf8',windowsHide:true,timeout:30000});
     assert.equal(poll.status,1,poll.stderr);
