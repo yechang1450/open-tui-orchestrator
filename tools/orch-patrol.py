@@ -47,7 +47,8 @@ import time
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 NODE_DIR = r'C:\Program Files\nodejs'  # 2026-09-22: node24-fresh tree removed; system node
 NODE_EXE = os.path.join(NODE_DIR, 'node.exe')
-CODEX_BIN = r'C:\Users\yecha\.tools\open-tui-orchestrator\scripts\node_modules\@openai\codex-win32-x64\vendor\x86_64-pc-windows-msvc\bin'  # 2026-09-22: repo-local codex vendor (was under the removed node24-fresh)
+CODEX_BIN = os.path.join(ROOT, 'scripts', 'node_modules', '@openai', 'codex-win32-x64',
+                         'vendor', 'x86_64-pc-windows-msvc', 'bin')  # 2026-09-22: repo-local codex vendor, derived from ROOT (no user path)
 GATE_TIMEOUT = 1500          # 门禁全量（含 296 条套件）的宽限；任务侧 ExecutionTimeLimit 30min
 LOCK_STALE_MIN = 40          # 锁超过这个分钟数视为遗留（任务 15 分钟一跑）
 OTHER_PROCS = r'gate\.mjs|\.test\.mjs|orch-level-check|l5-recovery-drill|orch-suite'
