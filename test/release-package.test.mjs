@@ -11,7 +11,10 @@ const source=fileURLToPath(new URL('..',import.meta.url));
 // 临时产物落在系统临时目录：写死的 `D:\temp` 只是作者机器的习惯，换一台没有 D: 盘的机器第一步 mkdir 就
 // ENOENT（2026-09-22 本机实测：ENOENT mkdir 'D:\temp\orchestrator'，本文件这条用例全红）；也不能落在
 // 本仓 temp/ 下——repair 明确拒绝"发布到源码树内部"（Publish target must be outside the source tree）。
-const family=path.join(os.tmpdir(),'orchestrator');
+// ORCH_TEST_ROOT 可覆盖根目录（测试隔离用），未设置时回落系统临时目录。
+const family=process.env.ORCH_TEST_ROOT
+  ? path.join(process.env.ORCH_TEST_ROOT,'orchestrator')
+  : path.join(os.tmpdir(),'orchestrator');
 
 test('published generic package keeps polling usable and diagnoses missing SDK',()=>{
   fs.mkdirSync(family,{recursive:true});
