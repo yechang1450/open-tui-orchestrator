@@ -32,8 +32,12 @@ from pathlib import Path
 
 REPO = Path(os.path.expanduser("~/.tools/open-tui-orchestrator"))
 NODE_BIN = Path(r"C:\Program Files\nodejs")  # 2026-09-22: node24-fresh removed; system node
-CODEX_BIN = r"C:\Users\<user>\.tools\open-tui-orchestrator\scripts\node_modules\@openai\codex-win32-x64\vendor\x86_64-pc-windows-msvc\bin"
-SUITE_CMD = "ORCH_AGENT=codex PATH='C:/Program Files/nodejs:C:/Users/<user>/.tools/open-tui-orchestrator/scripts/node_modules/@openai/codex-win32-x64/vendor/x86_64-pc-windows-msvc/bin:$PATH node --test --test-concurrency=3 test/*.test.mjs"
+# vendor 目录随仓归档；从 REPO 推导，避免写死用户名路径（公开前身份清理）
+_CODEX_VENDOR = (REPO / "scripts" / "node_modules" / "@openai" / "codex-win32-x64"
+                 / "vendor" / "x86_64-pc-windows-msvc" / "bin")
+CODEX_BIN = str(_CODEX_VENDOR)
+SUITE_CMD = (f"ORCH_AGENT=codex PATH='C:/Program Files/nodejs:{_CODEX_VENDOR.as_posix()}:$PATH "
+             f"node --test --test-concurrency=3 test/*.test.mjs")
 DEFAULT_LOG = Path("D:/temp/orch-level/L1-suite.log")
 LOG_PATH = DEFAULT_LOG
 LOG_EXPLICIT = False
