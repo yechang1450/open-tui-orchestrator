@@ -132,5 +132,5 @@ node scripts/recover-stale.mjs --workspace <dir> --resume   # resume them throug
 Recommended deployment: run the report at logon (Task Scheduler), add `--resume` when unattended. Recovery is
 itself interruptible — if the machine dies again mid-resume the next scan picks it up (bounded, converging).
 
-Resume admission is clamped to *current* free memory (`floor(freeMB/1000)*2`): a busier machine queues blocks in
+Resume admission is clamped to *current* free memory (the same memory-fit admission as a fresh run: `floor((freeMB − 1000) / unit estimate)`): a busier machine queues blocks in
 waves and never fails a legitimately-created ledger just because memory shrank.
