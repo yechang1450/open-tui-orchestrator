@@ -74,7 +74,7 @@ async function cleanup(workspace, kids) {
   fs.rmSync(workspace, {recursive: true, force: true});
 }
 
-test('a transient unit failure (started-only checkpoint, quick exit) is auto-retried and can reach success', async () => {
+test('a transient unit failure (started-only checkpoint, quick exit) is auto-retried and can reach success', {timeout: 240000}, async () => {
   fs.mkdirSync(family, {recursive: true});
   const workspace = fs.mkdtempSync(path.join(family, 'transient-ok-'));
   const h = harness({workspace, runId: 'transient-ok'});
@@ -93,7 +93,7 @@ test('a transient unit failure (started-only checkpoint, quick exit) is auto-ret
   }
 });
 
-test('retrySafe:false vetoes the automatic transient retry (the escape hatch stays intact)', async () => {
+test('retrySafe:false vetoes the automatic transient retry (the escape hatch stays intact)', {timeout: 180000}, async () => {
   fs.mkdirSync(family, {recursive: true});
   const workspace = fs.mkdtempSync(path.join(family, 'transient-veto-'));
   const h = harness({workspace, runId: 'transient-veto', checksValue: false});
@@ -110,7 +110,7 @@ test('retrySafe:false vetoes the automatic transient retry (the escape hatch sta
   }
 });
 
-test('a long-running failure is not treated as transient (real failures are never masked)', async () => {
+test('a long-running failure is not treated as transient (real failures are never masked)', {timeout: 180000}, async () => {
   fs.mkdirSync(family, {recursive: true});
   const workspace = fs.mkdtempSync(path.join(family, 'transient-slow-'));
   const h = harness({workspace, runId: 'transient-slow', attempt1Ms: 1600});
@@ -130,7 +130,7 @@ test('a long-running failure is not treated as transient (real failures are neve
 
 // 2026-09-18（codex 现场）：单元整轮“只说不干”——连一个检查点都没写（T002 从未 started），
 // 普通预算 1 次用尽就会把失败甩给调用方。新行为：无产出特征成立时自动补一次重试（可 env 关）。
-test('a unit that never writes ANY checkpoint is auto-retried once beyond the plain attempt budget', async () => {
+test('a unit that never writes ANY checkpoint is auto-retried once beyond the plain attempt budget', {timeout: 240000}, async () => {
   fs.mkdirSync(family, {recursive: true});
   const workspace = fs.mkdtempSync(path.join(family, 'unproductive-'));
   const h = harness({workspace, runId: 'unproductive', attempt1NoCheckpoint: true});
