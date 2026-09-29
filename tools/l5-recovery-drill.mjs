@@ -17,7 +17,7 @@ import {spawn, spawnSync} from 'node:child_process';
 
 const REPO = process.env.ORCH_REPO || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const NODE = process.execPath;
-const ROOT = process.env.ORCH_L5_ROOT || 'D:/temp/orch-l5';
+const ROOT = process.env.ORCH_L5_ROOT || path.join(os.tmpdir(), 'orch-l5');
 const WS = path.join(ROOT, 'ws');
 const failMode = process.argv.includes('--no-resume-budget');
 const runId = 'l5-drill-' + (failMode ? 'fail' : 'auto') + '-' + Date.now().toString(36);

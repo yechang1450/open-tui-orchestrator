@@ -20,3 +20,47 @@ Thumbs.db
 .plugin-eval/
 .agent-cache.json
 scripts/.agent-cache.json
+
+# ---- 编排器运行时产物（run 中间文件、窗口/租约/内存画像）----
+*.out.log
+*.pty.log
+win-*.window.json
+win-launch-*.ps1
+window-*.pid
+resumed-engine-*.log
+unit-peak-*.json
+unit-memory.json
+run-*.json
+
+# ---- 构建/覆盖率产物 ----
+coverage/
+dist/
+build/
+*.tsbuildinfo
+
+# ---- 草稿与编辑器临时 ----
+*.bak
+*.orig
+*.rej
+*.swp
+*~
+.tmp-*
+
+# ---- Python 工具链（tools/ 下的判据脚本）----
+*.py[cod]
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# ---- 凭据：永不入库（除模板外）----
+*.pem
+*.key
+*.p12
+secrets/
+desktop.ini
+*.code-workspace
+
+# ---- 必须入库，切勿忽略 ----
+# release.json、scripts/core/**（封印覆盖的 47 个核心文件）、test/**、docs/**
+# 封印会核对 tracked 文件内容；误忽略核心文件将导致 verifyRelease 失败。

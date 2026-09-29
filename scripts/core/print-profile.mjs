@@ -78,7 +78,7 @@ export function resolveProfileHost(env = process.env, id) {
     const versionResult = probeCli(bin, [...prefixArgs, '--version'], {env});
     const version = new RegExp(profile.versionPattern || '(\\d+\\.\\d+\\.\\d+)').exec(String(versionResult.stdout || ''))?.[1];
     if (versionResult.status !== 0 || !version) { rejected.push(`${file}: --version ${versionResult.error ? 'probe error ' + versionResult.error : 'exit ' + versionResult.status + '; unusable output ' + JSON.stringify(String(versionResult.stdout || '').trim().slice(0, 120))}`); continue; }
-    return { agent: id, config: { id, label: profile.label || id, version, bin, prefixArgs, available: true, native: prefixArgs.length === 0, completionMarker: '__ORCH_DONE__', modelEnv: 'ORCH_MODEL', effortEnv: 'ORCH_EFFORT', profile, profileFile: path.join(profilesDir(env), id + '.json'), reusable: true } };
+    return { agent: id, config: { id, label: profile.label || id, version, bin, prefixArgs, available: true, native: prefixArgs.length === 0, completionMarker: '__ORCH_DONE__', modelEnv: 'ORCH_MODEL', effortEnv: 'ORCH_EFFORT', carrier: profile.carrier || null, profile, profileFile: path.join(profilesDir(env), id + '.json'), reusable: true } };
   }
   throw new Error(`CLI_MISSING: ${id}; no supported installed ${id} CLI found (print-class profile ${path.join(profilesDir(env), id + '.json')}). No fallback or automatic install. Tried: ${rejected.join(' | ') || 'no candidate found on disk'}`);
 }
