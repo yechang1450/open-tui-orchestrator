@@ -18,13 +18,13 @@ const blk = (title, tasks = 1, dependsOn = [], hints = []) => ({
 
 test('memConfig: generic defaults + env overrides', () => {
   const d = memConfig({});
-  assert.equal(d.floorMb, 256);
+  assert.equal(d.floorMb, 1000);
   assert.equal(d.defaultUnitMb, MEM_DEFAULTS.defaultUnitMb);
   assert.equal(d.safety, 1.3);
   const e = memConfig({ORCH_MIN_FREE_MEM_MB: '512', ORCH_UNIT_MEM_DEFAULT_MB: '800', ORCH_UNIT_MEM_SAFETY: '1.5', ORCH_UNIT_MEM_MIN_SAMPLES: '5'});
   assert.deepEqual(e, {floorMb: 512, defaultUnitMb: 800, safety: 1.5, minSamples: 5, blockGrowth: 0.15});
   const bad = memConfig({ORCH_MIN_FREE_MEM_MB: '-3', ORCH_UNIT_MEM_SAFETY: 'nope'});
-  assert.equal(bad.floorMb, 256);
+  assert.equal(bad.floorMb, 1000);
   assert.equal(bad.safety, 1.3);
 });
 
@@ -74,7 +74,7 @@ test('fit: ample memory -> zero merges (never merge what fits)', () => {
 });
 
 test('fit: tight memory -> exactly the merges needed, floor respected (merged block costs 1+g)', () => {
-  const cfg = memConfig({});                       // floor=256, g=0.15
+  const cfg = memConfig({ORCH_MIN_FREE_MEM_MB: '256'});   // 本用例只验合并机制：显式钉余量，不受默认值漂移影响
   // free=500, unit=100: 3 块 est=300 > 244 ✗ → 并 1 对（成本 1.15）⇒ est=215 ≤ 285 ✓ 停
   const plan = fitBlocks([blk('B1'), blk('B2'), blk('B3')], 500, 100, cfg);
   assert.equal(plan.merges.length, 1);
@@ -89,7 +89,7 @@ test('fit: growth factor keeps merging profitable (g<1) and is clamped', () => {
   assert.equal(g, 0.9);
   const off = memConfig({ORCH_UNIT_MEM_BLOCK_GROWTH: '0'}).blockGrowth;    // 允许显式关闭
   assert.equal(off, 0);
-  const cfg = memConfig({});
+  const cfg = memConfig({ORCH_MIN_FREE_MEM_MB: '256'});   // 显式钉余量：本用例验的是增长系数
   // 4 块 ×1 任务 → 内存紧 ⇒ 并到 2 块：总账必须单调下降（400 → 315 → 230）
   const before = fitBlocks([blk('A'), blk('B'), blk('C'), blk('D')], 500, 100, cfg);
   assert.ok(before.estMb < 400, `merged estimate must drop below 400, got ${before.estMb}`);
@@ -97,7 +97,7 @@ test('fit: growth factor keeps merging profitable (g<1) and is clamped', () => {
 });
 
 test('fit: idempotent — refitting a fitted plan changes nothing', () => {
-  const cfg = memConfig({});
+  const cfg = memConfig({ORCH_MIN_FREE_MEM_MB: '256'});
   const once = fitBlocks([blk('A'), blk('B'), blk('C')], 500, 100, cfg);
   const twice = fitBlocks(once.blocks, 500, 100, cfg);
   assert.equal(twice.merges.length, 0);
@@ -126,7 +126,7 @@ test('fit: merge order ①dependency -> ②conflict-hint -> ③largest', () => {
 });
 
 test('fit: dependsOn rewiring keeps the graph intact after a merge', () => {
-  const cfg = memConfig({});
+  const cfg = memConfig({ORCH_MIN_FREE_MEM_MB: '256'});   // 显式钉余量：本用例验的是依赖重连
   // B 依赖 A（先并 A+B）；C 依赖 A ⇒ 合并后 C 的依赖要改指合并块
   const plan = fitBlocks([blk('A'), blk('B', 1, ['A']), blk('C', 1, ['A'])], 500, 100, cfg);
   assert.equal(plan.blocks.length, 2);
@@ -151,16 +151,27 @@ test('genericity: same request, two hosts with different learned profiles -> dif
 });
 
 test('admitCount: honest generalization of the retired formula (learned unit size, floor respected)', () => {
-  const cfg = memConfig({});                       // floor=256
-  assert.equal(admitCount(2000, 500, cfg), 3);     // (2000−256)/500 = 3.488 ⇒ 3
+  const cfg = memConfig({});                       // floor=1000（默认余量）
+  assert.equal(admitCount(2000, 500, cfg), 2);     // (2000−1000)/500 = 2.0 ⇒ 2
   assert.equal(admitCount(300, 500, cfg), 0);      // 贴不进去 ⇒ 0（等待，而不是硬开）
   assert.equal(admitCount(NaN, 500, cfg), 1);      // 读不到内存 ⇒ 保守给 1
 });
 
+test('admitCount: an explicit smaller floor admits more units (the knob still works)', () => {
+  const cfg = memConfig({ORCH_MIN_FREE_MEM_MB: '256'});
+  assert.equal(admitCount(2000, 500, cfg), 3);     // (2000−256)/500 = 3.488 ⇒ 3
+});
+
 test('fit is deterministic and described for logs', () => {
-  const cfg = memConfig({});
+  const cfg = memConfig({ORCH_MIN_FREE_MEM_MB: '256'});
   const one = fitBlocks([blk('A'), blk('B'), blk('C')], 500, 100, cfg);
   const two = fitBlocks([blk('A'), blk('B'), blk('C')], 500, 100, cfg);
   assert.deepEqual(one, two);
   assert.match(describeFit(one), /^\[mem-fit\] units=2 unitMb=100 growth=0.15 estMb=215 freeMb=500 floorMb=256 fits=true merges=1:/);
+});
+
+test('fit: the default floor of 1000MB is reported verbatim in the log line', () => {
+  const cfg = memConfig({});
+  const r = fitBlocks([blk('A'), blk('B'), blk('C')], 2000, 100, cfg);
+  assert.match(describeFit(r), /floorMb=1000 /);
 });

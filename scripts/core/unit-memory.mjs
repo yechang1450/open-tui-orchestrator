@@ -10,7 +10,7 @@ import path from 'node:path';
 export const MEM_STORE_SCHEMA = 1;
 
 export const MEM_DEFAULTS = Object.freeze({
-  floorMb: 256,       // 系统可用内存硬底：全并发执行也不得让可用内存低于它（ORCH_MIN_FREE_MEM_MB）
+  floorMb: 1000,      // 系统可用内存硬底：全并发执行也不得让可用内存低于它（ORCH_MIN_FREE_MEM_MB）
   defaultUnitMb: 640, // 未知宿主的保守单单元峰值（ORCH_UNIT_MEM_DEFAULT_MB）
   safety: 1.3,        // 学习值安全系数：estimate = p90 × safety（ORCH_UNIT_MEM_SAFETY）
   minSamples: 3,      // 学习生效所需的最少样本数（ORCH_UNIT_MEM_MIN_SAMPLES）

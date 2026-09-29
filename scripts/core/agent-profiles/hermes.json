@@ -23,6 +23,7 @@
   "processNames": [
     "^hermes(\\.exe)?$"
   ],
+  "carrier": "pty",
   "args": {
     "approve": [
       "--yolo"

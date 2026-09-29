@@ -125,18 +125,39 @@ test('pid reuse by an unrelated process is not the engine (identity must match)'
  }finally{fs.rmSync(workspace,{recursive:true,force:true});}
 });
 
-test('missing state file or vanished summary fails closed without respawn',async()=>{
+test('missing state file fails closed without respawn',async()=>{
  const noState=mkRun(null,null);
- try {
+ try{
   const a=mkHooks(noState.workspace,noState.runId,{});
   assert.equal(await runMain(noState.workspace,noState.runId,a.hooks),2);assert.equal(a.spawns.length,0);
  }finally{fs.rmSync(noState.workspace,{recursive:true,force:true});}
- const gone=mkRun({},null);
+});
+
+// summary.json 尚未落盘（引擎还在跑）不是错误：必须继续等，绝不据此 error 退出。
+// 红例＝旧的二态读法（missing 与 broken 都被吞成 null ⇒ 立刻 crash-exit，留孤儿引擎）。
+test('summary not yet written is waited on, not treated as an error',async()=>{
+ const {workspace,runId,file}=mkRun({},null);
  try {
-  const b=mkHooks(gone.workspace,gone.runId,{summary:null});
-  assert.equal(await runMain(gone.workspace,gone.runId,b.hooks),2);assert.equal(b.spawns.length,0);
-  assert.equal(readGuardianState(gone.file).status,'error');
- }finally{fs.rmSync(gone.workspace,{recursive:true,force:true});}
+  let ticks=0;const summary=()=>(++ticks>3?{runId,finishedAt:1_002_000}:{kind:'missing'});
+  const {hooks,spawns}=mkHooks(workspace,runId,{summary});
+  const code=await runMain(workspace,runId,hooks);
+  assert.equal(code,0);assert.equal(spawns.length,0);
+  assert.equal(readGuardianState(file).status,'done');
+ }finally{fs.rmSync(workspace,{recursive:true,force:true});}
+});
+
+// summary.json 存在但读不动/解析不了＝真错误：必须带原因 fail-closed。
+test('a broken summary fails closed and names the reason',async()=>{
+ const {workspace,runId,file}=mkRun({},null);
+ try {
+  const {hooks,spawns,logs}=mkHooks(workspace,runId,{summary:{kind:'broken',why:'summary.json unparsable: Unexpected token'}});
+  const code=await runMain(workspace,runId,hooks);
+  assert.equal(code,2);assert.equal(spawns.length,0);
+  assert.equal(readGuardianState(file).status,'error');
+  const line=logs.find(l=>l.includes('error'));
+  assert.ok(line,'the error line must be logged');
+  assert.match(line,/reason=summary\.json unparsable/);
+ }finally{fs.rmSync(workspace,{recursive:true,force:true});}
 });
 
 test('parseGuardianOptions validates arguments',()=>{

@@ -57,5 +57,16 @@ if (bootstrapInstallDeps) {
   const { installDepsCli } = await import('./install-deps.mjs');
   process.exitCode = installDepsCli();
 } else if (IS_MAIN) {
-  engine.main().catch((e) => { fatal(e); process.exitCode = 1; });
+  // 异常收口：引擎抛异常时，除了按契约打一行 FATAL，还必须收掉本 run 自己录下的残留窗口。
+  // 否则一次异常退出就会留下孤儿单元进程 + 尸体窗，违背"不留残窗/不让人手动关窗"的承诺
+  // （2026-09-28 现场实测：--mode window 下 guardian 提前退出 + 引擎异常 ⇒ 残窗与孤儿都留下）。
+  // 收口复用既有判据（只关本 run 句柄、属 WindowsTerminal、无活进程引用该 stem），此处不新增判据。
+  engine.main().catch(async (e) => {
+    fatal(e);
+    process.exitCode = 1;
+    try {
+      const { sweep } = engine.__residualCleanup || {};
+      if (typeof sweep === 'function') await sweep();
+    } catch { /* cleanup must never mask the original failure */ }
+  });
 }

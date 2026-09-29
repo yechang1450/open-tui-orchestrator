@@ -2810,4 +2810,5 @@ if (isMain) main().catch((e) => {
   reportFatal(e);
   process.exitCode = 1;
 });
+export const __residualCleanup = { sweep: (stem) => sweepLeftoverRunWindows(stem || "") };
 export { classifyBlockComplexity, classifyExecutionMode, windowExecutionPolicy, appendModelEffortArgs, genericProjectSplit, trySingleBlock, conflictByKeys, loadCachedDecompose, buildBlocksFromTasks, resolveHints, extractTasks, classifyPrompt, buildBlockPrompt, levelWaves, decomposeHash, loadPlanFile, planFromFile, checkDiskSpace, readPidFile, pidAliveCheck, closeWindowByPid, windowGenuinelyPopped, windowVerdictOk, extractResult, extractUsage, readReportFromResult, sessionDir, writeInteractiveLauncher, staleTransientFiles, pidFileOfTransient, tryReserveWindow, commitReservation, cancelReservation, computeMaxWindows, blockKeys, keysOverlap, scanTaskComplete, __setOrchHooks, isOrchestratorSelfMod, resolveCodexHome, withRegistryLock, spawnHeadlessWithRetry, normalizeSpawnMode, REG_LOCK as REGISTRY_LOCK_FILE };

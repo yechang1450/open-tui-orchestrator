@@ -79,20 +79,37 @@ export async function main(argv=process.argv.slice(2),hooks={}) {
   const now=hooks.now||(()=>Date.now()),sleep=hooks.sleep||(ms=>new Promise(r=>setTimeout(r,ms)));
   const snapshot=hooks.snapshot||processSnapshot,spawnImpl=hooks.spawn||spawn;
   const log=hooks.log||(m=>{console.log(m);try{fs.appendFileSync(path.join(dir,'guardian.log'),m+'\n');}catch{}});
-  const load=hooks.load||(()=>{try{return JSON.parse(fs.readFileSync(path.join(dir,'summary.json'),'utf8'));}catch{return null;}});
+  const readSummary=()=>{
+    const file=path.join(dir,'summary.json');
+    let raw;
+    try{raw=fs.readFileSync(file,'utf8');}
+    catch(e){return e.code==='ENOENT'?{kind:'missing'}:{kind:'broken',why:'summary.json unreadable: '+e.code};}
+    try{return {kind:'ok',value:JSON.parse(raw)};}
+    catch(e){return {kind:'broken',why:'summary.json unparsable: '+e.message};}
+  };
+  // 兼容两种桩形态：三态包装（新）与裸 summary 对象/null（旧）。旧桩 null 视作 missing——
+  // 它不是错误，只是"还没有落盘"；真损坏必须由三态形态显式声明（kind:'broken'）。
+  const load=()=>{
+    const r=hooks.load?hooks.load():readSummary();
+    if(r&&typeof r==='object'&&typeof r.kind==='string')return r;
+    if(r===null||r===undefined)return {kind:'missing'};
+    return {kind:'ok',value:r};
+  };
   const readState=hooks.readState||(()=>readGuardianState(stateFile));
   const writeState=hooks.writeState||(s=>{s.updatedAt=Date.now();atomicJson(stateFile,s);});
   // The engine writes the state file just before spawning us; tolerate a race.
   let state=null;
   for(let i=0;i<20&&!state;i++){state=readState();if(!state)await sleep(500);}
   if(!validState(state,runId)){log('[guardian] missing or invalid state; exit');process.exitCode=2;return;}
-  const finish=(status,code)=>{state.status=status;writeState(state);log('[guardian] '+status+' runId='+runId+' restarts='+state.restarts);process.exitCode=code;};
+  const finish=(status,code,why)=>{state.status=status;writeState(state);log('[guardian] '+status+' runId='+runId+' restarts='+state.restarts+(why?' reason='+why:''));process.exitCode=code;};
   let engine=state.engines.at(-1).owner;
   const guardianDeadline=state.createdAt+state.timeoutMs+600000;
   while(now()<guardianDeadline) {
     const sum=load();
-    if(sum&&sum.finishedAt){finish('done',0);return;}
-    if(sum===null){finish('error',2);return;}
+    // 三态读法：missing＝引擎还在跑、summary 尚未落盘（正常等待，不是错误）；
+    //          broken＝文件在但读不动/解析不了（真错误，必须带原因 fail-closed）。
+    if(sum.kind==='broken'){finish('error',2,sum.why);return;}
+    if(sum.kind==='ok'&&sum.value&&sum.value.finishedAt){finish('done',0);return;}
     let snap=null;
     try{snap=snapshot();}catch{/* identity unverifiable: never respawn blind */}
     if(snap===null){await sleep(state.intervalMs);continue;}
@@ -102,8 +119,8 @@ export async function main(argv=process.argv.slice(2),hooks={}) {
     if(state.restarts>=state.maxRestarts){finish('exhausted',1);return;}
     await sleep(Math.min(5000*2**state.restarts,30000));
     const again=load();
-    if(again?.finishedAt){finish('done',0);return;}
-    if(again===null){finish('error',2);return;}
+    if(again.kind==='broken'){finish('error',2,again.why);return;}
+    if(again.kind==='ok'&&again.value&&again.value.finishedAt){finish('done',0);return;}
     try{snap=snapshot();}catch{snap=null;}
     if(snap&&sameProcess(engine,snap.get(Number(engine.ProcessId))))continue;
     const number=state.restarts+1;
@@ -112,7 +129,7 @@ export async function main(argv=process.argv.slice(2),hooks={}) {
     try{outFd=fs.openSync(path.join(dir,'resumed-engine-'+number+'.log'),'a');}catch{outFd='ignore';}
     const child=spawnImpl(process.execPath,[ENTRY,'--resume-run',runId],{
       cwd:workspace,
-      env:{...env,ORCH_AGENT:String(again.agent||'codex'),ORCH_RUN_ID:runId,WORKSPACE_DIR:workspace},
+      env:{...env,ORCH_AGENT:String((again.value&&again.value.agent)||'codex'),ORCH_RUN_ID:runId,WORKSPACE_DIR:workspace},
       detached:true,windowsHide:true,stdio:['ignore',outFd,outFd],
     });
     if(outFd!=='ignore')try{fs.closeSync(outFd);}catch{}
