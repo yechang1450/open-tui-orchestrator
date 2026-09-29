@@ -10,6 +10,25 @@
 4. 用 `node repair.mjs --target <新的绝对父目录>` 生成发行副本。目标目录必须不存在；复制完成后会再次验证封印和必需文件，任何失败都会清理本次 staging 目录。
 5. 从目标副本运行 `node repair.mjs`、`node cli.mjs --version`、`node cli.mjs --agent codex --doctor` 和只读状态检查。本仓库是独立私有 CLI、不含插件管理器：安装、升级和回滚以发行副本的目录级替换落实（外部验收证据见文末）。
 
+### npm 发布路径的额外一步（顺序陷阱）
+
+`npm version` 会重写 `package.json`，而 `package.json` 是封印覆盖的 71 个运行时文件之一 —— **改完版本号，第 3 步做的封印立刻失效**。发布的包若带着过期封印，装的人除了 `--version` 之外每个入口都会 `RELEASE_INTEGRITY_FAILED` 拒绝启动（2026-09-29 实际发生过：`2026.9.29-1` 即因此带伤发布，随后以 `2026.9.29-2` 重封纠正）。
+
+因此 npm 发布必须按这个顺序，**封印相关步骤在版本号之后**：
+
+```bash
+node --test test/*.test.mjs                       # ① 完整回归
+node scripts/gate.mjs --all                       # ② 门禁（5 判据）
+npm version <ver>                                 # ③ 改版本号（动 package.json ⇒ 封印失效）
+node scripts/release-integrity.mjs --seal         # ④ 重封（必须在 ③ 之后）
+node cli.mjs --tasks "smoke"                      # ⑤ 发布前真验：rc 必须为 0（这一步才真正触发 verifyRelease）
+npm publish --tag latest                          # ⑥ 发布
+npm view <pkg>@<ver> version                      # ⑦ 回读（预发布版号必须带 --tag；registry 传播需数分钟）
+npx -y <pkg>@<ver> --version                      # ⑧ 冷装烟测
+```
+
+两个易错点：**③ 之后必须重封**（否则 ⑤ 会红）；带 `-N` 的版本号（如 `2026.9.29-1`）属 semver 预发布版，`npm publish` 不带 `--tag` 会被拒（`You must specify a tag using --tag when publishing a prerelease version`），要显式 `--tag latest`。
+
 2026-09-17 现场修复轮（core 1.15.2 / 0.9.12）：**单元停滞看门狗 + 残窗收口**。① 停滞判据＝进度（检查点/结果/启动器 out·pty 日志/宿主会话 mtime）停止超过 `ORCH_UNIT_STALL_MS`（默认 600000ms）→ 判 `stalled` → 走正常收口（杀净后代、launcher 自查 exit 0；绝不强杀 launcher 本体）→ 计入该块 attempts 预算自动重跑；`ORCH_UNIT_TIMEOUT_MS`（默认 2700000ms）限制单元寿命；预算耗尽的 reason 现在带上次失败文本。实机演示（`D:/temp/orch-stall-live/`，sleeper 单元 + ORCH_UNIT_STALL_MS=8000）：两窗弹出→8s 判停滞→自动关→自动重开 a2→再次判停滞→`finalized success=false`（rc=1），无残留进程、无残留窗口；判据 `test/unit-stall.test.mjs`（修复前会一直挂到运行上限）。② 残窗收口＝只按**本 run 自己**录下的窗口句柄（`win-*.window.json`）且「窗口属 Windows Terminal + 宿主无任何子进程（尸体窗）」才发 WM_CLOSE；纯函数判据 `leftoverWindowHandles()`（`test/leftover-windows.test.mjs`）+ 运行前自动收口（`sweepLeftoverRunWindows()` 在 runner 之前）；实逮并清掉本轮矩阵/停电演练留下的 8 个尸体窗（可见窗口 12→4，余下全为不可见宿主窗）。③ 旁记：force-kill launcher 的思路被现场否决（会在 WT 留下「[已退出进程，代码为 1]」死窗格）——正确收口是杀后代让 launcher 自己 exit 0。
 
 2026-09-22 现场修复轮（核心未换版）：**套件全绿 + 真机闭环**。① 协调器互斥自证真因：PS 侧收场时写状态票（`busy-timeout`/`owner-gone`/`hold-ceiling`/`error:`），JS 侧用状态票 + 廉价活性探针（`process.kill(pid,0)`）立刻失败并报出真因，不再干等满 `ORCH_MUTEX_WAIT_MS`；属主活性探针从"每秒一次全表 CIM 查询"改成 `GetProcessById`+启动时间（连读三次"确定不在"才认账，避免一次查询抽风就丢锁）；新增持锁上限 `ORCH_MUTEX_HOLD_MAX_MS`（默认 120s）。② 锁内不做全表快照：`transaction` 不再在持锁期间跑 `processSnapshot`（满载机器上一次几秒~十几秒，正是 3 并发套件里几十处 "waited 60000ms x3" 假红的真根因）；同一改动后 9 进程抢槽用例从 190s 降到 ~6s。③ 测试隔离：凡删掉 `NODE_TEST_CONTEXT` 走真实入口的用例（caller-driven / queue-backoff / print-profile / orch-force）与 `adapt --smoke` 一律显式钉 `ORCH_COORDINATOR_DIR`，不再共用机器级 HKCU 槽位池（实测 122s 容量假红），也不再让一次性工作区把机器定位器钉在随后被删的目录上（本机实勘到 `...\temp\caller-run-xBFpS2\...` 的污染，已清理）。④ kimi 检测：`--help` 探测显式给宽列（窄窗下 Rich 会把 `--auto` 藏在省略号里，装好的 CLI 被判 `CLI_MISSING`），版本行支持带标签（`kimi, version 1.50.0` → `1.50.0`）。⑤ 平台跳过不再留盲区：MSYS/POSIX 路径两种语义改由可注入平台的纯函数在任意平台判定（gate 的 L1 要求 `skipped==0`）。⑥ 测试环境硬编码修正：发布用例不再写死 `D:\temp`。
