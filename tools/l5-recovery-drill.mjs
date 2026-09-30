@@ -28,7 +28,8 @@ const GUARDIAN_LOG = path.join(runDir, 'guardian.log');
 const barrier = path.join(ROOT, 'release');
 const waiting = path.join(ROOT, 'waiting');
 
-fs.rmSync(WS, {recursive: true, force: true, maxRetries: 10, retryDelay: 200});
+try { fs.rmSync(WS, {recursive: true, force: true, maxRetries: 10, retryDelay: 200}); }
+catch (e) { log(`cleanup of the previous run dir failed (${e.code || e.message}); continuing — a Windows file handle is usually still closing and the drill does not depend on the old state`); }
 for (const f of ['release', 'waiting', 'alpha.txt', 'beta.txt', 'unit-runs.json']) { try { fs.rmSync(path.join(ROOT, f), {force: true}); } catch {} }
 fs.mkdirSync(path.join(WS), {recursive: true});
 
@@ -89,7 +90,7 @@ if (failMode) { env.ORCH_GUARDIAN_MAX_RESTARTS = '1'; }
 const read = () => { try { return JSON.parse(fs.readFileSync(summaryFile, 'utf8')); } catch { return null; } };
 const readGuardian = () => { try { return JSON.parse(fs.readFileSync(guardianFile, 'utf8')); } catch { return null; } };
 const pause = (ms) => new Promise((r) => setTimeout(r, ms));
-const until = async (fn, label, ms = 240000) => { const end = Date.now() + ms; while (Date.now() < end) { if (fn()) return true; await pause(500); } return false; };
+const until = async (fn, label, ms = 240000) => { const end = Date.now() + ms; while (Date.now() < end) { if (fn()) return true; await pause(500); } report.error = `step timed out: ${label} (waited ${Math.round(ms/1000)}s)`; console.log(`[drill] TIMEOUT waiting for ${label} after ${Math.round(ms/1000)}s`); return false; };
 const log = (...a) => console.log('[drill]', ...a);
 
 log('runId =', runId, failMode ? '(让恢复失败模式：MAX_RESTARTS=1，两次杀控制器)' : '(自动接管模式：MAX_RESTARTS=默认 3)');
