@@ -52,7 +52,7 @@
   },
   "runtimeFiles": {
     "cli.mjs": "8ae5231ba8644656179581cfea3c50ceeb492560e673b94f5c91eab27094f27b",
-    "package.json": "3616314b4420709833370f10d16956e8dde4fb57d4e1c622505cb4f987e01492",
+    "package.json": "1780c15b795aa05cd9108e495d339df60d4499c01e7a6d66d7c8ff79a54a25ad",
     "repair.mjs": "5a456b42560bfa21fd1e66ccdff7416f88e82fe711db5c04279717e73275a076",
     "scripts/recover-stale.mjs": "c6dfecdfd7621b77999b710127aa1f5e3b444032bc0e2f91ec95f94c07c59f97",
     "scripts/adapt.mjs": "20209c74212d334ea5aa1dfe35816a1b7a4b7f0415eb27c5a1975925dbbd10c5",
