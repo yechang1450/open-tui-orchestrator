@@ -112,7 +112,11 @@ export function requestTasks(request) {
 }
 export function bindClassifiedTasks(request,classified) {
   const tasks=requestTasks(request),byId=new Map(tasks.map(t=>[t.id,t]));
-  if(!Array.isArray(classified)||classified.length!==tasks.length||new Set(classified.map(t=>t.id)).size!==tasks.length||classified.some(t=>!byId.has(t.id)))throw new Error('Classified task inventory mismatch');
+  if(!Array.isArray(classified)||classified.length!==tasks.length||new Set(classified.map(t=>t.id)).size!==tasks.length||classified.some(t=>!byId.has(t.id))){
+    const wanted=tasks.map(t=>t.id).join(', ')||'(none)';
+    const got=Array.isArray(classified)?classified.map(t=>t?.id).join(', ')||'(none)':'(not an array)';
+    throw new Error(`Classified task inventory mismatch: the request yields [${wanted}] but the classification supplied [${got}]. Run \`--tasks "<the exact request>"\` to print the authoritative ledger, then make the classification cover exactly those ids (no more, no fewer).`);
+  }
   return classified.map(t=>({...t,summary:byId.get(t.id).prompt,prompt:byId.get(t.id).prompt}));
 }
 export function ledgerPlan(request, candidate, capacity, compact) {

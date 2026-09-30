@@ -75,7 +75,7 @@ export function recoveryTasks(tasks,checkpoints,checks,workspace) {
     const verification=verifyChecks(policy.checks,workspace);
     if(verification.status==='verified'){result.verified.push(task.id);result.results[task.id]={...verification,checkpoint:cp};}
     else if(policy.retrySafe){result.pending.push(task.id);}
-    else {result.uncertain.push(task.id);result.results[task.id]={status:'needs-reconciliation',reason:'Started task has no proven result and is not declared safe to retry',verification,checkpoint:cp};}
+    else {result.uncertain.push(task.id);result.results[task.id]={status:'needs-reconciliation',reason:'Started task has no proven result and is not declared safe to retry',hint:'Declare {"checks":[...],"retrySafe":true} for this task if it is idempotent so the engine auto-retries instead of reporting; otherwise inspect the workspace for the product (it may exist outside the checked path) and the checkpoint under attempts/<block>/<n>/checkpoints/.',verification,checkpoint:cp};}
   }
   return result;
 }
