@@ -1160,6 +1160,12 @@ async function spawnWindowWithRetry(lp, title, pidf, maxRetry = 3, token, reserv
       return true;
     }
     console.log("  [window] popup NOT confirmed (attempt " + attempt + "/" + maxRetry + ") for [" + title + "]");
+    // A failed attempt can still have created its window: the confirmation only proves we could SEE it.
+    // Leaving it behind means every retry adds another live launcher + agent (measured: 29 live
+    // launchers for 9 blocks), which in turn blows any capacity accounting built on live windows.
+    // Best-effort close of THIS attempt's own window before the next spawn; closeWindowRobust locates
+    // the launcher by pidFile, then registry pid, then by scanning for its win-launch script path.
+    try { await closeWindowRobust({ pidFile: pidf, pid: readPidFile(pidf) }); } catch { /* best effort */ }
   }
   console.log("  !! [window] popup FAILED after " + maxRetry + " attempts for [" + title + "]");
   return false;
