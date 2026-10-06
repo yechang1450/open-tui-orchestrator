@@ -68,7 +68,12 @@ fs.mkdirSync(root, { recursive: true });
 // raising only the harness window left the engine cutting units off at its own fixed 15 min.
 // Same class as the other budget fixes: only the budget is configurable, the verdict stays fail-closed.
 const liveDeadlineMs = Math.max(300000, Number(process.env.ORCH_LIVE_DEADLINE_MS) || 970000);
-const env = { ...process.env, ORCH_AGENT: agent, ORCH_SPAWN_MODE: 'window', ORCH_MAX_POLL_MS: String(Math.max(60000, liveDeadlineMs - 70000)), ORCH_RUN_ID:runId, ORCH_ACCEPTANCE_FILE:acceptanceFile };
+// The harness verifies that the engine holds EXACTLY `capacity` windows in parallel and queues the
+// rest, so the cap has to be handed to the engine: without ORCH_MAX_WINDOWS the engine picks its own
+// capacity from memory-fit (measured: 9 against a hardcoded 8), and then `live.length === capacity`
+// can never hold while `live.length > capacity` throws 'Capacity exceeded' - the release barrier is
+// never written and every probe dies on its own timeout.
+const env = { ...process.env, ORCH_AGENT: agent, ORCH_SPAWN_MODE: 'window', ORCH_MAX_POLL_MS: String(Math.max(60000, liveDeadlineMs - 70000)), ORCH_MAX_WINDOWS: String(capacity), ORCH_RUN_ID:runId, ORCH_ACCEPTANCE_FILE:acceptanceFile };
 for (const key of ['WORKSPACE_DIR', 'ORCH_STATE_DIR', 'ORCH_TUI', 'ORCH_SANDBOX', 'ORCH_APPROVAL']) delete env[key];
 const config = { nonce, workspace, ids: Array.from({ length: 9 }, (_, i) => String(91 + i)), capacity };
 fs.writeFileSync(path.join(root, 'config.json'), JSON.stringify(config));
