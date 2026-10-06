@@ -169,6 +169,10 @@ export function finalizeCodexReport(report,cleanup={state:"not-run",diagnostics:
     pollExit:report.pollResult?.code,
     peak:report.peak,
     capacity:report.capacity,
+    // The final verdict is recomputed here, so this call needs the task count too - without it the
+    // report silently falls back to capacity and re-fails the per-task counts (measured: a run whose
+    // live verdict was correct still reported window-launches-12-of-8).
+    tasks:report.tasks,
     receiptsValid:report.receiptsValid,
     ordered:report.ordered,
     overlap:report.overlap,

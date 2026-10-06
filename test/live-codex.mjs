@@ -234,7 +234,7 @@ const verdict=codexFailureReasons({
 });
 const passed=verdict.passed;
 const equivalentToCurrentCodexPlugin = passed && windowLaunches <= config.ids.length;
-report = { automaticClose, samplingComplete, measurementFailures, jsonDiagnostics, failureReasons:verdict.failureReasons, coreHashAtLaunch, coreHashAtEnd, coreHashFiles:coreFiles, coreHashScheme:'sha256(sorted scripts/core *.mjs/*.ps1/*.txt entries as name:hash joined by LF)', coreUnchanged, coreVersion:summary?.version, passed, equivalentToCurrentCodexPlugin, runId, entry: process.env.ORCH_LIVE_ENTRY||path.join(repo, 'cli.mjs'), terminal: 'wt', workspace, root, nonce, capacity, peak, windowLaunches, uniqueLaunchers, engineResult, pollResult, receiptsValid, ordered, overlap, results, summary, samples };
+report = { automaticClose, samplingComplete, measurementFailures, jsonDiagnostics, failureReasons:verdict.failureReasons, coreHashAtLaunch, coreHashAtEnd, coreHashFiles:coreFiles, coreHashScheme:'sha256(sorted scripts/core *.mjs/*.ps1/*.txt entries as name:hash joined by LF)', coreUnchanged, coreVersion:summary?.version, passed, equivalentToCurrentCodexPlugin, runId, entry: process.env.ORCH_LIVE_ENTRY||path.join(repo, 'cli.mjs'), terminal: 'wt', workspace, root, nonce, capacity, tasks:config.ids.length, peak, windowLaunches, uniqueLaunchers, engineResult, pollResult, receiptsValid, ordered, overlap, results, summary, samples };
 process.exitCode = passed ? 0 : 1;
 } catch(error) {
   report={passed:false,runId,entry:process.env.ORCH_LIVE_ENTRY||path.join(repo,'cli.mjs'),terminal:'wt',workspace,root,nonce,capacity,peak,measurementFailures:[...samplingErrors.values()],jsonDiagnostics,error:String(error),failureReasons:['harness-error']};
