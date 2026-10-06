@@ -4,6 +4,6 @@
     "version": "0.2.0",
     "dependencies": {
         "@lydell/node-pty": "1.2.0-beta.15",
-        "@openai/codex-sdk": "0.149.0"
+        "@openai/codex-sdk": "0.160.0"
     }
 }
