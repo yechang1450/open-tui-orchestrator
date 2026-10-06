@@ -55,7 +55,11 @@ public static class OrchestratorInactiveShell {
  // visible window of this pid actually appear) is still decided by the scan below.
  static int AppearMs(){
   try{var s=Environment.GetEnvironmentVariable("ORCH_WINDOW_APPEAR_MS");if(!string.IsNullOrEmpty(s)){int v=int.Parse(s);if(v>0)return v;}}catch{}
-  return 9000;
+  // Must not be shorter than the engine's own confirmation window (spawnWindowWithRetry waits 35000ms
+  // for pid file + launcher + this verdict): the engine reads the verdict FILE, so a verdict written
+  // after 9s is a permanent ok:false even when the window shows up at 12s. Measured 2026-10-06 on a
+  // loaded machine: 9 of 11 confirmations read ok:false while the windows did open.
+  return 30000;
  }
  // z-order rank (0 = frontmost): EnumWindows walks top-level windows in z-order, so this is the
  // hardest measurable evidence that the user can actually see the window. -1 = not found.
