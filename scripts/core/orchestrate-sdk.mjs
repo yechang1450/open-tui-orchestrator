@@ -1107,8 +1107,15 @@ function windowVerdictOk(pidf) {
   const conf = windowConfirmationPath(pidf);
   try { return existsSync(conf) && JSON.parse(readFileSync(conf, 'utf8')).ok === true; } catch { return false; }
 }
+// Popup confirmation budget: how long the engine waits, after a window has appeared, for the
+// launcher's pid file and a live launcher. Eight concurrent Windows Terminal cold starts can need
+// longer than the old fixed 35s on a loaded machine - measured 2026-10-07: 7 of 9 blocks reported
+// "popup NOT confirmed" on the first attempt and confirmed on retry, and the live acceptance counts
+// every extra launch as a failure (window-launches must not exceed the window cap).
+// Only the budget is configurable; the verdict (pid file + live launcher + visible window) is not.
+function windowConfirmMs(){const v=Number(process.env.ORCH_WINDOW_CONFIRM_MS);return Number.isFinite(v)&&v>0?Math.min(600000,Math.ceil(v)):35000;}
 async function confirmWindowPopped(pidf, token) {
-  const deadline = Date.now() + 35000;
+  const deadline = Date.now() + windowConfirmMs();
   while (Date.now() < deadline) {
     if (windowGenuinelyPopped(pidf, token)) return true;
     await new Promise((r) => setTimeout(r, 500));
@@ -1145,7 +1152,7 @@ async function spawnWindowWithRetry(lp, title, pidf, maxRetry = 3, token, reserv
   // 恢复调用方传入的重试上限（默认 3）：sync 拉起后每次尝试 ~2.5s，重试成本可控，兜底 WT 偶发不弹窗。
   for (let attempt = 1; attempt <= maxRetry; attempt++) {
     spawnVisibleWindow(lp, title, pidf);
-    const deadline = Date.now() + 35000;
+    const deadline = Date.now() + windowConfirmMs();
     let ok = false;
     const t0 = Date.now();
     while (Date.now() < deadline) {
@@ -1198,7 +1205,7 @@ async function spawnHeadlessWithRetry(lp, title, pidf, maxRetry = 3, token, rese
   // hiccups and parity with the window path.
   for (let attempt = 1; attempt <= maxRetry; attempt++) {
     spawnHeadlessUnit(lp, title);
-    const deadline = Date.now() + 35000;
+    const deadline = Date.now() + windowConfirmMs();
     let ok = false;
     const t0 = Date.now();
     while (Date.now() < deadline) {
