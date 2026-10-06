@@ -120,7 +120,7 @@ export function collectOwnedProcessTargets({controllers=[],runId,windows=[]}={},
 }
 
 export function codexFailureReasons({
-  samplingComplete,measurementFailures=[],engineExit,pollExit,peak,capacity,receiptsValid,
+  samplingComplete,measurementFailures=[],engineExit,pollExit,peak,capacity,tasks,receiptsValid,
   ordered,overlap,windowLaunches,uniqueLaunchers,summaryResultCount,summaryResultsVerified,
   automaticClose,coreUnchanged,jsonErrors=[],cleanupState,cleanupDiagnostics=[],
 }={}) {
@@ -133,9 +133,14 @@ export function codexFailureReasons({
   if(!receiptsValid)failureReasons.push('receipts-invalid');
   if(!ordered)failureReasons.push('ordering-invalid');
   if(!overlap)failureReasons.push('overlap-invalid');
-  if(windowLaunches!==capacity)failureReasons.push(`window-launches-${windowLaunches}-of-${capacity}`);
-  if(uniqueLaunchers!==capacity)failureReasons.push(`unique-launchers-${uniqueLaunchers}-of-${capacity}`);
-  if(summaryResultCount!==capacity)failureReasons.push('summary-result-count-mismatch');
+  // These three count things that happen once per TASK, not once per window slot: the harness runs
+  // `tasks` (9) blocks through a window cap of `capacity` (8), so comparing them to capacity made
+  // `passed` unreachable by construction (9 results can never equal 8). peak stays on capacity -
+  // that one really is about how many windows were live at once.
+  const perTask=Number.isFinite(Number(tasks))?Number(tasks):capacity;
+  if(windowLaunches!==perTask)failureReasons.push(`window-launches-${windowLaunches}-of-${perTask}`);
+  if(uniqueLaunchers!==perTask)failureReasons.push(`unique-launchers-${uniqueLaunchers}-of-${perTask}`);
+  if(summaryResultCount!==perTask)failureReasons.push(`summary-result-count-${summaryResultCount}-of-${perTask}`);
   if(!summaryResultsVerified)failureReasons.push('summary-results-not-all-verified');
   if(jsonErrors.length)failureReasons.push('json-errors');
   if(!automaticClose)failureReasons.push('automatic-close-invalid');

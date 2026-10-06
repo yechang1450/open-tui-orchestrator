@@ -228,12 +228,12 @@ const automaticClose = agent !== 'openclaw' || Object.values(summary?.results||{
 const coreHashAtEnd=coreHash();
 const coreUnchanged=coreHashAtLaunch===coreHashAtEnd;
 const verdict=codexFailureReasons({
-  samplingComplete,measurementFailures,engineExit:engineResult.code,pollExit:pollResult.code,peak,capacity,receiptsValid,
+  samplingComplete,measurementFailures,engineExit:engineResult.code,pollExit:pollResult.code,peak,capacity,tasks:config.ids.length,receiptsValid,
   ordered,overlap,windowLaunches,uniqueLaunchers,summaryResultCount:Object.keys(summary?.results||{}).length,
   summaryResultsVerified:Object.values(summary?.results||{}).every(r=>r.status==='verified'),automaticClose,coreUnchanged,jsonErrors:jsonDiagnostics,
 });
 const passed=verdict.passed;
-const equivalentToCurrentCodexPlugin = passed && windowLaunches <= capacity;
+const equivalentToCurrentCodexPlugin = passed && windowLaunches <= config.ids.length;
 report = { automaticClose, samplingComplete, measurementFailures, jsonDiagnostics, failureReasons:verdict.failureReasons, coreHashAtLaunch, coreHashAtEnd, coreHashFiles:coreFiles, coreHashScheme:'sha256(sorted scripts/core *.mjs/*.ps1/*.txt entries as name:hash joined by LF)', coreUnchanged, coreVersion:summary?.version, passed, equivalentToCurrentCodexPlugin, runId, entry: process.env.ORCH_LIVE_ENTRY||path.join(repo, 'cli.mjs'), terminal: 'wt', workspace, root, nonce, capacity, peak, windowLaunches, uniqueLaunchers, engineResult, pollResult, receiptsValid, ordered, overlap, results, summary, samples };
 process.exitCode = passed ? 0 : 1;
 } catch(error) {
