@@ -122,13 +122,18 @@ function launch(script, args, label) {
 engine = launch('orchestrate-sdk.mjs', ['--run-windows', request], 'engine');
 const startupDeadline = Date.now() + 60000;
 while (engine.child.exitCode === null && !/spawned visible/.test(engine.output()) && Date.now() < startupDeadline) await new Promise(r => setTimeout(r, 500));
-poll = launch('poll-windows.mjs', ['--require-all-success', '--timeoutMs', '960000', '--intervalMs', '5000'], 'poll');
+// Deadline is tunable (2026-10-06): the fixed 970s window misreported agent speed as failure --
+// hermes units need ~11-13 min each, so 4 of 9 blocks finished correct output only 17s after the
+// hardcoded deadline and were reported unproven. Same class as the other budget fixes: only the
+// budget is configurable, the verdict stays fail-closed.
+const liveDeadlineMs = Math.max(300000, Number(process.env.ORCH_LIVE_DEADLINE_MS) || 970000);
+poll = launch('poll-windows.mjs', ['--require-all-success', '--timeoutMs', String(liveDeadlineMs - 10000), '--intervalMs', '5000'], 'poll');
 let engineEnded = false;
 engine.done.then(() => {
   engineEnded = true;
   if (!fs.existsSync(summaryFile)) void terminateVerified(poll);
 });
-const deadline = Date.now() + 970000;
+const deadline = Date.now() + liveDeadlineMs;
 while (!engineEnded && Date.now() < deadline) {
   try {
     const { stdout } = await exec(powershellExe(), ['-NoProfile', '-Command', 'Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,Name,CommandLine,@{n="Started";e={$_.CreationDate.ToUniversalTime().ToString("o")}} | ConvertTo-Json -Compress'], { windowsHide: true, timeout: 15000 });
