@@ -74,10 +74,17 @@ test('inactive-window.ps1 stays ANSI-safe (ASCII only, LF) and is PowerShell-par
  assert.match(text,/\\"ok\\":/,'必须输出机读裁决 JSON');
  assert.match(text,/public uint cbSize;public IntPtr hwnd;/,'FlashInfo.hwnd must remain pointer-sized on x64');
  assert.doesNotMatch(text,/fi\.hwnd=\(uint\)/,'FlashInfo.hwnd must not truncate a 64-bit HWND');
- assert.match(text,/GetWindowThreadProcessId\(h,out windowPid\)/,'fresh-window selection must be tied to the launched owner pid');
+ // 2026-10-06 measured: a console window is owned by the console HOST (WindowsTerminal/conhost),
+ // which is never the PID CreateProcessW returned for wt.exe (measured createdPid=15364 while
+ // ownerPid=15336). "The owner must equal the launched PID" is therefore an unsatisfiable premise:
+ // it failed 9 of 9 blocks. New rule: owner is the created pid OR a console host; everything else
+ // is still rejected. Red example: drop IsConsoleHost from the filter and the assertions below fail.
  assert.match(text,/GetWindowThreadProcessId\(h,out windowPid\)==0/,'DWORD Win32 return must be compared with zero, not negated as a boolean');
- assert.match(text,/windowPid!=p\.pid/,'unrelated windows must be rejected');
- assert.match(text,/ownerPid/,'the verdict must report the owner pid used for filtering');
+ assert.match(text,/IsConsoleHost\(windowPid\)/,'a console-host owner must be accepted, not only the created pid');
+ assert.match(text,/n=="windowsterminal"\|\|n=="conhost"\|\|n=="openconsole"/,'console hosts are exactly WindowsTerminal/conhost/OpenConsole');
+ assert.match(text,/windowPid!=p\.pid&&!IsConsoleHost\(windowPid\)\)continue/,'unrelated windows must still be rejected');
+ assert.match(text,/ownerName/,'the verdict must report the resolved owner process name as evidence');
+ assert.match(text,/createdPid/,'the verdict must keep reporting the pid CreateProcessW returned, for diagnosis');
  // No-activate is a non-interference contract: SW_SHOWNOACTIVATE asks Windows not to
  // foreground the child, and this helper must not keep reclaiming the user's foreground
  // window after launch. The real foreground/window policy remains a live-only boundary.

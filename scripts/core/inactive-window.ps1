@@ -59,6 +59,16 @@ public static class OrchestratorInactiveShell {
  }
  // z-order rank (0 = frontmost): EnumWindows walks top-level windows in z-order, so this is the
  // hardest measurable evidence that the user can actually see the window. -1 = not found.
+ // Console windows are owned by the console HOST, never by the program that was launched:
+ // Windows Terminal hosts its panes, and conhost/OpenConsole hosts classic consoles. Requiring the
+ // window owner to equal the PID CreateProcessW returned for wt.exe can therefore never match --
+ // measured 2026-10-06: the window appeared in 1.4s owned by WindowsTerminal (11212) while the
+ // verdict still reported 'no new visible window appeared within 9000ms', for all 9 blocks of a run.
+ static bool IsConsoleHost(uint pid){
+  try{var p=System.Diagnostics.Process.GetProcessById((int)pid);var n=p.ProcessName.ToLowerInvariant();
+   return n=="windowsterminal"||n=="conhost"||n=="openconsole";}catch{return false;}
+ }
+ static string OwnerName(uint pid){try{return System.Diagnostics.Process.GetProcessById((int)pid).ProcessName;}catch{return "";}}
  static int ZRank(IntPtr target){int rank=0;int found=-1;EnumWindows((h,p)=>{if(found>=0)return false;if(h==target){found=rank;return false;}rank++;return rank<400;},IntPtr.Zero);return found;}
  // Launch (no activate) and optionally bring the fresh window forward. Prints one JSON line.
  public static string Launch(string file,string parameters,string cwd,bool activate){
@@ -76,19 +86,22 @@ public static class OrchestratorInactiveShell {
   // The default stays 9000ms; only the budget is configurable: ORCH_WINDOW_APPEAR_MS.
   int appearMs=AppearMs();
   var deadline=Environment.TickCount64+appearMs;
-  IntPtr found=IntPtr.Zero; string title="";
+  IntPtr found=IntPtr.Zero; string title=""; uint ownerPid=0; string ownerName="";
   while(Environment.TickCount64<deadline){
    var now=new HashSet<IntPtr>();Snapshot(now);
    foreach(var h in now){
     if(before.Contains(h))continue;
-    uint windowPid=0;if(GetWindowThreadProcessId(h,out windowPid)==0||windowPid!=p.pid)continue;
+    uint windowPid=0;if(GetWindowThreadProcessId(h,out windowPid)==0)continue;
+    // Accept the window when it is owned by the process we created, or by a console host
+    // (the real owner of a console window). Every other window is still rejected.
+    if(windowPid!=p.pid&&!IsConsoleHost(windowPid))continue;
     if(!IsWindowVisible(h))continue;
     Rect r;if(!GetWindowRect(h,out r))continue;
     var w=r.R-r.L;var hh=r.B-r.T;
     if(w<260||hh<180)continue;                     // skip IME/tool/tray slivers
     var t=Title(h);
     if(t=="MSCTFIME UI"||t=="Default IME"||t=="DDE Server Window")continue;
-    found=h;title=t;break;
+    found=h;title=t;ownerPid=windowPid;ownerName=OwnerName(windowPid);break;
    }
    if(found!=IntPtr.Zero)break;
    System.Threading.Thread.Sleep(150);
@@ -128,7 +141,7 @@ public static class OrchestratorInactiveShell {
     flashed=FlashWindowEx(ref fi);
   }
   var verdict=visible&&!minimized;
-  return "{\"ok\":"+(verdict?"true":"false")+",\"ownerPid\":"+p.pid+",\"hwnd\":\"0x"+found.ToInt64().ToString("X")+"\",\"title\":\""+
+  return "{\"ok\":"+(verdict?"true":"false")+",\"ownerPid\":"+ownerPid+",\"ownerName\":\""+ownerName+"\",\"createdPid\":"+p.pid+",\"hwnd\":\"0x"+found.ToInt64().ToString("X")+"\",\"title\":\""+
     title.Replace("\\","\\\\").Replace("\"","\\\"")+"\",\"rect\":\""+fr.L+","+fr.T+","+fr.R+","+fr.B+
     "\",\"foreground\":"+(isFg?"true":"false")+",\"raised\":"+(fg?"true":"false")+",\"flashed\":"+(flashed?"true":"false")+",\"zrank\":"+zrank+",\"minimized\":"+(minimized?"true":"false")+"}";
  }
