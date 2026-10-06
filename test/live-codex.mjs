@@ -62,7 +62,13 @@ const terminateVerified = async run => {
 try {
 if (process.platform !== 'win32') throw new Error('This acceptance scenario requires Windows');
 fs.mkdirSync(root, { recursive: true });
-const env = { ...process.env, ORCH_AGENT: agent, ORCH_SPAWN_MODE: 'window', ORCH_MAX_POLL_MS: '900000', ORCH_RUN_ID:runId, ORCH_ACCEPTANCE_FILE:acceptanceFile };
+// Deadline is tunable (2026-10-06): the fixed 970s window misreported agent speed as failure --
+// hermes units need ~11-13 min each, so correct output landed only seconds after the hardcoded
+// deadline and was reported unproven. The engine's own ORCH_MAX_POLL_MS scales with the same knob:
+// raising only the harness window left the engine cutting units off at its own fixed 15 min.
+// Same class as the other budget fixes: only the budget is configurable, the verdict stays fail-closed.
+const liveDeadlineMs = Math.max(300000, Number(process.env.ORCH_LIVE_DEADLINE_MS) || 970000);
+const env = { ...process.env, ORCH_AGENT: agent, ORCH_SPAWN_MODE: 'window', ORCH_MAX_POLL_MS: String(Math.max(60000, liveDeadlineMs - 70000)), ORCH_RUN_ID:runId, ORCH_ACCEPTANCE_FILE:acceptanceFile };
 for (const key of ['WORKSPACE_DIR', 'ORCH_STATE_DIR', 'ORCH_TUI', 'ORCH_SANDBOX', 'ORCH_APPROVAL']) delete env[key];
 const config = { nonce, workspace, ids: Array.from({ length: 9 }, (_, i) => String(91 + i)), capacity };
 fs.writeFileSync(path.join(root, 'config.json'), JSON.stringify(config));
@@ -122,11 +128,6 @@ function launch(script, args, label) {
 engine = launch('orchestrate-sdk.mjs', ['--run-windows', request], 'engine');
 const startupDeadline = Date.now() + 60000;
 while (engine.child.exitCode === null && !/spawned visible/.test(engine.output()) && Date.now() < startupDeadline) await new Promise(r => setTimeout(r, 500));
-// Deadline is tunable (2026-10-06): the fixed 970s window misreported agent speed as failure --
-// hermes units need ~11-13 min each, so 4 of 9 blocks finished correct output only 17s after the
-// hardcoded deadline and were reported unproven. Same class as the other budget fixes: only the
-// budget is configurable, the verdict stays fail-closed.
-const liveDeadlineMs = Math.max(300000, Number(process.env.ORCH_LIVE_DEADLINE_MS) || 970000);
 poll = launch('poll-windows.mjs', ['--require-all-success', '--timeoutMs', String(liveDeadlineMs - 10000), '--intervalMs', '5000'], 'poll');
 let engineEnded = false;
 engine.done.then(() => {
