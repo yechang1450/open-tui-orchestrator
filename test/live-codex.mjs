@@ -108,7 +108,12 @@ for (const id of config.ids) {
   fs.mkdirSync(path.join(root, 'project-' + id));
   fs.writeFileSync(path.join(root, 'project-' + id, 'probe' + id + '.mjs'), probe);
 }
-const request = config.ids.map(id => `项目${id}：执行 node ${root.replaceAll('\\', '/')}/project-${id}/probe${id}.mjs ${id} 创建 ${root.replaceAll('\\', '/')}/project-${id}/result${id}.json 并等待命令完成后读回该结果文件核验成功，按主持提供的命令逐项记录检查点，禁止另开窗口禁止提交或写记忆`).join('；');
+// Checkpoint FIRST, then the blocking probe. The probe waits for the release barrier, and the engine
+// retires a unit that has not recorded its first checkpoint within 300s - so asking for the probe
+// first deadlocks the two: probes wait for the barrier, the barrier waits for eight probes, and the
+// engine keeps retiring the units that never got to checkpoint (measured: 7 of 9 blocks unproductive).
+// The segment count and the ； separators are part of the request-splitting contract - keep both.
+const request = config.ids.map(id => `项目${id}：先按主持提供的命令逐项记录检查点，再执行 node ${root.replaceAll('\\', '/')}/project-${id}/probe${id}.mjs ${id} 创建 ${root.replaceAll('\\', '/')}/project-${id}/result${id}.json 并等待命令完成后读回该结果文件核验成功，禁止另开窗口禁止提交或写记忆`).join('；');
 fs.writeFileSync(path.join(root, 'request.txt'), request, 'utf8');
 console.log(JSON.stringify({ root, capacity, tasks: 9, nonce }));
 function launch(script, args, label) {
