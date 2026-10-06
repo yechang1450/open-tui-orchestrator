@@ -97,3 +97,20 @@ test('CLI_MISSING diagnostics name the rejected candidate and reason',()=>{
   });
  }finally{cleanup();}
 });
+
+// .cmd/.bat 不能直接 spawn（CreateProcess 执行不了批处理，实测 EINVAL）——2026-10-06 实测：
+// hermes 现场 4 个候选里两个 .cmd 全部 EINVAL，而 EINVAL 不是超时、不会被重试，
+// 等于把「npm 全局装出来的宿主 CLI」永久判成不可用。修法与 install-deps.mjs 同形：
+// 走 cmd /d /s /c 的 verbatim 形态。
+// 红例：退回裸 spawnSync(bin,args,{shell:false}) 时本用例必红（EINVAL）。
+test('probeCli can actually run a .cmd shim instead of reporting EINVAL',{skip:process.platform!=='win32'},()=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'orch-probe-cmd-'));
+ const shim=path.join(dir,'fake-host.cmd');
+ fs.writeFileSync(shim,'@echo off\r\nif "%1"=="--version" echo 7.7.7\r\nexit /b 0\r\n');
+ try{
+  const r=probeCli(shim,['--version'],{timeoutMs:30000,attempts:1});
+  assert.equal(r.error,null,'a .cmd shim must be spawnable, got '+(r.error||'none'));
+  assert.equal(r.status,0,'the shim must run: '+JSON.stringify(r));
+  assert.match(r.out,/7\.7\.7/,'the shim output must be captured');
+ }finally{fs.rmSync(dir,{recursive:true,force:true});}
+});
