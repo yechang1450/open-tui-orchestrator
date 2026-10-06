@@ -73,7 +73,11 @@ const liveDeadlineMs = Math.max(300000, Number(process.env.ORCH_LIVE_DEADLINE_MS
 // capacity from memory-fit (measured: 9 against a hardcoded 8), and then `live.length === capacity`
 // can never hold while `live.length > capacity` throws 'Capacity exceeded' - the release barrier is
 // never written and every probe dies on its own timeout.
-const env = { ...process.env, ORCH_AGENT: agent, ORCH_SPAWN_MODE: 'window', ORCH_MAX_POLL_MS: String(Math.max(60000, liveDeadlineMs - 70000)), ORCH_MAX_WINDOWS: String(capacity), ORCH_WINDOW_CONFIRM_MS: String(Math.max(60000, Number(process.env.ORCH_WINDOW_CONFIRM_MS) || 90000)), ORCH_RUN_ID:runId, ORCH_ACCEPTANCE_FILE:acceptanceFile };
+const env = { ...process.env, ORCH_AGENT: agent, ORCH_SPAWN_MODE: 'window', ORCH_MAX_POLL_MS: String(Math.max(60000, liveDeadlineMs - 70000)), ORCH_MAX_WINDOWS: String(capacity), ORCH_WINDOW_CONFIRM_MS: String(Math.max(60000, Number(process.env.ORCH_WINDOW_CONFIRM_MS) || 90000)), // First-checkpoint budget: the engine retires a unit that has not recorded its first checkpoint in
+// time, and a hermes TUI can take minutes to boot and answer. Measured: 15 'unproductive: no task
+// checkpoint within 300s' events in one run, each one a retry - and the retries are what break the
+// launch count, the ordering and the overlap checks all at once.
+ORCH_UNIT_FIRST_CHECKPOINT_MS: String(Math.max(300000, Number(process.env.ORCH_UNIT_FIRST_CHECKPOINT_MS) || 900000)), ORCH_RUN_ID:runId, ORCH_ACCEPTANCE_FILE:acceptanceFile };
 for (const key of ['WORKSPACE_DIR', 'ORCH_STATE_DIR', 'ORCH_TUI', 'ORCH_SANDBOX', 'ORCH_APPROVAL']) delete env[key];
 const config = { nonce, workspace, ids: Array.from({ length: 9 }, (_, i) => String(91 + i)), capacity };
 fs.writeFileSync(path.join(root, 'config.json'), JSON.stringify(config));
