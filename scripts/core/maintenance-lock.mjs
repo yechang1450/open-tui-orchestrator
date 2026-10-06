@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import crypto from 'node:crypto';
 
 // 维护锁：编排器在对自身做升级/优化/维护/更新等改动期间上锁。上锁期间任何 agent
 // 调用编排器（--run-windows/--spawn/--resume-run/preflight/force --assert 等动作入口）
@@ -45,6 +46,7 @@ export function readMaintenanceLock(env = process.env, now = Date.now()) {
     reason: String((data && data.reason) || ''),
     startedAt: Number(data && data.startedAt) || null,
     expiresAt,
+    ownerToken: typeof data?.ownerToken === 'string' && data.ownerToken ? data.ownerToken : null,
   };
 }
 
@@ -57,18 +59,36 @@ export function acquireMaintenanceLock({ reason = '', ttlMinutes = DEFAULT_TTL_M
   const minutes = Number.isFinite(ttl) && ttl > 0 ? Math.min(ttl, MAX_TTL_MINUTES) : DEFAULT_TTL_MINUTES;
   const file = maintenanceLockPath(env);
   fs.mkdirSync(path.dirname(file), { recursive: true });
+  const current = readMaintenanceLock(env);
+  if (current.locked) {
+    throw new Error('MAINTENANCE_LOCK_HELD: ' + (current.reason || 'another maintenance session owns the lock'));
+  }
   const now = Date.now();
-  const data = { version: 1, pid: process.pid, reason: String(reason || ''), startedAt: now, expiresAt: now + Math.round(minutes * 60000) };
-  // tmp+rename 原子落盘，读者永远只看到完整 JSON 或不存在。
-  const tmp = file + '.tmp-' + process.pid;
+  const ownerToken = crypto.randomUUID();
+  const data = { version: 1, pid: process.pid, ownerToken, reason: String(reason || ''), startedAt: now, expiresAt: now + Math.round(minutes * 60000) };
+  // 先写完整临时文件，再以 hard-link 原子地“只在目标不存在时”落盘；
+  // rename 会覆盖已有锁，导致并发维护会话互相夺锁。
+  const tmp = file + '.tmp-' + process.pid + '-' + ownerToken;
   fs.writeFileSync(tmp, JSON.stringify(data, null, 2) + '\n', 'utf8');
-  fs.renameSync(tmp, file);
+  try {
+    fs.linkSync(tmp, file);
+  } catch (error) {
+    if (error?.code === 'EEXIST') throw new Error('MAINTENANCE_LOCK_HELD: another maintenance session owns the lock');
+    throw error;
+  } finally {
+    try { fs.rmSync(tmp, { force: true }); } catch { /* preserve acquisition result */ }
+  }
   return data;
 }
 
-export function releaseMaintenanceLock(env = process.env) {
+export function releaseMaintenanceLock(env = process.env, ownerToken) {
   try {
     const file = maintenanceLockPath(env);
+    if (ownerToken !== undefined && ownerToken !== null) {
+      let data;
+      try { data = parseLockJson(fs.readFileSync(file, 'utf8')); } catch { return false; }
+      if (String(data?.ownerToken || '') !== String(ownerToken)) return false;
+    }
     fs.rmSync(file, { force: true });
     // 顺手收掉空目录（仅当为空才成功，绝不误删其它内容）。
     try { fs.rmdirSync(path.dirname(file)); } catch { /* ignore */ }

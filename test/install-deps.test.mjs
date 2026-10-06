@@ -53,20 +53,25 @@ test('--install-deps fails closed and cleanly when the npm toolchain is missing'
 
 test('--install-deps reports a successful install as installed (npm stub, success path)', () => {
   // 真机回归抓到的洞：装前算一次的 present 常量会把「刚装成功」误判成失败——成功路径必须有判据。
-  // 用 PATH 前置的 npm 桩（只建出依赖目录、exit 0）离线确定性地走完成功路径。
+  // 用 PATH 前置的 npm 桩（只建出依赖目录、exit 0）离线确定性地走完成功路径；被测入口挂在一个
+  // 不带 npm-cli.js 的 node 副本下，保证真的走 cmd fallback + 桩，而不是本机 npm 直启真联网。
   const pkg = minimalPackage();
-  const stubDir = fs.mkdtempSync(path.join(family, 'install-deps-stub-'));
+  const dir = fs.mkdtempSync(path.join(family, 'install-deps-stub-'));
+  const stubDir = path.join(dir, 'stub');
   try {
+    fs.mkdirSync(stubDir);
+    const fakeNode = path.join(dir, 'node.exe');
+    fs.copyFileSync(process.execPath, fakeNode);
     const script = "const fs=require('fs'),p=require('path');const i=process.argv.indexOf('--prefix');const d=process.argv[i+1];"
       + "for(const n of ['@openai/codex-sdk','@lydell/node-pty']){const x=p.join(d,'node_modules',...n.split('/'));fs.mkdirSync(x,{recursive:true});fs.writeFileSync(p.join(x,'package.json'),JSON.stringify({name:n,version:'0.0.0'}));}";
     fs.writeFileSync(path.join(stubDir, 'npm.cmd'), `@echo off\r\n"${process.execPath}" -e "${script.replace(/"/g, '\\"')}" %*\r\n`);
     const env = {SystemRoot: process.env.SystemRoot, PATH: `${stubDir}${path.delimiter}${path.dirname(process.execPath)}${path.delimiter}${path.join(process.env.SystemRoot || '', 'System32')}`, ORCH_MAINTENANCE_LOCK: path.join(family, 'no-lock.json'), ORCH_AGENT: 'codex'};
-    const r = spawnSync(process.execPath, [path.join(pkg, 'cli.mjs'), '--install-deps'], {cwd: family, env, encoding: 'utf8', windowsHide: true, timeout: 60000});
+    const r = spawnSync(fakeNode, [path.join(pkg, 'cli.mjs'), '--install-deps'], {cwd: family, env, encoding: 'utf8', windowsHide: true, timeout: 60000});
     assert.equal(r.status, 0, r.stderr || r.stdout);
     assert.match(r.stdout, /"action":"installed"/, r.stdout);
     assert.ok(fs.existsSync(path.join(pkg, 'scripts', 'node_modules', '@openai', 'codex-sdk', 'package.json')), 'the success path must leave the shim in place');
   } finally {
-    fs.rmSync(stubDir, {recursive: true, force: true});
+    fs.rmSync(dir, {recursive: true, force: true});
     fs.rmSync(pkg, {recursive: true, force: true});
   }
 });
@@ -83,4 +88,49 @@ test('--install-deps stays a no-op on a copy whose shim is already present', () 
     assert.equal(r.status, 0, r.stderr || r.stdout);
     assert.match(r.stdout, /"action":"already-present"/, r.stdout);
   } finally { fs.rmSync(pkg, {recursive: true, force: true}); }
+});
+
+test('the cmd.exe fallback installs through a real cmd parse (verbatim arguments, spaces in path)', () => {
+  const pkg = minimalPackage();
+  const dir = fs.mkdtempSync(path.join(family, 'install deps cmd '));   // 含空格：引号域必须原样穿过 cmd
+  try {
+    const fakeNode = path.join(dir, 'node.exe');
+    fs.copyFileSync(process.execPath, fakeNode);                        // dirname 下没有 npm-cli.js → 强制走 cmd fallback
+    const stubDir = path.join(dir, 'stub');
+    fs.mkdirSync(stubDir);
+    const script = "const fs=require('fs'),p=require('path');const i=process.argv.indexOf('--prefix');const d=process.argv[i+1];"
+      + "for(const n of ['@openai/codex-sdk','@lydell/node-pty']){const x=p.join(d,'node_modules',...n.split('/'));fs.mkdirSync(x,{recursive:true});fs.writeFileSync(p.join(x,'package.json'),JSON.stringify({name:n,version:'0.0.0'}));}";
+    fs.writeFileSync(path.join(stubDir, 'npm.cmd'), `@echo off\r\n"${process.execPath}" -e "${script.replace(/"/g, '\\"')}" %*\r\n`);
+    const env = {SystemRoot: process.env.SystemRoot, PATH: `${stubDir}${path.delimiter}${path.join(process.env.SystemRoot || '', 'System32')}`, ORCH_MAINTENANCE_LOCK: path.join(family, 'no-lock.json'), ORCH_AGENT: 'codex'};
+    const r = spawnSync(fakeNode, [path.join(pkg, 'cli.mjs'), '--install-deps'], {cwd: family, env, encoding: 'utf8', windowsHide: true, timeout: 120000});
+    const out = (r.stdout || '') + (r.stderr || '');
+    assert.equal(r.status, 0, out);
+    assert.match(r.stdout, /"action":"installed"/, out);
+    assert.ok(fs.existsSync(path.join(pkg, 'scripts', 'node_modules', '@openai', 'codex-sdk', 'package.json')), 'the fallback must reach the prefix exactly: ' + out);
+  } finally {
+    fs.rmSync(pkg, {recursive: true, force: true});
+    fs.rmSync(dir, {recursive: true, force: true});
+  }
+});
+
+test('--install-deps honors ORCH_NPM_BIN (.cmd stub) and reports its marker', () => {
+  const pkg = minimalPackage();
+  const dir = fs.mkdtempSync(path.join(family, 'install deps npm bin ')); // custom .cmd path intentionally contains spaces
+  try {
+    const marker = path.join(dir, 'stub-ran.marker');
+    const script = "const fs=require('fs'),p=require('path');const i=process.argv.indexOf('--prefix');const d=process.argv[i+1];"
+      + "fs.writeFileSync(" + JSON.stringify(marker) + ", 'ran');"
+      + "for(const n of ['@openai/codex-sdk','@lydell/node-pty']){const x=p.join(d,'node_modules',...n.split('/'));fs.mkdirSync(x,{recursive:true});fs.writeFileSync(p.join(x,'package.json'),JSON.stringify({name:n,version:'0.0.0'}));}";
+    fs.writeFileSync(path.join(dir, 'npm-stub.cmd'), `@echo off\r\n"${process.execPath}" -e "${script.replace(/"/g, '\\"')}" %*\r\n`);
+    const env = {SystemRoot: process.env.SystemRoot, PATH: process.env.PATH, ORCH_MAINTENANCE_LOCK: path.join(family, 'no-lock.json'), ORCH_AGENT: 'codex', ORCH_NPM_BIN: path.join(dir, 'npm-stub.cmd')};
+    const r = spawnSync(process.execPath, [path.join(pkg, 'cli.mjs'), '--install-deps'], {cwd: family, env, encoding: 'utf8', windowsHide: true, timeout: 120000});
+    const out = (r.stdout || '') + (r.stderr || '');
+    assert.equal(r.status, 0, out);
+    assert.match(r.stdout, /"action":"installed"/, out);
+    assert.ok(fs.existsSync(marker), 'the ORCH_NPM_BIN stub must actually run: ' + out);
+    assert.ok(fs.existsSync(path.join(pkg, 'scripts', 'node_modules', '@openai', 'codex-sdk', 'package.json')), 'the stub must reach the prefix exactly: ' + out);
+  } finally {
+    fs.rmSync(pkg, {recursive: true, force: true});
+    fs.rmSync(dir, {recursive: true, force: true});
+  }
 });

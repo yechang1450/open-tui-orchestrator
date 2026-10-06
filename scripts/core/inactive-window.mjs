@@ -2,7 +2,7 @@ import {spawn,spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {powershellExe} from './contracts.mjs';
 
-// 锚定 SystemRoot 的 powershell.exe：裸名会先按进程 cwd（任意工作区）解析，防二进制投毒。
+// 统一使用受信任位置解析出的 pwsh.exe，避免裸名按工作区解析造成二进制投毒。
 const PS_EXE=powershellExe();
 
 // Windows command-line quoting, including quotes and trailing backslashes.
@@ -33,8 +33,8 @@ export function spawnInactiveWindow(file,args,cwd,{invoke=spawnSync,activate=fal
 }
 
 // Start the same Win32 no-activate helper without holding the scheduler while
-// Windows Terminal finishes creating its window. The helper briefly restores
-// the initiating foreground window and exits on its own.
+// Windows Terminal finishes creating its window. The helper leaves
+// the initiating foreground untouched and exits on its own.
 export function spawnInactiveWindowDetached(file,args,cwd,{invoke=spawn}={}){
  const payload=Buffer.from(JSON.stringify({file,parameters:args.map(quoteWindowsArgument).join(' '),cwd}),'utf8').toString('base64');
  let child;
@@ -42,6 +42,7 @@ export function spawnInactiveWindowDetached(file,args,cwd,{invoke=spawn}={}){
   child=invoke(PS_EXE,['-NoProfile','-NonInteractive','-File',fileURLToPath(new URL('./inactive-window.ps1',import.meta.url)),'-Payload',payload],{cwd,windowsHide:true,shell:false,stdio:'ignore'});
  }catch(error){throw new Error('INACTIVE_WINDOW_LAUNCH_FAILED: '+(error?.message||String(error)));}
  if(!child||typeof child.unref!=='function')throw new Error('INACTIVE_WINDOW_LAUNCH_FAILED: helper did not return a detached process');
+ if(typeof child.on==='function')child.on('error',()=>{});
  child.unref();
  return child;
 }

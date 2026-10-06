@@ -49,3 +49,13 @@ test('a custom model_provider in the user config.toml disables the OpenAI networ
     fs.rmSync(home, {recursive: true, force: true});
   }
 });
+test('codex provider detection reads root TOML providers without matching nested profile tables',()=>{
+ fs.mkdirSync(family,{recursive:true});
+ const home=fs.mkdtempSync(path.join(family,'netpol-toml-'));
+ try{
+  fs.writeFileSync(path.join(home,'config.toml'),"model_provider = 'deepseek'\n[profiles.x]\nmodel_provider = 'openai'\n",'utf8');
+  assert.equal(codexProviderMode({env:{CODEX_HOME:home}}),'off');
+  fs.writeFileSync(path.join(home,'config.toml'),"model_provider = 'openai'\n",'utf8');
+  assert.equal(codexProviderMode({env:{CODEX_HOME:home}}),'on');
+ }finally{fs.rmSync(home,{recursive:true,force:true});}
+});

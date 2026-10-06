@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
+import {realpathSync} from 'node:fs';
 import {verifyRelease} from './release-integrity.mjs';
 import {formatFailureLines} from './core/failure-report.mjs';
 import {enforceWindowsOnly} from './platform-guard.mjs';
@@ -9,7 +10,20 @@ import {enforceWindowsOnly} from './platform-guard.mjs';
 // （完整栈帧仅 ORCH_DEBUG=1 时才打）——调用方的管道里永远不该出现裸 Node 栈帧。
 // 作为模块被 import 时保持原语义：封印/自适配失败照旧抛出（fail-closed 不受影响），
 // 只是不再把栈帧甩到调用者脸上。
-const IS_MAIN = !!process.argv[1] && path.resolve(process.argv[1]).toLowerCase() === fileURLToPath(import.meta.url).toLowerCase();
+// junction/符号链接入口下 argv[1] 是链接路径而 import.meta.url 已是 realpath；纯词法比较会把主入口
+// 误判为 import（verifyRelease 照跑但 main 被跳过、CLI 静默无输出）。两侧解析真实路径再比较。
+let entryIdentityError = null;
+const IS_MAIN = (() => {
+  try {
+    const self = realpathSync(fileURLToPath(import.meta.url));
+    const entry = process.argv[1] ? realpathSync(path.resolve(process.argv[1])) : '';
+    return !!entry && (process.platform === 'win32' ? entry.toLowerCase() === self.toLowerCase() : entry === self);
+  } catch (error) { entryIdentityError = error; return false; }
+})();
+if (entryIdentityError) {
+  console.error('[orchestrator] FATAL: ENTRY_IDENTITY_UNAVAILABLE: ' + (entryIdentityError?.message || String(entryIdentityError)));
+  process.exit(1);
+}
 function fatal(error) {
   // 首行仍是机器判据 `[orchestrator] FATAL: <原因>`；其后是给人看的 cause/tried/fix/docs。
   for (const line of formatFailureLines(error)) console.error(line);
@@ -41,7 +55,16 @@ try {
   throw error;
 }
 // 引导路径不进引擎：缺依赖时引擎根本加载不起来。装完依赖后，再走正常入口。
-const engine = bootstrapInstallDeps ? null : await import('./core/orchestrate-sdk.mjs');
+// 引擎加载失败（缺 SDK 依赖/损坏）必须收敛成一行 FATAL——预检只覆盖显式 codex 场景，
+// 进程链识别出的 codex 会走到这里；裸栈违反『入口失败只回一行』契约。
+let engine = null;
+if (!bootstrapInstallDeps) {
+  try { engine = await import('./core/orchestrate-sdk.mjs'); }
+  catch (error) {
+    if (IS_MAIN) { fatal(error); process.exit(1); }
+    throw error;
+  }
+}
 export const {
   main, reportFatal, buildPsArrayLit, capPlanBlocks, buildWindowWaves, applyAuthPromptPolicy, readTail,
   classifyBlockComplexity, classifyExecutionMode, appendModelEffortArgs, genericProjectSplit, plannerPrompt, plannerBlockCeiling,
@@ -54,8 +77,13 @@ export const {
   withRegistryLock, REGISTRY_LOCK_FILE,
 } = engine ?? {};
 if (bootstrapInstallDeps) {
-  const { installDepsCli } = await import('./install-deps.mjs');
-  process.exitCode = installDepsCli();
+  try {
+    const { installDepsCli } = await import('./install-deps.mjs');
+    process.exitCode = installDepsCli();
+  } catch (error) {
+    if (IS_MAIN) { fatal(error); process.exit(1); }
+    throw error;
+  }
 } else if (IS_MAIN) {
   // 异常收口：引擎抛异常时，除了按契约打一行 FATAL，还必须收掉本 run 自己录下的残留窗口。
   // 否则一次异常退出就会留下孤儿单元进程 + 尸体窗，违背"不留残窗/不让人手动关窗"的承诺

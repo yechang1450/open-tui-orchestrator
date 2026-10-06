@@ -1,5 +1,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import {runDirectory} from './runtime-context.mjs';
+import {realpathWithMissing,containedBy} from './path-security.mjs';
+
+export {runDirectory};
 
 // 执行看板（run board）：把运行账本投影成"块状态 + 任务状态"的实时视图。
 // 数据源：summary.json（block 级权威）+ attempts/**/checkpoints（task 级真实进度，
@@ -8,10 +12,6 @@ import path from 'node:path';
 
 const BLOCK_MARKS = { verified: '✓', running: '▶', launching: '…', waiting: '⏳', pending: '·', failed: '✗', timeout: '✗', 'popup-failed': '✗', 'needs-reconciliation': '⚠', blocked: '⊘', 'awaiting-verification': '◐' };
 const TERMINAL = new Set(['verified', 'failed', 'blocked', 'cancelled', 'awaiting-verification', 'preflight-failed', 'popup-failed', 'timeout', 'needs-reconciliation']);
-
-export function runDirectory(workspace, runId) {
-  return path.join(workspace, 'temp', 'orchestrator', 'runs', String(runId));
-}
 
 export function boardSignature(sum, taskStates = {}) {
   return JSON.stringify([
@@ -84,11 +84,26 @@ export function boardJson(sum, taskStates = {}) {
 
 export function taskCheckpointStates(runDir, sum) {
   const states = {};
+  const attemptsRoot = path.resolve(runDir, 'attempts');
+  const realRunDir = realpathWithMissing(runDir);
+  const realAttemptsRoot = realpathWithMissing(attemptsRoot);
+  if (!realRunDir || !realAttemptsRoot || !containedBy(realRunDir, realAttemptsRoot)) return states;
+  const safeAttemptFile = value => {
+    if (typeof value !== 'string' || !value) return null;
+    // 相对路径按 runDir 起算（而不是 process.cwd()）：监视器可能从任意 cwd 调用，
+    // 从 cwd 解析会让合法账本随调用点漂移、也给篡改账本留下 cwd 相关的接受面。
+    const candidate = path.resolve(runDir, value);
+    const real = realpathWithMissing(candidate);
+    return real && containedBy(realAttemptsRoot, real) ? candidate : null;
+  };
   for (const b of sum?.blocks || []) {
     for (const a of sum?.results?.[b.key]?.attempts || []) {
+      const attemptFile = safeAttemptFile(a?.file);
+      if (!attemptFile) continue;
       for (const id of a.taskIds || []) {
         try {
-          const f = path.join(path.dirname(String(a.file)), 'checkpoints', id + '.json');
+          if (typeof id !== 'string' || !/^[A-Za-z0-9_-]{1,100}$/.test(id)) continue;
+          const f = path.join(path.dirname(attemptFile), 'checkpoints', id + '.json');
           const cp = JSON.parse(fs.readFileSync(f, 'utf8').replace(/^\uFEFF/, ''));
           if (cp?.state) states[id] = cp.state;
         } catch { /* not yet written */ }
@@ -102,8 +117,8 @@ export function readBoardSummary(runDir) {
   try { return JSON.parse(fs.readFileSync(path.join(runDir, 'summary.json'), 'utf8').replace(/^\uFEFF/, '')); } catch { return null; }
 }
 
-export function readBoard(workspace, runId) {
-  const dir = runDirectory(workspace, runId);
+export function readBoard(workspace, runId, stateDir) {
+  const dir = runDirectory(workspace, runId, stateDir);
   const sum = readBoardSummary(dir);
   if (!sum) return null;
   return { dir, sum, taskStates: taskCheckpointStates(dir, sum) };
@@ -116,18 +131,19 @@ export function boardFinished(sum) {
 // --watch：只读流式看板。TTY 原地重绘完整看板；管道/--jsonl 输出机器可读行。
 // 机器可调用契约：未知 run 不许无限挂起。首次读到看板前有一个上界（graceMs /
 // ORCH_WATCH_GRACE_MS，默认 60s——覆盖「--run-windows 先规划、后建 run 目录」的竞态），
-// 超时即 fail-closed 一行诊断；已读到的运行中途丢 summary.json 也立刻报错，不静默停摆。
-export async function watchRun({ workspace, runId, intervalMs = 800, jsonl = false, out = process.stdout, graceMs = Number(process.env.ORCH_WATCH_GRACE_MS ?? 60000) }) {
+// 超时即 fail-closed 一行诊断；已读到的运行中途丢 summary.json（超过瞬时重写容忍窗）报错，不静默停摆。
+export async function watchRun({ workspace, runId, stateDir, intervalMs = 800, jsonl = false, out = process.stdout, graceMs = Number(process.env.ORCH_WATCH_GRACE_MS ?? 60000), missToleranceMs = Number(process.env.ORCH_WATCH_MISS_TOLERANCE_MS ?? 6000) }) {
   const write = s => out.write(s);
   const tty = !!out.isTTY && !jsonl;
-  const dir = runDirectory(workspace, runId);
+  const dir = runDirectory(workspace, runId, stateDir);
   const grace = Number.isFinite(graceMs) && graceMs >= 0 ? graceMs : 60000;
+  const missTolerance = Number.isFinite(missToleranceMs) && missToleranceMs >= 0 ? missToleranceMs : 6000;
   const startedAt = Date.now();
-  let lastSig = '', paintedLines = 0, announcedFinal = false, seen = false;
+  let lastSig = '', paintedLines = 0, announcedFinal = false, seen = false, lastSeenAt = 0;
   for (;;) {
-    const b = readBoard(workspace, runId);
+    const b = readBoard(workspace, runId, stateDir);
     if (b) {
-      seen = true;
+      seen = true; lastSeenAt = Date.now();
       const sig = boardSignature(b.sum, b.taskStates);
       if (sig !== lastSig) {
         lastSig = sig;
@@ -144,7 +160,9 @@ export async function watchRun({ workspace, runId, intervalMs = 800, jsonl = fal
         return b.sum.success === true ? 0 : 1;
       }
     } else if (seen) {
-      throw new Error('Run ' + runId + ' lost its summary.json while being watched (dir: ' + dir + ')');
+      // 瞬时重写窗口（atomicJson rm+rename）不该被误报成 lost：容忍 missTolerance 内的不可读，
+      // 持续缺失才 fail-closed。
+      if (Date.now() - lastSeenAt >= missTolerance) throw new Error('Run ' + runId + ' lost its summary.json while being watched (dir: ' + dir + ')');
     } else if (Date.now() - startedAt >= grace) {
       throw new Error(fs.existsSync(dir)
         ? 'Run ' + runId + ' has no readable summary.json (dir exists: ' + dir + ')'

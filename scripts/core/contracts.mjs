@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import crypto from 'node:crypto';
 import {spawnSync} from 'node:child_process';
 import os from 'node:os';
+import {containedBy,findSymlinkComponent,realpathWithMissing} from './path-security.mjs';
 
 export const CORE_VERSION = '0.9.24-1';
 // 机器可读入口（stdout 只出数据，见 README「机器可读入口 stdout 保持纯数据」）：
@@ -146,9 +147,80 @@ export function systemToolExe(name, env = process.env) {
   const anchored = path.join(env.SystemRoot || env.WINDIR || 'C:\\Windows', 'System32', String(name));
   return fs.existsSync(anchored) ? anchored : String(name);
 }
-export function powershellExe(env = process.env) {
-  const anchored = path.join(env.SystemRoot || env.WINDIR || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
-  return fs.existsSync(anchored) ? anchored : 'powershell.exe';
+// 冷启动探测预算：where.exe 与逐候选探针都要真的起一个 pwsh 进程（WindowsApps 里的
+// 应用执行别名冷启动最慢——本机实测负载高峰 5s 预算下 ETIMEDOUT@5086ms、13.8s 才成功，
+// 而同一时刻 30s/60s 预算只要 2.0s/1.7s）。硬编码 5s 会把「机器忙」误报成
+// 'PowerShell 7 executable not found'，即在重载机器上把可用的 pwsh 判成不存在。
+// 这是探测预算，不是信任判断：候选集合仍由 trustedRoots 白名单决定。
+const psProbeTimeoutMs = (env = process.env) => {
+  const raw = Number(String(env.ORCH_PS_PROBE_TIMEOUT_MS ?? '').trim());
+  return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 30000;
+};
+
+export function powershellExe(env = process.env, deps = {}) {
+  if (process.platform !== 'win32') return 'pwsh';
+  const runSync = deps.spawnSync || spawnSync;
+  const existsSync = deps.existsSync || (candidate => fs.existsSync(candidate));
+  const probeTimeout = Number(deps.probeTimeoutMs) > 0 ? Number(deps.probeTimeoutMs) : psProbeTimeoutMs(env);
+  const systemRoot = env.SystemRoot || env.WINDIR || 'C:\\Windows';
+  const programFiles = env.ProgramW6432 || env.ProgramFiles || 'C:\\Program Files';
+  const localAlias = env.LOCALAPPDATA ? path.join(env.LOCALAPPDATA, 'Microsoft', 'WindowsApps', 'pwsh.exe') : '';
+  const trustedRoots = [
+    path.resolve(programFiles, 'PowerShell', '7'),
+    path.resolve(programFiles, 'WindowsApps'),
+    localAlias ? path.dirname(localAlias) : '',
+  ].filter(Boolean).map(value => value.toLowerCase().replaceAll('\\', '/'));
+  const candidates = [path.join(programFiles, 'PowerShell', '7', 'pwsh.exe')];
+  try {
+    const whereExe = path.join(systemRoot, 'System32', 'where.exe');
+    const result = runSync(whereExe, ['pwsh.exe'], {encoding: 'utf8', windowsHide: true, timeout: probeTimeout});
+    for (const raw of String(result.stdout || '').split(/\r?\n/).map(value => value.trim()).filter(Boolean)) {
+      const candidate = path.resolve(raw);
+      const normalized = candidate.toLowerCase().replaceAll('\\', '/');
+      if (trustedRoots.some(root => normalized === root + '/pwsh.exe' || normalized.startsWith(root + '/'))) candidates.push(candidate);
+    }
+  } catch {}
+  if (localAlias) candidates.push(localAlias);
+  const resolved = candidates.find(candidate => existsSync(candidate));
+  if (resolved) return resolved;
+  for (const candidate of candidates) {
+    try {
+      const probe = runSync(candidate, ['-NoProfile', '-NonInteractive', '-Command', '$PSHOME'], {encoding: 'utf8', windowsHide: true, timeout: probeTimeout, shell: false});
+      if (!probe?.error && probe?.status === 0) return candidate;
+    } catch {}
+  }
+  throw new Error('PowerShell 7 executable not found in trusted locations');
+}
+function pathInside(root, candidate) {
+  const lexical = path.resolve(candidate);
+  const real = realpathWithMissing(lexical);
+  return containedBy(root, lexical) || Boolean(real && containedBy(root, real));
+}
+export function resolveAcceptanceCommand(command, workspace, env = process.env) {
+  const raw = String(command || '').trim();
+  if (!raw) throw new Error('Acceptance command is required');
+  const lexicalWorkspace = path.resolve(workspace);
+  const workspaceRoot = realpathWithMissing(lexicalWorkspace) || lexicalWorkspace;
+  const pathLike = path.isAbsolute(raw) || raw.includes('/') || raw.includes('\\');
+  if (pathLike) {
+    const candidate = path.isAbsolute(raw) ? path.resolve(raw) : path.resolve(lexicalWorkspace, raw);
+    if (pathInside(workspaceRoot, candidate)) throw new Error('Acceptance command executable must be outside workspace: ' + raw);
+    return candidate;
+  }
+  const dirs = String(env.PATH ?? env.Path ?? '').split(path.delimiter);
+  const extensions = process.platform === 'win32'
+    ? (path.extname(raw) ? [''] : String(env.PATHEXT || '.COM;.EXE;.BAT;.CMD').split(';').filter(Boolean))
+    : [''];
+  for (const dir of dirs) {
+    const base = path.resolve(dir || process.cwd());
+    for (const ext of extensions) {
+      const candidate = path.join(base, raw + ext);
+      try {
+        if (fs.statSync(candidate).isFile() && !pathInside(workspaceRoot, candidate)) return candidate;
+      } catch {}
+    }
+  }
+  throw new Error('Acceptance command executable not found outside workspace: ' + raw);
 }
 export function verifyTask(receipt, task, checks, context) {
   if(!receipt || receipt.runId!==context.runId || receipt.token!==context.token || receipt.id!==task.id || receipt.status!=='completed')return {status:'failed',reason:'Missing or mismatched task receipt'};
@@ -164,29 +236,51 @@ export function acceptanceKeyDiff(checks,tasks) {
 
 export function verifyChecks(checks,workspace) {
   if(!Array.isArray(checks)||!checks.length)return {status:'awaiting-verification',reason:'No parent-defined acceptance checks; window report is not proof of success'};
+  const resolvedWorkspace=path.resolve(workspace);
+  const workspaceRoot=realpathWithMissing(resolvedWorkspace)||resolvedWorkspace;
+  const resolveCheckedPath=value=>{
+    if(typeof value!=='string'||!value.trim())throw new Error('Acceptance path is required');
+    const file=path.resolve(workspaceRoot,value),relative=path.relative(workspaceRoot,file);
+    if(relative==='..'||relative.startsWith(`..${path.sep}`)||path.isAbsolute(relative))throw new Error('Acceptance path escapes workspace: '+value);
+    return file;
+  };
+  const realCheckedPath=file=>{
+    let real;
+    try{real=fs.realpathSync(file);}catch(error){throw new Error('Acceptance path unreadable: '+file+' ('+((error&&error.message)||String(error))+')');}
+    const relative=path.relative(workspaceRoot,real);
+    if(relative==='..'||relative.startsWith(`..${path.sep}`)||path.isAbsolute(relative))throw new Error('Acceptance path escapes workspace via link: '+file);
+    return real;
+  };
   const evidence=[];
   try {
     for(const check of checks) {
       if(check.type==='command') {
         if(!check.command||!Array.isArray(check.args))throw new Error('Command acceptance requires command and args');
-        const result=spawnSync(check.command,check.args,{cwd:workspace,encoding:'utf8',windowsHide:true,shell:false,timeout:check.timeoutMs||30000});
+        const requestedTimeout=Number(check.timeoutMs);
+        const timeoutMs=Number.isFinite(requestedTimeout)?Math.max(1,Math.min(120000,requestedTimeout)):30000;
+        const resolvedCommand=resolveAcceptanceCommand(check.command,workspace);
+        const result=spawnSync(resolvedCommand,check.args,{cwd:workspace,encoding:'utf8',windowsHide:true,shell:false,timeout:timeoutMs,maxBuffer:1024*1024});
         if(result.error||result.status!==(check.exitCode??0))throw new Error('Acceptance command failed: '+(result.error?.message||result.status));
         if(check.stdout!==undefined&&result.stdout.trim()!==check.stdout)throw new Error('Acceptance stdout mismatch');
-        evidence.push({type:'command',command:check.command,args:check.args,exitCode:result.status});continue;
+        evidence.push({type:'command',command:check.command,resolvedCommand,args:check.args,exitCode:result.status});continue;
       }
-      const file=path.resolve(workspace,check.path);
+      const file=resolveCheckedPath(check.path);
       if(check.type==='file') {
         if(!fs.existsSync(file))throw new Error('Acceptance file missing: '+file+(String(check.path)!==file?' (check.path="'+check.path+'")':''));
-        if(!fs.statSync(file).isFile())throw new Error('Not a file: '+file);if(check.sha256&&sha256(file)!==check.sha256)throw new Error('Hash mismatch: '+file);}
+        const real=realCheckedPath(file);if(!fs.statSync(real).isFile())throw new Error('Not a file: '+file);if(check.sha256&&sha256(real)!==check.sha256)throw new Error('Hash mismatch: '+file);}
       else if(check.type==='json') {
         if(!fs.existsSync(file))throw new Error('Acceptance file missing: '+file+(String(check.path)!==file?' (check.path="'+check.path+'")':''));
-        let value;try{value=JSON.parse(fs.readFileSync(file,'utf8'));}catch(e){throw new Error('Acceptance JSON parse failed: '+file+': '+e.message);}
+        const real=realCheckedPath(file);let value;try{value=JSON.parse(fs.readFileSync(real,'utf8').replace(/^\uFEFF/,''));}catch(e){throw new Error('Acceptance JSON parse failed: '+file+': '+e.message);}
         for(const [key,expected] of Object.entries(check.equals||{})){
           if(!(key in value))throw new Error('JSON field missing: '+file+' key="'+key+'" expected='+JSON.stringify(expected));
           if(JSON.stringify(value[key])!==JSON.stringify(expected))throw new Error('JSON mismatch: '+file+' key="'+key+'" expected='+JSON.stringify(expected)+' actual='+JSON.stringify(value[key]));}}
-      else if(check.type==='absent') {if(fs.existsSync(file))throw new Error('Unexpected path: '+file);}
+      else if(check.type==='absent') {
+        const link=findSymlinkComponent(file);
+        if(link)throw new Error('Unexpected path via link: '+file+' ('+link+')');
+        if(fs.existsSync(file))throw new Error('Unexpected path: '+file);
+      }
       else throw new Error('Unsupported acceptance check: '+check.type);
-      evidence.push({type:check.type,path:file,sha256:check.type==='absent'?undefined:sha256(file)});
+      evidence.push({type:check.type,path:file,sha256:check.type==='absent'?undefined:sha256(realCheckedPath(file))});
     }
     return {status:'verified',evidence};
   } catch(e){return {status:'failed',reason:e.message};}

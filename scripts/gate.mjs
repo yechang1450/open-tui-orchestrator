@@ -48,7 +48,17 @@ function check(id, title, ok, lines) {
 
 function node(argsArr, opts = {}) {
   // 非交互自动化一律显式 headless：gate 的子进程绝不继承本壳 ORCH_SPAWN_MODE（零弹窗）。
-  const env = {...(opts.env || process.env), ORCH_SPAWN_MODE: 'headless'};
+  // 同时给子进程一个现实的进程快照预算：默认 15000ms 是给正常桌面机器的，而 L1 以
+  // --test-concurrency=3 并发跑 91 个测试文件、每个都真起进程，满载机器上 PowerShell/WMI
+  // 枚举会超过 15s，于是成片测试以 `Cannot verify process identities ... did not return
+  // within 15000 ms` 收场——那是预算红，不是判据红。leases.mjs 的默认值保持 15s 不变
+  // （snapshot-diagnostics.test.mjs 把默认值钉成契约），这里只钉 gate 子进程的预算。
+  // 套件自身的预算走 suite() 的 ORCH_GATE_SUITE_TIMEOUT_MS（本就在），此处不重复。
+  const env = {
+    ...(opts.env || process.env),
+    ORCH_SPAWN_MODE: 'headless',
+    ORCH_PS_TIMEOUT_MS: process.env.ORCH_GATE_PS_TIMEOUT_MS || '120000',
+  };
   const r = spawnSync(process.execPath, argsArr, {cwd: REPO, encoding: 'utf8', windowsHide: true, timeout: opts.timeout || 900000, env});
   return {status: r.status, out: (r.stdout || '') + (r.stderr || '')};
 }
@@ -96,6 +106,32 @@ export function suiteReds(out) {
   return reds;
 }
 
+// 跳过项必须**具名且正当**（2026-10-06 用户拍板，方案 A）：宿主 CLI 没装时，适配器用例按
+// README 既有的设计 skip（pi-adapter 早有同款先例），但 gate 必须打印是哪几条、为什么缺，
+// 且仍然要求 fail==0 —— 「允许缺席宿主的具名 skip」不等于「允许静默跳过」。
+// 任何理由不是「CLI is not installed」的 skip 一律判红；解析数与 reporter 报的 skipped 数
+// 对不上也判红（漏解析不许蒙混）。
+export const SKIP_REASON_ALLOWED = /CLI is not installed/i;
+export function suiteSkips(out) {
+  const text = String(out || '');
+  const skips = [];
+  const seen = new Set();
+  // spec reporter 的跳过行：`<glyph> <name> (N.Nms) # <reason>`，glyph 非 ✔/✖/ℹ。
+  const SKIP = /^([^\s✔✖ℹ])\s+(.+?)\s*(?:\(\d+(?:\.\d+)?ms\))?\s*#\s*(.+)$/;
+  for (const raw of text.split(/\r?\n/)) {
+    const m = SKIP.exec(raw.trimEnd());
+    if (!m) continue;
+    const name = m[2].trim();
+    const reason = m[3].trim();
+    const key = `${name}\u0000${reason}`;
+    if (name && reason && !seen.has(key)) {
+      seen.add(key);
+      skips.push({name, reason});
+    }
+  }
+  return skips;
+}
+
 function stamp() {
   const d = new Date();
   const p = (n) => String(n).padStart(2, '0');
@@ -134,10 +170,21 @@ function suite() {
   };
   const pass = num('pass'), fail = num('fail'), skipped = num('skipped'), cancelled = num('cancelled');
   const missing = [['pass', pass], ['fail', fail], ['skipped', skipped]].filter(([, v]) => v === null).map(([k]) => k);
-  let ok = !missing.length && pass > 0 && fail === 0 && skipped === 0 && r.status === 0;
-  const lines = [`expected: pass>0 / fail==0 / skipped==0 / exit==0`];
+  // 跳过项必须逐条具名且理由正当（宿主 CLI 没装）。解析数与 reporter 的 skipped 对不上 = 红。
+  const skips = suiteSkips(r.out);
+  const unjustified = skips.filter((s) => !SKIP_REASON_ALLOWED.test(s.reason));
+  const skipAccountingOk = skipped !== null && skips.length === skipped;
+  let ok = !missing.length && pass > 0 && fail === 0 && r.status === 0 && unjustified.length === 0 && skipAccountingOk;
+  const lines = [`expected: pass>0 / fail==0 / exit==0 / every skip named with an allowed reason (host CLI not installed)`];
   if (missing.length) lines.push(`actual: missing ${missing.join(', ')} ⇒ unknown is failure`);
   else lines.push(`actual: pass=${pass} fail=${fail} skipped=${skipped} cancelled=${cancelled} exit=${r.status}`);
+  // 用户拍板（方案 A）：跳过项必须逐条点名并给出理由——gate 打印是哪几条、为什么缺。
+  if (skips.length) {
+    lines.push(`named skips (${skips.length}) — host CLI not installed:`);
+    for (const s of skips) lines.push(`  ○ ${s.name} — ${s.reason}`);
+  }
+  if (unjustified.length) lines.push(`unjustified skips (${unjustified.length}) ⇒ FAIL: ${unjustified.map((s) => `${s.name} — ${s.reason}`).join(' | ')}`);
+  if (!skipAccountingOk) lines.push(`skip accounting mismatch: parsed ${skips.length} of ${skipped === null ? 'unknown' : skipped} reported ⇒ FAIL`);
   let redLine = '';
   if (!ok) {
     const reds = suiteReds(r.out);
@@ -154,10 +201,11 @@ function suite() {
     if (reds.length && !missing.length) {
       const srcs = new Map(files.map((rel) => [rel, fs.readFileSync(path.join(REPO, rel), 'utf8')]));
       const byFile = new Map();
+      const attributed = new Set();
       for (const red of reds) {
         const name = red.name.replace(/\s*\(\d+(?:\.\d+)?ms\)\s*$/, '');
         for (const rel of files) {
-          if (srcs.get(rel).includes(name)) byFile.set(rel, (byFile.get(rel) || 0) + 1);
+          if (srcs.get(rel).includes(name)) { byFile.set(rel, (byFile.get(rel) || 0) + 1); attributed.add(red.name); }
         }
       }
       const stillRed = [];
@@ -167,7 +215,7 @@ function suite() {
         if (isoRed) stillRed.push(rel);
         lines.push(`  isolation re-run ${rel}: ${isoRed ? 'STILL RED' : 'green'} (${byFile.get(rel)} red title[s])`);
       }
-      if (byFile.size && !stillRed.length) {
+      if (byFile.size && canAutoPassEnvironmentFlake(reds, attributed, stillRed)) {
         ok = true;
         lines.push(`actual: all ${reds.length} red title[s] green in isolation (${byFile.size} file[s]) ⇒ environment flake, recorded, not blocking`);
         redLine = `  [gate] L1 environment flake recorded: ${reds.length} red title[s] green in isolated re-runs (${[...byFile.keys()].join(', ')}); suite summary observed pass=${pass} fail=${fail}`;
@@ -181,6 +229,11 @@ function suite() {
   if (redLine) console.log(redLine);
   if (missing.length) return undefined;                       // 被截断：不许放行，L4 也会对不上
   return ok && fail > 0 ? pass + fail : pass;                 // 环境假红放行时，实测总数 = pass+fail（隔离复跑已逐条证绿）
+}
+
+export function canAutoPassEnvironmentFlake(reds, attributed, stillRed) {
+  const names = attributed instanceof Set ? attributed : new Set(attributed || []);
+  return Array.isArray(reds) && reds.length > 0 && reds.every((red) => names.has(red.name)) && Array.isArray(stillRed) && stillRed.length === 0;
 }
 
 // ------------------------------------------------- L2a: host resolution (doctor)
@@ -273,7 +326,15 @@ function consistency(suitePass) {
 function main() {
   const args = new Set(process.argv.slice(2));
   const wants = (flag) => args.has(flag) || args.has('--all') || args.size === 0;
+  const knownFlags = new Set(['--all','--suite','--doctor','--canary','--unknown-run','--consistency']);
+  const unknownFlags = [...args].filter((arg) => !knownFlags.has(arg));
   console.log(`  [gate] shell ORCH_SPAWN_MODE=${SHELL_SPAWN_MODE}; children pinned to headless (zero popups)`);
+  if (unknownFlags.length) {
+    console.log(`[gate] unknown gate flag(s): ${unknownFlags.join(', ')}`);
+    console.log(`ORCH_GATE: FAIL (ARGS) — 0 criteria`);
+    process.exitCode = 1;
+    return;
+  }
 
   let measuredSuite = null;
   if (wants('--suite')) measuredSuite = suite();

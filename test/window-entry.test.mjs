@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {loadProfile, profileArgs} from '../scripts/core/print-profile.mjs';
@@ -34,13 +35,27 @@ test('runtime context normalizes MSYS-style paths on Windows and keeps POSIX abs
   assert.equal(msysToNative('D:/temp/ws', 'win32'), 'D:/temp/ws');
   assert.equal(msysToNative('/d/temp/ws', 'linux'), '/d/temp/ws');
   assert.equal(msysToNative('/d/temp/ws', 'darwin'), '/d/temp/ws');
-  const windows = process.platform === 'win32';
-  const r = resolveRuntimeContext(
-    {WORKSPACE_DIR: '/d/temp/ws', ORCH_STATE_DIR: '/d/temp/ws/temp/orchestrator'},
-    windows ? 'D:/' : '/tmp'
-  );
-  assert.equal(r.workspace, windows ? path.resolve('D:/temp/ws') : path.resolve('/tmp', '/d/temp/ws'));
-  assert.equal(r.state, windows ? path.resolve('D:/temp/ws/temp/orchestrator') : path.resolve('/d/temp/ws/temp/orchestrator'));
+  const fixture = fs.mkdtempSync(path.join(os.tmpdir(), 'otui-window-entry-'));
+  const workspace = path.join(fixture, 'ws');
+  const state = path.join(workspace, 'temp', 'orchestrator');
+  fs.mkdirSync(state, {recursive: true});
+  const native = value => path.resolve(value).replaceAll('\\', '/');
+  const toMsys = value => {
+    const normalized = native(value);
+    if (process.platform !== 'win32') return normalized;
+    const drive = /^([A-Za-z]):\/(.*)$/.exec(normalized);
+    return drive ? `/${drive[1].toLowerCase()}/${drive[2]}` : normalized;
+  };
+  try {
+    const r = resolveRuntimeContext(
+      {WORKSPACE_DIR: toMsys(workspace), ORCH_STATE_DIR: toMsys(state)},
+      process.cwd(),
+    );
+    assert.equal(r.workspace, path.resolve(workspace));
+    assert.equal(r.state, path.resolve(state));
+  } finally {
+    fs.rmSync(fixture, {recursive: true, force: true});
+  }
 });
 
 // 判据：hermes 画像必须声明窗口入口（真 TUI 路线依赖它）。

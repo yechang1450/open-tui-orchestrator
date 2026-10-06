@@ -27,11 +27,11 @@ if (/任务定性分析器/.test(prompt)) { try { fs.writeFileSync('planner-invo
 if (process.env.FAKE_UNIT_FAIL === '1') { process.exit(3); }
 const token = /【本块唯一标识】\\s*([A-Za-z0-9][A-Za-z0-9_-]*)/.exec(prompt)?.[1] || 'tok';
 const ids = [...new Set([...prompt.matchAll(/任务 (T\\d+)/g)].map((m) => m[1]))];
-const cp = (helper, file, id, state) => spawnSync(process.execPath, [helper, file, id, state], { windowsHide: true });
+const cp = (carrier, id, state) => spawnSync(carrier, [id, state], { windowsHide: true, shell: true });
 const noCheckpoints = process.env.FAKE_UNIT_NO_CHECKPOINTS === '1';
-if (!noCheckpoints) for (const m of prompt.matchAll(/开始前：node "([^"]+)" "([^"]+)" (\\S+) started/g)) cp(m[1], m[2], m[3], 'started');
+if (!noCheckpoints) for (const m of prompt.matchAll(/开始前："([^" ]+checkpoint[.]cmd)" ([^ ]+) started/g)) cp(m[1], m[2], 'started');
 for (const id of ids) fs.writeFileSync('receipt-' + id + '.json', JSON.stringify({ ok: true, token, id }));
-if (!noCheckpoints) for (const m of prompt.matchAll(/完成自验后：node "([^"]+)" "([^"]+)" (\\S+) completed/g)) cp(m[1], m[2], m[3], 'completed');
+if (!noCheckpoints) for (const m of prompt.matchAll(/完成自验后："([^" ]+checkpoint[.]cmd)" ([^ ]+) completed/g)) cp(m[1], m[2], 'completed');
 console.log('done __ORCH_DONE__ ' + token);
 `;
 
@@ -176,6 +176,13 @@ test('unit profile validation and argv expansion', () => {
   } finally { fs.rmSync(tmp, {recursive: true, force: true}); }
 });
 
+test('unit profile normalizes and returns the optional carrier field', () => {
+  assert.equal(normalizeUnitProfile({bin: 'x.exe', args: ['{prompt}'], carrier: 'pty'}).carrier, 'pty');
+  assert.equal(normalizeUnitProfile({bin: 'x.exe', args: ['{prompt}'], carrier: 'STDIO '}).carrier, 'stdio');
+  assert.equal(normalizeUnitProfile({bin: 'x.exe', args: ['{prompt}']}).carrier, null);
+  assert.throws(() => normalizeUnitProfile({bin: 'x.exe', args: ['{prompt}'], carrier: 'window'}), /UNSUPPORTED_UNIT_CARRIER/);
+});
+
 test('a caller unit runs end-to-end: plan file + unit command, two parallel blocks, zero model calls', async () => {
   const s = setup();
   const ws = fs.mkdtempSync(path.join(family, 'caller-run-'));
@@ -199,6 +206,28 @@ test('a caller unit runs end-to-end: plan file + unit command, two parallel bloc
     // 二次验收（只读重检）同样成立
     const v = spawnSync(process.execPath, [CLI, '--verify-run', 'caller-e2e'], {cwd: ws, env: callEnv({ws, unitFile, acceptance}), encoding: 'utf8', windowsHide: true, timeout: 60000});
     assert.equal(v.status, 0, v.stderr || v.stdout);
+  } finally { await cleanup(s.dir, ws); }
+});
+
+test('custom ORCH_STATE_DIR carries the run ledger through execution and verification', async () => {
+  const s = setup();
+  const ws = fs.mkdtempSync(path.join(family, 'caller-custom-state-'));
+  try {
+    const unitFile = path.join(s.dir, 'unit.json');
+    fs.writeFileSync(unitFile, JSON.stringify(unitProfile(s.unit)));
+    const plan = path.join(s.dir, 'plan.json');
+    fs.writeFileSync(plan, JSON.stringify(taskLevelPlan()));
+    const acceptance = path.join(s.dir, 'acceptance.json');
+    fs.writeFileSync(acceptance, JSON.stringify({T001: [{type: 'file', path: 'receipt-T001.json'}], T002: [{type: 'file', path: 'receipt-T002.json'}]}));
+    const stateDir = path.join(ws, 'temp', 'custom-state');
+    const env = callEnv({ws, unitFile, planFile: plan, acceptance, extra: {ORCH_STATE_DIR: stateDir}});
+    const run = spawnSync(process.execPath, [CLI, '--run-id', 'custom-state', '--run-windows', REQUEST], {cwd: ws, env, encoding: 'utf8', windowsHide: true, timeout: 240000});
+    assert.equal(run.status, 0, run.stderr || run.stdout);
+    const summary = path.join(stateDir, 'runs', 'custom-state', 'summary.json');
+    assert.ok(fs.existsSync(summary), 'the run ledger must follow ORCH_STATE_DIR');
+    assert.equal(fs.existsSync(path.join(ws, 'temp', 'orchestrator', 'runs', 'custom-state', 'summary.json')), false, 'the default state path must stay unused');
+    const verify = spawnSync(process.execPath, [CLI, '--verify-run', 'custom-state'], {cwd: ws, env, encoding: 'utf8', windowsHide: true, timeout: 60000});
+    assert.equal(verify.status, 0, verify.stderr || verify.stdout);
   } finally { await cleanup(s.dir, ws); }
 });
 

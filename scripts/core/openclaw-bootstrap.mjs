@@ -12,8 +12,21 @@ if(process.platform==='win32'){
   return mkdir(target,options);
  };
 }
-const spec=JSON.parse(fs.readFileSync(process.env.ORCH_OPENCLAW_SPEC,'utf8'));
-const runtime=await import(pathToFileURL(path.join(spec.packageRoot,'dist','plugin-sdk','config-runtime.js')));
+const specPath=process.env.ORCH_OPENCLAW_SPEC;
+if(!specPath)throw new Error('OPENCLAW_BOOTSTRAP_REJECTED: missing spec path');
+const spec=JSON.parse(fs.readFileSync(specPath,'utf8'));
+const trustedRoot=process.env.ORCH_OPENCLAW_PACKAGE_ROOT;
+if(!trustedRoot)throw new Error('OPENCLAW_BOOTSTRAP_REJECTED: missing trusted package root');
+const real=target=>{try{return fs.realpathSync.native(target);}catch{throw new Error('OPENCLAW_BOOTSTRAP_REJECTED: path is not readable: '+target);}};
+const packageRoot=real(spec.packageRoot),trustedPackageRoot=real(trustedRoot);
+const fold=value=>process.platform==='win32'?String(value).toLowerCase():String(value);
+if(fold(packageRoot)!==fold(trustedPackageRoot))throw new Error('OPENCLAW_BOOTSTRAP_REJECTED: package root does not match the trusted host resolution');
+const entry=real(spec.entry),expectedEntry=real(path.join(packageRoot,'openclaw.mjs'));
+if(fold(entry)!==fold(expectedEntry))throw new Error('OPENCLAW_BOOTSTRAP_REJECTED: entry is not the resolved OpenClaw entry');
+const runtimePath=real(path.join(packageRoot,'dist','plugin-sdk','config-runtime.js'));
+const pkg=JSON.parse(fs.readFileSync(path.join(packageRoot,'package.json'),'utf8'));
+if(pkg.name!=='openclaw')throw new Error('OPENCLAW_BOOTSTRAP_REJECTED: package identity mismatch');
+const runtime=await import(pathToFileURL(runtimePath));
 const source=runtime.loadConfig();
 process.env.OPENCLAW_STATE_DIR=spec.state;
 process.env.OPENCLAW_CONFIG_PATH=path.join(spec.state,'runtime-config.json');

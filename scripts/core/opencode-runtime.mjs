@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import {fileURLToPath} from 'node:url';
 import {spawn} from 'node:child_process';
 import {opencodeArgs, opencodePlannerArgs} from './opencode-host.mjs';
@@ -52,6 +53,7 @@ export function writeOpenCodeLauncher(config, {key, prompt, suffix, workspace, t
   const stem = String(key + '-' + suffix).replace(/[^a-zA-Z0-9_-]/g, '-');
   const token = /【本块唯一标识】\s*([A-Za-z0-9][A-Za-z0-9_-]*)/.exec(prompt)?.[1];
   if (!token) throw new Error('OpenCode window requires a completion token');
+  const sanctionToken = crypto.randomBytes(18).toString('hex');
   fs.mkdirSync(temp, {recursive: true});
   const lp = path.join(temp, 'win-launch-' + stem + '.ps1');
   const pidf = path.join(temp, 'window-' + stem + '.pid');
@@ -74,6 +76,7 @@ export function writeOpenCodeLauncher(config, {key, prompt, suffix, workspace, t
     'Write-Host "============================================="',
     `Set-Location -LiteralPath ${quote(workspace)}`,
     `$env:ORCH_WINDOW = '1'`,
+    `$env:ORCH_WINDOW_TOKEN = ${quote(sanctionToken)}`,
     `$token = ${quote(token)}`,
     `$log = ${quote(log)}`,
     `$resultFile = ${quote(rf)}`,
@@ -107,7 +110,7 @@ export function writeOpenCodeLauncher(config, {key, prompt, suffix, workspace, t
     'exit 0',
   ].join('\r\n');
   fs.writeFileSync(lp, '\ufeff' + body, 'utf8');
-  return {lp, pidf, pf, rf, log};
+  return {lp, pidf, pf, rf, log, sanctionToken};
 }
 
 export async function waitOpenCodeResult(rf, timeoutMs, pidf) {

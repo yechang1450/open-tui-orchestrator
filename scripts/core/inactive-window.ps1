@@ -42,7 +42,7 @@ public static class OrchestratorInactiveShell {
  [DllImport("user32.dll")] static extern bool BringWindowToTop(IntPtr handle);
  [DllImport("user32.dll")] static extern bool FlashWindowEx(ref FlashInfo info);
  [DllImport("kernel32.dll")] static extern uint GetCurrentThreadId();
- [StructLayout(LayoutKind.Sequential)] public struct FlashInfo {public uint cbSize,hwnd;public uint flags,count,timeout;}
+ [StructLayout(LayoutKind.Sequential)] public struct FlashInfo {public uint cbSize;public IntPtr hwnd;public uint flags,count,timeout;}
  [DllImport("user32.dll")] static extern bool EnumWindows(EnumProc cb,IntPtr p);
  [DllImport("user32.dll")] static extern bool AllowSetForegroundWindow(int pid);
  delegate bool EnumProc(IntPtr h,IntPtr p);
@@ -55,28 +55,21 @@ public static class OrchestratorInactiveShell {
  static int ZRank(IntPtr target){int rank=0;int found=-1;EnumWindows((h,p)=>{if(found>=0)return false;if(h==target){found=rank;return false;}rank++;return rank<400;},IntPtr.Zero);return found;}
  // Launch (no activate) and optionally bring the fresh window forward. Prints one JSON line.
  public static string Launch(string file,string parameters,string cwd,bool activate){
-  var baseline=GetForegroundWindow();
   HashSet<IntPtr> before=null;
   if(activate){before=new HashSet<IntPtr>();Snapshot(before);}
   var s=new Startup();s.cb=Marshal.SizeOf(s);s.flags=1;s.show=4;ProcessInfo p;
   if(!CreateProcessW(file,new System.Text.StringBuilder("\""+file+"\" "+parameters),IntPtr.Zero,IntPtr.Zero,false,0x10,IntPtr.Zero,cwd,ref s,out p))
     throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
   CloseHandle(p.thread);CloseHandle(p.process);
-  if(!activate){
-    var until=Environment.TickCount+2500;
-    while(Environment.TickCount<until){
-      if(baseline!=IntPtr.Zero&&GetForegroundWindow()!=baseline)SetForegroundWindow(baseline);
-      System.Threading.Thread.Sleep(20);
-    }
-    return "{\"ok\":true,\"activated\":false}";
-  }
+  if(!activate)return "{\"ok\":true,\"activated\":false}";
   // Give the app time to create its window, then raise the first fresh, sane top-level window.
-  var deadline=Environment.TickCount+9000;
+  var deadline=Environment.TickCount64+9000;
   IntPtr found=IntPtr.Zero; string title="";
-  while(Environment.TickCount<deadline){
+  while(Environment.TickCount64<deadline){
     var now=new HashSet<IntPtr>();Snapshot(now);
     foreach(var h in now){
       if(before.Contains(h))continue;
+      uint windowPid=0;if(GetWindowThreadProcessId(h,out windowPid)==0||windowPid!=p.pid)continue;
       if(!IsWindowVisible(h))continue;
       Rect r;if(!GetWindowRect(h,out r))continue;
       var w=r.R-r.L;var hh=r.B-r.T;
@@ -119,11 +112,11 @@ public static class OrchestratorInactiveShell {
   // If the foreground switch still did not take, flash the taskbar entry so the user notices anyway.
   var flashed=false;
   if(!isFg){
-    var fi=new FlashInfo();fi.cbSize=(uint)Marshal.SizeOf(fi);fi.hwnd=(uint)found.ToInt64();fi.flags=0x3|0xC;fi.count=6;fi.timeout=0;
+    var fi=new FlashInfo();fi.cbSize=(uint)Marshal.SizeOf(fi);fi.hwnd=found;fi.flags=0x3|0xC;fi.count=6;fi.timeout=0;
     flashed=FlashWindowEx(ref fi);
   }
   var verdict=visible&&!minimized;
-  return "{\"ok\":"+(verdict?"true":"false")+",\"hwnd\":\"0x"+found.ToInt64().ToString("X")+"\",\"title\":\""+
+  return "{\"ok\":"+(verdict?"true":"false")+",\"ownerPid\":"+p.pid+",\"hwnd\":\"0x"+found.ToInt64().ToString("X")+"\",\"title\":\""+
     title.Replace("\\","\\\\").Replace("\"","\\\"")+"\",\"rect\":\""+fr.L+","+fr.T+","+fr.R+","+fr.B+
     "\",\"foreground\":"+(isFg?"true":"false")+",\"raised\":"+(fg?"true":"false")+",\"flashed\":"+(flashed?"true":"false")+",\"zrank\":"+zrank+",\"minimized\":"+(minimized?"true":"false")+"}";
  }

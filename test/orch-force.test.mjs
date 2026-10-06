@@ -6,6 +6,7 @@ import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 const root = fileURLToPath(new URL('..', import.meta.url));
 const family = path.join(root, 'temp');
+const RUN_TIMEOUT_MS = 180000; // ORCH_MAX_POLL_MS 120000 + 60s cleanup/serialization headroom
 
 // 假 kimi CLI：--help/--version 过 kimi-host 探测；其余调用按提示词里的 checkpoint 指令
 // 先记 started、写回执、再记 completed，最后输出完成标记（行为对齐守规矩的真实块代理）。
@@ -16,10 +17,10 @@ if (args.includes('--help')) { console.log('--prompt --output-format --auto'); p
 if (args.includes('--version')) { console.log('9.9.9'); process.exit(0); }
 const prompt = args[args.length - 1] || '';
 const token = /【本块唯一标识】\\s*([A-Za-z0-9][A-Za-z0-9_-]*)/.exec(prompt)?.[1] || 'tok';
-const cp = (helper, file, id, state) => spawnSync(process.execPath, [helper, file, id, state], { windowsHide: true });
-for (const m of prompt.matchAll(/开始前：node "([^"]+)" "([^"]+)" (\\S+) started/g)) cp(m[1], m[2], m[3], 'started');
+const cp = (carrier, id, state) => spawnSync(carrier, [id, state], { windowsHide: true, shell: true });
+for (const m of prompt.matchAll(/开始前："([^" ]+checkpoint[.]cmd)" ([^ ]+) started/g)) cp(m[1], m[2], 'started');
 fs.writeFileSync('receipt.json', JSON.stringify({ok: true, token}));
-for (const m of prompt.matchAll(/完成自验后：node "([^"]+)" "([^"]+)" (\\S+) completed/g)) cp(m[1], m[2], m[3], 'completed');
+for (const m of prompt.matchAll(/完成自验后："([^" ]+checkpoint[.]cmd)" ([^ ]+) completed/g)) cp(m[1], m[2], 'completed');
 console.log('done __ORCH_DONE__ ' + token);
 `;
 
@@ -41,13 +42,27 @@ function setup() {
   return { ws, acceptance, lockFile, env: base };
 }
 
-const run = (env, extra = []) => spawnSync(process.execPath, [path.join(root, 'cli.mjs'), ...extra, '--run-windows', '修复项目81登录页'], { cwd: env.__ws, env: (() => { const e = { ...env, WORKSPACE_DIR: env.__ws, ORCH_STATE_DIR: path.join(env.__ws, 'temp', 'orchestrator') }; delete e.__ws; return e; })(), encoding: 'utf8', windowsHide: true, timeout: 120000 });
+const run = (env, extra = []) => {
+  const result = spawnSync(process.execPath, [path.join(root, 'cli.mjs'), ...extra, '--run-windows', '修复项目81登录页'], { cwd: env.__ws, env: (() => { const e = { ...env, WORKSPACE_DIR: env.__ws, ORCH_STATE_DIR: path.join(env.__ws, 'temp', 'orchestrator') }; delete e.__ws; return e; })(), encoding: 'utf8', windowsHide: true, timeout: RUN_TIMEOUT_MS });
+  if (result.error?.code === 'ETIMEDOUT' || result.signal || result.status === null) {
+    if (Number.isInteger(result.pid) && result.pid > 0) {
+      try { spawnSync('taskkill', ['/PID', String(result.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' }); } catch { /* best-effort cleanup */ }
+    }
+  }
+  return result;
+};
+const assertRunStarted = (result) => {
+  assert.equal(result.error, undefined, result.error?.message || result.stderr || 'orchestrator spawn failed');
+  assert.equal(result.signal, null, result.stderr || 'orchestrator terminated by signal');
+  assert.notEqual(result.status, null, result.stderr || 'orchestrator returned no exit status');
+};
 
 test('a single-block request returns inline by default', () => {
   const s = setup();
   const env = { ...s.env, __ws: s.ws };
   try {
     const r = run(env);
+    assertRunStarted(r);
     assert.equal(r.status, 0, r.stderr);
     assert.match(r.stdout, /"mode":"inline"/);
     assert.doesNotMatch(r.stdout, /spawned headless/);
@@ -59,6 +74,7 @@ test('ORCH_FORCE_EXECUTE bypasses the inline gate and actually spawns a unit', (
   const env = { ...s.env, __ws: s.ws, ORCH_FORCE_EXECUTE: '1' };
   try {
     const r = run(env);
+    assertRunStarted(r);
     assert.equal(r.status, 0, r.stderr);
     assert.doesNotMatch(r.stdout, /"mode":"inline"/);
     assert.match(r.stdout, /force-execute: inline gate bypassed/);
@@ -77,6 +93,7 @@ test('the maintenance lock still blocks a forced invocation', () => {
   const env = { ...s.env, __ws: s.ws, ORCH_FORCE_EXECUTE: '1' };
   try {
     const r = run(env);
+    assertRunStarted(r);
     assert.equal(r.status, 0, r.stderr);
     assert.match(r.stdout, /open-tui-orchestrator正在维护更新，本轮跳过orchestrator直接开始执行/);
     assert.doesNotMatch(r.stdout, /spawned headless/);

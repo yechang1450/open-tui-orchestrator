@@ -64,6 +64,35 @@ test('task checkpoint states surface the true per-task progress while running', 
   } finally { f.cleanup(); }
 });
 
+test('taskCheckpointStates ignores attempt paths outside the run directory', () => {
+  const f = fixtureRun({ checkpoint: 'started' });
+  try {
+    const outside = path.join(f.workspace, 'outside', 'attempt.json');
+    fs.mkdirSync(path.dirname(outside), { recursive: true });
+    fs.writeFileSync(outside, '{}');
+    const sum = JSON.parse(fs.readFileSync(path.join(f.runDir, 'summary.json'), 'utf8'));
+    sum.results.B1.attempts[0].file = outside;
+    assert.deepEqual(taskCheckpointStates(f.runDir, sum), {});
+  } finally { f.cleanup(); }
+});
+
+test('taskCheckpointStates ignores attempt paths routed through a junction', () => {
+  const f = fixtureRun({ checkpoint: 'started' });
+  const outside = path.join(f.workspace, 'outside-junction');
+  const linkedDir = path.join(f.runDir, 'attempts', 'B1', 'linked');
+  try {
+    fs.mkdirSync(outside, { recursive: true });
+    fs.symlinkSync(outside, linkedDir, 'junction');
+    const outsideAttempt = path.join(outside, 'attempt.json');
+    fs.writeFileSync(outsideAttempt, '{}');
+    fs.mkdirSync(path.join(outside, 'checkpoints'), { recursive: true });
+    fs.writeFileSync(path.join(outside, 'checkpoints', 'T001.json'), JSON.stringify({state: 'started'}));
+    const sum = JSON.parse(fs.readFileSync(path.join(f.runDir, 'summary.json'), 'utf8'));
+    sum.results.B1.attempts[0].file = path.join(linkedDir, 'attempt.json');
+    assert.deepEqual(taskCheckpointStates(f.runDir, sum), {});
+  } finally { f.cleanup(); }
+});
+
 test('watchRun streams board lines and exits with the run outcome', async () => {
   const f = fixtureRun({});
   try {
@@ -123,17 +152,44 @@ test('watchRun fails closed when the run directory exists but no summary is ever
   } finally { f.cleanup(); }
 });
 
-test('watchRun reports a summary that disappears mid-watch instead of stopping silently', async () => {
+test('watchRun reports a summary that stays missing mid-watch instead of stopping silently', async () => {
   const f = fixtureRun({});
   try {
     const chunks = [];
-    const watching = watchRun({ workspace: f.workspace, runId: 'boardrun', intervalMs: 20, out: { isTTY: false, write: s => chunks.push(s) }, graceMs: 5000 });
+    // 瞬时重写窗口（atomicJson 的 rm+rename）有容忍；持续缺失超过容忍窗必须 surface。
+    const watching = watchRun({ workspace: f.workspace, runId: 'boardrun', intervalMs: 20, out: { isTTY: false, write: s => chunks.push(s) }, graceMs: 5000, missToleranceMs: 150 });
     await new Promise(r => setTimeout(r, 80));
     fs.rmSync(path.join(f.runDir, 'summary.json'));
     const error = await watching.then(() => null, e => e);
     assert.ok(error, 'losing the summary mid-watch must surface, not stop silently');
     assert.match(error.message, /lost its summary\.json/);
     assert.match(chunks.join(''), /\[board\] run=boardrun/);
+  } finally { f.cleanup(); }
+});
+
+test('watchRun tolerates a transient summary rewrite window instead of declaring the run lost', async () => {
+  const f = fixtureRun({});
+  try {
+    const chunks = [];
+    const watching = watchRun({ workspace: f.workspace, runId: 'boardrun', intervalMs: 20, out: { isTTY: false, write: s => chunks.push(s) }, graceMs: 5000 });
+    await new Promise(r => setTimeout(r, 80));
+    const summaryFile = path.join(f.runDir, 'summary.json');
+    const body = fs.readFileSync(summaryFile, 'utf8');
+    fs.rmSync(summaryFile);                              // atomicJson 重写的空窗
+    await new Promise(r => setTimeout(r, 60));
+    const sum = JSON.parse(body); sum.finishedAt = Date.now(); sum.success = true;
+    fs.writeFileSync(summaryFile, JSON.stringify(sum));  // 重写完成
+    const code = await watching;
+    assert.equal(code, 0, 'a rewrite window must not be reported as a lost run');
+  } finally { f.cleanup(); }
+});
+
+test('taskCheckpointStates resolves relative attempt paths from the run directory', () => {
+  const f = fixtureRun({ checkpoint: 'started' });
+  try {
+    const sum = JSON.parse(fs.readFileSync(path.join(f.runDir, 'summary.json'), 'utf8'));
+    sum.results.B1.attempts[0].file = path.join('attempts', 'B1', '1', 'attempt.json'); // 相对 runDir
+    assert.equal(taskCheckpointStates(f.runDir, sum).T001, 'started', 'relative attempt paths must resolve against the run directory, not the process cwd');
   } finally { f.cleanup(); }
 });
 

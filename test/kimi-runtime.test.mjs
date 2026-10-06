@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {spawnSync} from 'node:child_process';
+import {powershellExe} from '../scripts/core/contracts.mjs';
 import {kimiAssistantText,writeKimiLauncher,waitKimiResult,runKimiPlanner} from '../scripts/core/kimi-runtime.mjs';
 const family=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../temp');fs.mkdirSync(family,{recursive:true});
 test('kimi planner binds the prompt immediately after -p (kimi CLI parses flag values greedily)',async()=>{
@@ -31,7 +32,7 @@ test('kimi PowerShell launcher preserves prompt argv, captures the token line an
   fs.writeFileSync(worker,'import fs from "node:fs";\nconst p=process.argv.at(-1);\nconst m=/^capture:(.+)$/m.exec(p);\nfs.writeFileSync(m[1].trim(),JSON.stringify(process.argv.slice(2)));\nconsole.log("done 【本块唯一标识】 kimitest1");\n');
   const prompt='执行窗口任务 "带引号" 与中文\n第二行 D:\\path\\\n【本块唯一标识】kimitest1\ncapture:'+capture;
   const la=writeKimiLauncher({bin:process.execPath,prefixArgs:[worker]},{key:'B1',suffix:'test',prompt,workspace:dir,temp:path.join(dir,'temp')});
-  const result=spawnSync('powershell.exe',['-NoProfile','-File',la.lp],{windowsHide:true,encoding:'utf8',timeout:20000});
+  const result=spawnSync(powershellExe(),['-NoProfile','-File',la.lp],{windowsHide:true,encoding:'utf8',timeout:20000});
   assert.equal(result.status,0,result.stderr);
   const r=JSON.parse(fs.readFileSync(la.rf,'utf8').replace(/^\uFEFF/,'').split(/\r?\n/)[0]);
   assert.equal(r.__EXIT__,0);assert.ok(r.__REPORT__.includes('kimitest1'));
@@ -46,7 +47,7 @@ test('kimi launcher with ORCH_MODEL emits -m before -p through real PowerShell a
   fs.writeFileSync(worker,'import fs from "node:fs";\nconst p=process.argv.at(-1);\nconst m=/^capture:(.+)$/m.exec(p);\nfs.writeFileSync(m[1].trim(),JSON.stringify(process.argv.slice(2)));\nconsole.log("done 【本块唯一标识】 kimitest2");\n');
   const prompt='带 model 的窗口任务\n【本块唯一标识】kimitest2\ncapture:'+capture;
   const la=writeKimiLauncher({bin:process.execPath,prefixArgs:[worker]},{key:'B1',suffix:'test2',prompt,workspace:dir,temp:path.join(dir,'temp')});
-  const result=spawnSync('powershell.exe',['-NoProfile','-File',la.lp],{windowsHide:true,encoding:'utf8',timeout:20000});
+  const result=spawnSync(powershellExe(),['-NoProfile','-File',la.lp],{windowsHide:true,encoding:'utf8',timeout:20000});
   assert.equal(result.status,0,result.stderr);
   assert.deepEqual(JSON.parse(fs.readFileSync(capture,'utf8')),['-m','kimi-k3','-p',prompt.trim()]);
  }finally{if(pm===undefined)delete process.env.ORCH_MODEL;else process.env.ORCH_MODEL=pm;fs.rmSync(dir,{recursive:true,force:true});}
@@ -86,7 +87,7 @@ test('kimi launcher unwraps native stderr (no NativeCommandError red block) but 
   fs.writeFileSync(worker,'console.error("kimi version 9.9.9 fake-diag");\nconsole.log("done 【本块唯一标识】 kimitest4");\n');
   const prompt='stderr 外观测试\n【本块唯一标识】kimitest4';
   const la=writeKimiLauncher({bin:process.execPath,prefixArgs:[worker]},{key:'B1',suffix:'test4',prompt,workspace:dir,temp:path.join(dir,'temp')});
-  const result=spawnSync('powershell.exe',['-NoProfile','-File',la.lp],{windowsHide:true,encoding:'utf8',timeout:20000});
+  const result=spawnSync(powershellExe(),['-NoProfile','-File',la.lp],{windowsHide:true,encoding:'utf8',timeout:20000});
   assert.equal(result.status,0,result.stderr);
   assert.doesNotMatch(result.stderr,/NativeCommandError/,'native stderr must not surface as PowerShell error records');
   const buf=fs.readFileSync(la.log);

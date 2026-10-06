@@ -8,6 +8,7 @@ import {normalizeUnitCarrier, effectiveUnitCarrier, ptyAvailability} from '../sc
 import {spawnHeadlessWithRetry} from '../scripts/core/orchestrate-sdk.mjs';
 const root = fileURLToPath(new URL('..', import.meta.url));
 const family = path.join(root, 'temp');
+fs.mkdirSync(family, {recursive: true});
 
 test('carrier normalization: stdio default, registry pty, explicit env wins, unknown refused', () => {
   assert.equal(normalizeUnitCarrier(''), null);
@@ -26,6 +27,12 @@ test('pty engine resolves from the tool install (scripts/node_modules)', {skip: 
   assert.equal(availability.ok, true);
   assert.ok(fs.existsSync(availability.resolved), availability.resolved);
   assert.match(availability.resolved.replaceAll('\\', '/'), /scripts\/node_modules\/@lydell\/node-pty\//);
+});
+
+test('pty resolution refuses a copy outside the tool install (no silent borrowing)', () => {
+  const src = fs.readFileSync(path.join(root, 'scripts', 'core', 'unit-carrier.mjs'), 'utf8');
+  assert.match(src, /paths:\s*\[TOOL_NODE_MODULES\]/, 'bare specifier resolution must be rooted at the tool install');
+  assert.match(src, /containedBy\(/, 'resolution must assert the module lands inside the tool install');
 });
 
 test('pty carrier gives the unit a real console while keeping pidf/identity contract', {skip: !ptyAvailability().ok}, async () => {

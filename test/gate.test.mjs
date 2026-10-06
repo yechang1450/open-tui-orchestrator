@@ -91,3 +91,64 @@ test('gate: the L1 red list is named from the suite reporter output', async () =
   assert.deepEqual(suiteReds('✖ a.test.mjs (12ms)\n✖ b.test.mjs (7ms)\n').map((r) => r.name), ['a.test.mjs', 'b.test.mjs']);
   assert.deepEqual(suiteReds('ℹ tests 2\nℹ pass 2\nℹ fail 0\n'), []);
 });
+
+test('gate: an unknown flag cannot produce PASS with zero criteria', () => {
+  for (const args of [['--suites'], ['unexpected-positional-argument'], ['-x'], ['--consistency', 'unexpected-positional-argument']]) {
+    const r = spawnSync(process.execPath, [path.join(root, 'scripts', 'gate.mjs'), ...args], {cwd: root, encoding: 'utf8', windowsHide: true, timeout: 120000});
+    const out = scrub((r.stdout || '') + (r.stderr || ''));
+    assert.equal(r.status, 1, out);
+    assert.match(out, /unknown gate flag|unrecognized gate flag/i, out);
+    assert.doesNotMatch(out, /ORCH_GATE: PASS/, out);
+  }
+});
+
+test('gate: un-attributed red tests cannot be auto-passed as environment flakes', async () => {
+  const {canAutoPassEnvironmentFlake} = await import(pathToFileURL(path.join(root, 'scripts', 'gate.mjs')).href);
+  assert.equal(canAutoPassEnvironmentFlake([{name: 'dynamic red'}], new Set(), []), false);
+  assert.equal(canAutoPassEnvironmentFlake([{name: 'known red'}], new Set(['other red']), []), false);
+  assert.equal(canAutoPassEnvironmentFlake([{name: 'known red'}], new Set(['known red']), ['test/known.test.mjs']), false);
+  assert.equal(canAutoPassEnvironmentFlake([{name: 'known red'}], new Set(['known red']), []), true);
+});
+
+// L1 预算（2026-10-06）：本机满载时 91 个测试文件跑不完默认的 900s，被 spawnSync 砍断后没有
+// `ℹ tests` 汇总，于是 L4 报 `measured suite undefined`——派生红而非套件红。套件预算走 suite()
+// 的 ORCH_GATE_SUITE_TIMEOUT_MS（本就在），本用例钉住它别被退回硬编码。
+test('gate: the L1 suite budget stays tunable instead of hardcoded to 900s', async () => {
+  const source = fs.readFileSync(path.join(root, 'scripts', 'gate.mjs'), 'utf8');
+  assert.match(source, /ORCH_GATE_SUITE_TIMEOUT_MS/, 'gate must expose a tunable suite budget');
+  assert.match(source, /Math\.max\(60000,/, 'the suite budget keeps its 60s floor');
+});
+
+// 跳过项必须具名且正当（2026-10-06 用户拍板方案 A）：宿主 CLI 未安装的 skip 放行，
+// 其它任何理由的 skip 一律判红。红例：把理由放宽成「任何 skip 都行」时，本用例必红。
+test('gate: only named host-absence skips are accepted, every other skip fails L1', async () => {
+  const {suiteSkips, SKIP_REASON_ALLOWED} = await import(pathToFileURL(path.join(root, 'scripts', 'gate.mjs')).href);
+  const hostAbsent = '\uFE63 installed kimi resolves its own CLI (0.58ms) # kimi CLI is not installed';
+  const otherReason = '\uFE63 some flaky case (1.20ms) # waiting on an upstream fix';
+  const parsed = suiteSkips([hostAbsent, otherReason, '\u2714 a passing case (2.00ms)', '\u2139 skipped 2'].join('\n'));
+  assert.equal(parsed.length, 2, 'both skip lines must be parsed: ' + JSON.stringify(parsed));
+  assert.equal(parsed[0].name, 'installed kimi resolves its own CLI');
+  assert.equal(parsed[0].reason, 'kimi CLI is not installed');
+  assert.ok(SKIP_REASON_ALLOWED.test(parsed[0].reason), 'host-absence reason is allowed');
+  assert.ok(!SKIP_REASON_ALLOWED.test(parsed[1].reason), 'any other reason must be rejected');
+  // 解析数必须与 reporter 报的 skipped 一致，否则 L1 判红（漏解析不许蒙混）。
+  assert.equal(suiteSkips('\u2714 only a pass (1ms)').length, 0);
+});
+
+// 进程快照预算钉给 gate 子进程（2026-10-06）：L1 以 --test-concurrency=3 真起进程，满载机器上
+// PowerShell/WMI 枚举超过 15s，成片测试以 `did not return within 15000 ms` 收场——预算红而非判据红。
+// 生产默认值不动（snapshot-diagnostics.test.mjs 把 15s 钉成契约），只在 gate 子进程里钉大预算。
+test('gate: child processes get a realistic process-snapshot budget while the production default stays 15s', async () => {
+  const source = fs.readFileSync(path.join(root, 'scripts', 'gate.mjs'), 'utf8');
+  assert.match(source, /ORCH_PS_TIMEOUT_MS: process\.env\.ORCH_GATE_PS_TIMEOUT_MS \|\| '120000'/,
+    'gate must pin a snapshot budget for its children');
+  // 生产默认值不得被顺手改掉。
+  const {processSnapshotTimeoutMs} = await import(pathToFileURL(path.join(root, 'scripts', 'core', 'leases.mjs')).href);
+  const previous = process.env.ORCH_PS_TIMEOUT_MS;
+  try {
+    delete process.env.ORCH_PS_TIMEOUT_MS;
+    assert.equal(processSnapshotTimeoutMs(), 15000, 'production default stays 15 s');
+  } finally {
+    if (previous === undefined) delete process.env.ORCH_PS_TIMEOUT_MS; else process.env.ORCH_PS_TIMEOUT_MS = previous;
+  }
+});

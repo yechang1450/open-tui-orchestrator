@@ -26,7 +26,7 @@
 
 **结论（2026-09-14，core 1.14.4 / 0.9.4）：清单只剩两件事，且都不可逆、都必须用户亲手点——一、发 npm 包（需要 `npm login`/token）；二、仓转公开。其余全部就绪。**
 
-1. ~~公开前的个人路径清理~~ **完成 2026-09-14**：18 个 tracked 文件、77 处用户名归一化为 `<user>`；根因一并修掉（证据采集器、画像适配器、hermes 画像 provenance）。验证：`git grep -c <user>` 只剩公开的 GitHub 句柄 `yechang1450`。
+1. ~~公开前的个人路径清理~~ **完成 2026-09-14**：18 个 tracked 文件、77 处用户名归一化为 `<user>`；根因一并修掉（证据采集器、画像适配器、hermes 画像 provenance）。验证：身份扫描结果只剩公开的 GitHub 句柄 `yechang1450`。
 2. ~~**npm 发布**~~ **已发布（最新＝0.9.9 · `latest` · 2026-09-17 00:27 +08）**：`open-tui-orchestrator@0.9.9` 已在 registry 上（93 文件 / 315.8 kB、shasum `4dc01c89…`、integrity `sha512-ceuO3vJb…`）。发布前对当轮 HEAD `f1ce647` 复绿：`node scripts/gate.mjs --all` = `ORCH_GATE: PASS — 5 criteria`（295/295）＋ `npm publish --dry-run` 面检同值。账号＝个人账号 unscoped（`npm whoami` = `yechang1450`；正名未被占）。**端到端烟测（0.9.9 · 冷前缀 `D:/temp/orch-coldinstall-099`）**：① `npm install open-tui-orchestrator` → `--version` = `0.9.9 (core 1.14.9)` → `--install-deps` = `{"ok":true,"action":"installed"}`（幂等复跑 `already-present`）→ `--agent codex --doctor` = `hostError=null / carrierAvailable=true`；② `npx --yes open-tui-orchestrator@latest --version` = `0.9.9 (core 1.14.9)`（任何 agent 从 PATH 即装的路径成立）。**历史**：0.9.6 = 2026-09-15 首发（93 文件 / 310.5 kB、shasum `4b16de76…`）。
 3. ~~CI~~ **弃用（用户令 2026-09-15）**：GitHub Actions 一律不用——私有仓被账户计费拦死（2026-09-15 实测：作业零步骤、3 秒失败），转公开也不再启用。**判定全部走本机等价门禁**：`node scripts/gate.mjs --all`（一条命令五判据 + 反例能红）＋ 定时巡逻（83 的 schtasks 法，需要时并入）。`.github/workflows/ci.yml` 仅作历史记录保留、不带任何触发。
 4. ~~公开文档面~~ **完成 2026-09-14**：`CHANGELOG.md`、`.github/ISSUE_TEMPLATE/bug_report.yml`、`SECURITY.md`（私密漏洞报告渠道 + 披露政策）、`CONTRIBUTING.md`（屋规：判据必须能红、封印纪律、数字对账）。

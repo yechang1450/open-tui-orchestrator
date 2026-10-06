@@ -20,7 +20,7 @@
  * This only makes a before-you-run decision; it does NOT touch the orchestrator's
  * block/dependency/result-recycling logic.
  */
-import { armed, liveWindows } from "./open-tui-orchestrator-force.mjs";
+import { armed, liveWindows, sanctionedWindow } from "./open-tui-orchestrator-force.mjs";
 import { lockedForMaintenance, MAINTENANCE_MESSAGE } from "./core/maintenance-lock.mjs";
 
 const kind = String(process.argv[2] || "").toLowerCase();
@@ -57,7 +57,8 @@ if (!armed()) {
 
 // liveWindows() 为跨进程快照（存在竞态），此处是 before-you-run 的近似判定；如需严格应在执行前紧邻复验。
 const envWindow = process.env.ORCH_WINDOW === "1";
-const alive = liveWindows().length;
+const windows = liveWindows();
+const alive = windows.length;
 // 与 force --assert 保持一致：ORCH_WINDOW=1 但无活窗 → env 单独不可采信，一律 REFUSED（含只读 kind）。
 if (envWindow && alive === 0) {
   console.log(
@@ -68,7 +69,7 @@ if (envWindow && alive === 0) {
 }
 // Only a process that (a) sets ORCH_WINDOW=1 AND (b) has a live registered window is sanctioned.
 // A headless/script context running while a legitimate window happens to be open must NOT pass.
-if (envWindow && alive > 0) {
+if (envWindow && sanctionedWindow(windows)) {
   console.log("ok: sanctioned orchestration window; '" + kind + "' may proceed.");
   process.exit(0);
 }

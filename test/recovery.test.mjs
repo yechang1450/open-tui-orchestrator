@@ -4,16 +4,18 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {spawnSync} from 'node:child_process';
+import {powershellExe} from '../scripts/core/contracts.mjs';
 import {CODEX_CLI_SKIP} from './helpers/external.mjs';
 const runner=await import('../scripts/core/runner.mjs');
 const family=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../temp');
+fs.mkdirSync(family,{recursive:true});
 const pause=ms=>new Promise(r=>setTimeout(r,ms));
 test('a dependent starts after its own prerequisite, while unrelated work remains running',async()=>{
  assert.equal(typeof runner.scheduleReady,'function');
  const events=[],recs=[{key:'A',dependsOn:[]},{key:'B',dependsOn:[]},{key:'C',dependsOn:['A']}];
  const statuses={};let finishB;const bDone=new Promise(r=>finishB=r);
  const work=runner.scheduleReady(recs,async r=>{events.push('start-'+r.key);if(r.key==='B')await bDone;if(r.key==='A')await pause(10);statuses[r.key]='verified';events.push('end-'+r.key);},key=>statuses[key]);
- try{await pause(60);assert.ok(events.includes('end-C'));assert.ok(!events.includes('end-B'));}finally{finishB();await work;}
+ try{await pause(60);const endA=events.indexOf('end-A'),startC=events.indexOf('start-C');assert.ok(endA>=0,'A must finish before its dependent can start: '+events.join(','));assert.ok(startC>endA,'C must start after A finishes: '+events.join(','));assert.ok(!events.includes('end-B'));}finally{finishB();await work;}
 });
 test('recovery rechecks partial work and never repeats verified or uncertain side effects',()=>{
  assert.equal(typeof runner.recoveryTasks,'function');
@@ -34,9 +36,10 @@ test('new launcher preserves a failed CLI exit and never blindly repeats the pro
  const lit=s=>"'"+s.replaceAll("'","''")+"'";
  try{
   fs.writeFileSync(fake,`Add-Content -LiteralPath ${lit(counter)} -Value called\nexit 23`);
-  const text=fs.readFileSync(la.lp,'utf8').replace(/^    & '[^\r\n]+' @agentArgs$/m,`    & powershell.exe -NoProfile -File ${lit(fake)}`);
+  const psExe=powershellExe().replaceAll('\\','/');
+  const text=fs.readFileSync(la.lp,'utf8').replace(/^    & '[^\r\n]+' @agentArgs$/m,`    & '${psExe}' -NoProfile -File ${lit(fake)}`);
   fs.writeFileSync(la.lp,text);
-  const result=spawnSync('powershell.exe',['-NoProfile','-File',la.lp],{windowsHide:true,encoding:'utf8',timeout:30000,env:{...process.env,ORCH_SESSION_DIR:dir,ORCH_SDIR:dir}});
+  const result=spawnSync(powershellExe(),['-NoProfile','-File',la.lp],{windowsHide:true,encoding:'utf8',timeout:30000,env:{...process.env,ORCH_SESSION_DIR:dir,ORCH_SDIR:dir}});
   assert.equal(result.status,0,result.stderr);assert.equal(fs.readFileSync(counter,'utf8').trim(),'called');
   assert.equal(JSON.parse(fs.readFileSync(la.rf,'utf8').replace(/^\uFEFF/,'').split(/\r?\n/)[0]).__EXIT__,23);
  }finally{for(const p of [...Object.values(la),la.rf+'.self-closed',la.pidf+'.self-closed'])if(typeof p==='string'&&fs.existsSync(p))fs.rmSync(p,{force:true});fs.rmSync(dir,{recursive:true,force:true});}

@@ -9,7 +9,7 @@ test('task dependencies cannot disappear when tasks share the same project block
  assert.throws(()=>buildBlocksFromTasks([task('A',['missing'])]),/Unknown dependency/);
  const plan=buildBlocksFromTasks([task('B',['A']),task('A')]);
  const text=plan.flatMap(b=>b.tasks.map(t=>t.prompt)).join('\n');
- assert.ok(text.indexOf('执行A')<text.indexOf('执行B'));
+ const a=text.indexOf('执行A'),b=text.indexOf('执行B');assert.ok(a>=0&&b>=0,'both dependency tasks must remain in the plan: '+text);assert.ok(a<b,'prerequisite A must precede dependent B: '+text);
 });
 test('project grouping retains declared resource conflicts',()=>{
  const plan=buildBlocksFromTasks([{id:'A',summary:'执行A',project:'81',conflict_hints:['file:D:/shared/config.json']}]);

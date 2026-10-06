@@ -6,6 +6,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { powershellExe } from '../scripts/core/contracts.mjs';
+
+const PS7_EXE = powershellExe().replaceAll('\\', '/').replaceAll("'", "''");
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const scripts = path.resolve(__dirname, '..', 'scripts');
@@ -45,7 +48,7 @@ process.env.WORKSPACE_DIR = wsDir;
 fs.mkdirSync(path.join(wsDir, 'temp'), { recursive: true });
 const stDir = fs.mkdtempSync(path.join(wsDir, 'temp', "orch-force-state-"));
 process.env.ORCH_STATE_DIR = stDir;
-const { armed, liveWindows, pidOf, pidAlive, WINDOWS_REG, TMP, FLAG, STATE_DIR } = await import(importUrl(path.join(scripts, 'open-tui-orchestrator-force.mjs')));
+const { armed, liveWindows, pidOf, pidAlive, sanctionedWindow, WINDOWS_REG, TMP, FLAG, STATE_DIR } = await import(importUrl(path.join(scripts, 'open-tui-orchestrator-force.mjs')));
 test('force.mjs armed/liveWindows/pidOf/pidAlive', () => {
   // fresh workspace -> not armed, no windows
   assert.equal(armed(), false);
@@ -69,6 +72,17 @@ test('force.mjs armed/liveWindows/pidOf/pidAlive', () => {
   assert.equal(TMP, path.join(wsDir, 'temp'));
   assert.ok(WINDOWS_REG.startsWith(STATE_DIR));
   assert.equal(FLAG, path.join(STATE_DIR, '.orchestrator-enabled'));
+});
+
+test('force.mjs does not accept a copied token without verified launcher identity', () => {
+  const windows = [
+    {title: 'unrelated', sanctionToken: 'other'},
+    {title: 'current', sanctionToken: 'expected'},
+  ];
+  const deps = {snapshot: () => new Map(), parentMap: new Map()};
+  assert.equal(sanctionedWindow(windows, {ORCH_WINDOW: '1', ORCH_WINDOW_TOKEN: 'expected'}, deps), null);
+  assert.equal(sanctionedWindow(windows, {ORCH_WINDOW: '1', ORCH_WINDOW_TOKEN: 'forged'}, deps), null);
+  assert.equal(sanctionedWindow(windows, {ORCH_WINDOW: '1'}, deps), null);
 });
 
 test('force.mjs CLI --status/--assert read/--assert write', () => {
@@ -134,6 +148,45 @@ test('force.mjs CLI --enable arms enforcement', () => {
     const flag = path.join(cliDir, 'temp', 'state', '.orchestrator-enabled');
     assert.equal(fs.existsSync(flag), true);
   } finally {
+    fs.rmSync(cliDir, { recursive: true, force: true });
+  }
+});
+
+test('force.mjs --verify: bare conflictKeys cannot produce a PASS (weak attribution is INDETERMINATE)', async () => {
+  const cliDir = fs.mkdtempSync(path.join(fixtureFamily, 'orch-force-attr-'));
+  let win = null;
+  try {
+    const env = { ...process.env, WORKSPACE_DIR: cliDir, ORCH_STATE_DIR: path.join(cliDir, 'temp', 'state') };
+    delete env.ORCH_WINDOW;
+    const stDir2 = path.join(cliDir, 'temp', 'state');
+    fs.mkdirSync(stDir2, { recursive: true });
+    fs.writeFileSync(path.join(stDir2, '.orchestrator-enabled'), String(Date.now()), 'utf8');
+    // 伪造一个“活窗”：powershell 进程 + 命令行含 --run-windows（pidAlive 的既有判据）。
+    win = spawn(powershellExe(), ['-NoProfile', '-Command', 'Start-Sleep 60 # --run-windows'], { windowsHide: true });
+    const pidFile = path.join(stDir2, 'fake-window.pid');
+    fs.writeFileSync(pidFile, String(win.pid), 'utf8');
+    const target = path.join(cliDir, 'other', 'vendor', 'index.ts');
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.writeFileSync(target, 'x', 'utf8');
+    const writeReg = (keys) => fs.writeFileSync(path.join(stDir2, 'orchestrator-windows.json'), JSON.stringify([{ title: 'fakewin', pidFile, keys }]), 'utf8');
+    await new Promise((r) => setTimeout(r, 1200)); // 让 powershell 进程进入可被 tasklist/CIM 观察的状态
+    // 未发布真实 launcher identity 的伪造 PowerShell 进程，不得被当作活窗。
+    writeReg(['file:index.ts']);
+    const bare = runNode(path.join(scripts, 'open-tui-orchestrator-force.mjs'), ['--verify', target], { env });
+    assert.equal(bare.code, 1, 'unverified fake window must be rejected: ' + bare.out);
+    assert.match(bare.out, /VIOLATION/);
+    // 即使键是绝对路径，伪造窗口也不能越过 launcher identity gate。
+    writeReg(['dir:' + path.join(cliDir, 'other', 'vendor')]);
+    const pathKey = runNode(path.join(scripts, 'open-tui-orchestrator-force.mjs'), ['--verify', target], { env });
+    assert.equal(pathKey.code, 1, 'unverified fake window must stay rejected: ' + pathKey.out);
+    assert.match(pathKey.out, /VIOLATION/);
+    // 无命中 —— VIOLATION
+    writeReg(['dir:somewhere-else']);
+    const miss = runNode(path.join(scripts, 'open-tui-orchestrator-force.mjs'), ['--verify', target], { env });
+    assert.equal(miss.code, 1, miss.out);
+    assert.match(miss.out, /VIOLATION/);
+  } finally {
+    if (win) { try { win.kill(); } catch { /* already gone */ } }
     fs.rmSync(cliDir, { recursive: true, force: true });
   }
 });
@@ -456,7 +509,7 @@ test('runtime: interactive launcher template ships Get-LastReport + tolerant ext
     assert.match(body, /__ORCH_DONE__/);
     assert.match(body, /\$_\.content/);
     assert.match(body, /\$_\.value/);
-    const parse = spawnSync('powershell.exe', ['-NoProfile', '-Command', '$t=$null;$e=$null;[System.Management.Automation.Language.Parser]::ParseFile($env:ORCH_PARSE_FILE,[ref]$t,[ref]$e)|Out-Null;if($e.Count){$e|ForEach-Object{$_.Message};exit 1}else{Write-Output PARSE_OK}'], { env: { ...process.env, ORCH_PARSE_FILE: lp }, encoding: 'utf8' });
+    const parse = spawnSync(powershellExe(), ['-NoProfile', '-Command', '$t=$null;$e=$null;[System.Management.Automation.Language.Parser]::ParseFile($env:ORCH_PARSE_FILE,[ref]$t,[ref]$e)|Out-Null;if($e.Count){$e|ForEach-Object{$_.Message};exit 1}else{Write-Output PARSE_OK}'], { env: { ...process.env, ORCH_PARSE_FILE: lp }, encoding: 'utf8' });
     assert.equal(parse.status, 0, 'generated launcher ps1 must be parseable by PowerShell: ' + String(parse.stdout || parse.stderr || ''));
   } finally { for (const f of [lp, pidf, pf]) { try { if (fs.existsSync(f)) fs.rmSync(f, { force: true }); } catch {} } }
 });
@@ -624,7 +677,7 @@ $report='{"t":"event_msg","payload":{"type":"agent_message","message":"done __OR
 Set-Content -LiteralPath (Join-Path $dir ('rollout-'+[guid]::NewGuid().ToString('N').Substring(0,8)+'.jsonl')) -Value $report -Encoding UTF8
 $PID | Set-Content -LiteralPath '${agentPidFile}' -Encoding UTF8
 $psi=New-Object System.Diagnostics.ProcessStartInfo
-$psi.FileName='powershell.exe'; $psi.Arguments='-NoProfile -Command "Start-Sleep -Seconds 600"'; $psi.UseShellExecute=$false
+$psi.FileName='${PS7_EXE}'; $psi.Arguments='-NoProfile -Command "Start-Sleep -Seconds 600"'; $psi.UseShellExecute=$false
 $grand=[System.Diagnostics.Process]::Start($psi)
 $grand.Id | Set-Content -LiteralPath '${grandPidFile}' -Encoding UTF8
 $grand.WaitForExit()
@@ -632,14 +685,20 @@ while($true){Start-Sleep -Seconds 600}`);
   // Patch the generated launcher so "codex" is our fake process (never self-exits), and inject a pre-codex
   // step that DELETES the result-file parent dir to simulate the plugin-upgrade wipe of the temp folder.
   let ps = fs.readFileSync(lp, 'utf8');
-  const psExe = 'C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe';
+  const psExe = powershellExe().replaceAll('\\', '/');
+  const beforeAgentPatch = ps;
   ps = ps.replace(/&\s*'[^']+'\s*@agentArgs/g, "& '" + psExe + "' -NoProfile -ExecutionPolicy Bypass -File '" + fakeAgent.replace(/\\/g, '/') + "' @agentArgs");
+  assert.notEqual(ps, beforeAgentPatch, 'launcher fake-agent replacement did not match the generated template');
+  assert.ok(ps.includes(fakeAgent.replace(/\\/g, '/')), 'launcher must invoke the fake agent after patching');
   // Inject before the `& codex` invocation: remove the dir that holds $resultFile (the vanished temp dir).
-  ps = ps.replace(/& 'C:\/Windows\/System32\/WindowsPowerShell\/v1\.0\/powershell\.exe'/g, "Remove-Item -LiteralPath (Split-Path -Parent $resultFile) -Recurse -Force -ErrorAction SilentlyContinue; & 'C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe'");
+  const beforeResultDirPatch = ps;
+  ps = ps.replace(/&\s*'[^']*pwsh\.exe'/gi, "Remove-Item -LiteralPath (Split-Path -Parent $resultFile) -Recurse -Force -ErrorAction SilentlyContinue; & '" + psExe + "'");
+  assert.notEqual(ps, beforeResultDirPatch, 'launcher result-dir deletion injection did not match the generated template');
+  assert.match(ps, /Remove-Item -LiteralPath \(Split-Path -Parent \$resultFile\)/, 'launcher must delete the result dir before the fake agent starts');
   fs.writeFileSync(lp, ps, 'utf8');
   const sdir = path.join(ws, 'sdir'); fs.mkdirSync(sdir, { recursive: true });
   const env = { ...process.env, ORCH_SESSION_DIR: sdir, ORCH_WATCHDOG_MAX_MIN: '5' };
-  const child = spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', lp], { env, windowsHide: true, stdio: 'ignore' });
+  const child = spawn(powershellExe(), ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', lp], { env, windowsHide: true, stdio: 'ignore' });
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const launcherExit = new Promise((resolve) => { child.once('exit', (code) => resolve(code)); child.once('error', () => resolve(null)); });
   let agentPid = 0, grandPid = 0;
@@ -685,12 +744,15 @@ Set-Content -LiteralPath (Join-Path $dir ('rollout-'+[guid]::NewGuid().ToString(
 $PID | Set-Content -LiteralPath '${agentPidFile}' -Encoding UTF8
 while($true){Start-Sleep -Seconds 600}`);
   let ps = fs.readFileSync(lp, 'utf8');
-  const psExe = 'C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe';
+  const psExe = powershellExe().replaceAll('\\', '/');
+  const beforeAgentPatch = ps;
   ps = ps.replace(/&\s*'[^']+'\s*@agentArgs/g, "& '" + psExe + "' -NoProfile -ExecutionPolicy Bypass -File '" + fakeAgent.replace(/\\/g, '/') + "' @agentArgs");
+  assert.notEqual(ps, beforeAgentPatch, 'launcher fake-agent replacement did not match the generated template');
+  assert.ok(ps.includes(fakeAgent.replace(/\\/g, '/')), 'launcher must invoke the fake agent after patching');
   fs.writeFileSync(lp, ps, 'utf8');
   const sdir = path.join(ws, 'sdir'); fs.mkdirSync(sdir, { recursive: true });
   const env = { ...process.env, ORCH_SESSION_DIR: sdir, ORCH_WATCHDOG_MAX_MIN: '5' };
-  const child = spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', lp], { env, windowsHide: true, stdio: 'ignore' });
+  const child = spawn(powershellExe(), ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', lp], { env, windowsHide: true, stdio: 'ignore' });
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const launcherExit = new Promise((resolve) => { child.once('exit', (code) => resolve(code)); child.once('error', () => resolve(null)); });
   let agentPid = 0;
@@ -731,12 +793,15 @@ Set-Content -LiteralPath (Join-Path $dir 'rollout-task-complete.jsonl') -Value @
 $PID | Set-Content -LiteralPath '${agentPidFile}' -Encoding UTF8
 while($true){Start-Sleep -Seconds 600}`);
   let ps = fs.readFileSync(lp, 'utf8');
-  const psExe = 'C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe';
+  const psExe = powershellExe().replaceAll('\\', '/');
+  const beforeAgentPatch = ps;
   ps = ps.replace(/&\s*'[^']+'\s*@agentArgs/g, "& '" + psExe + "' -NoProfile -ExecutionPolicy Bypass -File '" + fakeAgent.replace(/\\/g, '/') + "' @agentArgs");
+  assert.notEqual(ps, beforeAgentPatch, 'launcher fake-agent replacement did not match the generated template');
+  assert.ok(ps.includes(fakeAgent.replace(/\\/g, '/')), 'launcher must invoke the fake agent after patching');
   fs.writeFileSync(lp, ps, 'utf8');
   const sdir = path.join(ws, 'sdir'); fs.mkdirSync(sdir, { recursive: true });
   const env = { ...process.env, ORCH_SESSION_DIR: sdir, ORCH_WATCHDOG_MAX_MIN: '5' };
-  const child = spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', lp], { env, windowsHide: true, stdio: 'ignore' });
+  const child = spawn(powershellExe(), ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', lp], { env, windowsHide: true, stdio: 'ignore' });
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const launcherExit = new Promise((resolve) => { child.once('exit', (code) => resolve(code)); child.once('error', () => resolve(null)); });
   let agentPid = 0;
@@ -774,7 +839,7 @@ test('runtime: minimal launcher smoke -> recursive kill frees & codex; result fi
   const writePs = (f, body) => fs.writeFileSync(f, '\uFEFF' + body.trimStart() + '\r\n', 'utf8');
   writePs(agentPs, `param([string]$grandPidFile)
 $psi = New-Object System.Diagnostics.ProcessStartInfo
-$psi.FileName = 'powershell.exe'
+$psi.FileName = '${PS7_EXE}'
 $psi.Arguments = '-NoProfile -Command "Start-Sleep -Seconds 300"'
 $psi.UseShellExecute = $false
 $grand = [System.Diagnostics.Process]::Start($psi)
@@ -784,7 +849,7 @@ exit 1`);
   writePs(launcherPs, `param([string]$pidFile,[string]$agentPidFile,[string]$grandPidFile,[string]$agentPs1,[string]$resultFile,[string]$normalFile,[string]$report)
 $PID | Set-Content -LiteralPath $pidFile -Encoding UTF8
 $psi = New-Object System.Diagnostics.ProcessStartInfo
-$psi.FileName = 'powershell.exe'
+$psi.FileName = '${PS7_EXE}'
 $psi.Arguments = '-NoProfile -ExecutionPolicy Bypass -File "' + $agentPs1 + '" "' + $grandPidFile + '"'
 $psi.UseShellExecute = $false
 $codex = [System.Diagnostics.Process]::Start($psi)
@@ -796,7 +861,7 @@ $json = '{"__EXIT__":' + $code + ',"__DONE__":true,"__REPORT__":' + (ConvertTo-J
 Set-Content -LiteralPath $resultFile -Value ($json + "\`r\`n__EXIT__=" + $code) -Encoding UTF8
 Set-Content -LiteralPath $normalFile -Value 'NORMAL_EXIT' -Encoding UTF8
 exit 0`);
-  const child = spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', launcherPs, pidFile, agentPidFile, grandPidFile, agentPs, resultFile, normalFile, report], { windowsHide: true, stdio: 'ignore' });
+  const child = spawn(powershellExe(), ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', launcherPs, pidFile, agentPidFile, grandPidFile, agentPs, resultFile, normalFile, report], { windowsHide: true, stdio: 'ignore' });
   const launcherExit = new Promise((resolve, reject) => {
     child.once('error', reject);
     child.once('exit', (code, signal) => resolve({ code, signal }));
@@ -811,7 +876,9 @@ exit 0`);
     throw new Error('timed out waiting for runtime launcher smoke: ' + String(what));
   };
   try {
-    await waitFor(() => fs.existsSync(pidFile) && fs.existsSync(agentPidFile) && fs.existsSync(grandPidFile), 15000);
+    // Set-Content opens the file before its PID is visible to a concurrent reader.
+    // Existence alone can observe an empty file and falsely advance the smoke test.
+    await waitFor(() => [pidFile, agentPidFile, grandPidFile].every(file => readPidFile(file) > 0), 15000);
     const launcherPid = readPidFile(pidFile);
     const agentPid = readPidFile(agentPidFile);
     const grandPid = readPidFile(grandPidFile);
@@ -866,21 +933,24 @@ $report='{"t":"event_msg","payload":{"type":"agent_message","message":"done __OR
 Set-Content -LiteralPath (Join-Path $dir ('rollout-'+[guid]::NewGuid().ToString('N').Substring(0,8)+'.jsonl')) -Value $report -Encoding UTF8
 $PID | Set-Content -LiteralPath '${agentPidFile}' -Encoding UTF8
 $psi=New-Object System.Diagnostics.ProcessStartInfo
-$psi.FileName='powershell.exe'; $psi.Arguments='-NoProfile -Command "Start-Sleep -Seconds 600"'; $psi.UseShellExecute=$false
+$psi.FileName='${PS7_EXE}'; $psi.Arguments='-NoProfile -Command "Start-Sleep -Seconds 600"'; $psi.UseShellExecute=$false
 $grand=[System.Diagnostics.Process]::Start($psi)
 $grand.Id | Set-Content -LiteralPath '${grandPidFile}' -Encoding UTF8
 $grand.WaitForExit()
 while($true){Start-Sleep -Seconds 600}`);
   // Patch the generated launcher so the "codex" is our fake interactive process (never self-exits).
   let ps = fs.readFileSync(lp, 'utf8');
-  const psExe = 'C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe';
+  const psExe = powershellExe().replaceAll('\\', '/');
+  const beforeAgentPatch = ps;
   ps = ps.replace(/&\s*'[^']+'\s*@agentArgs/g, "& '" + psExe + "' -NoProfile -ExecutionPolicy Bypass -File '" + fakeAgent.replace(/\\/g, '/') + "' @agentArgs");
+  assert.notEqual(ps, beforeAgentPatch, 'launcher fake-agent replacement did not match the generated template');
+  assert.ok(ps.includes(fakeAgent.replace(/\\/g, '/')), 'launcher must invoke the fake agent after patching');
   fs.writeFileSync(lp, ps, 'utf8');
   // Simulate a STALE result from a prior window sharing this block path BEFORE the launcher runs.
   fs.writeFileSync(rf, '{"__EXIT__":0,"__DONE__":true,"__REPORT__":"STALE prior run"}', 'utf8');
   const sdir = path.join(ws, 'sdir'); fs.mkdirSync(sdir, { recursive: true });
   const env = { ...process.env, ORCH_SESSION_DIR: sdir, ORCH_WATCHDOG_MAX_MIN: '5' };
-  const child = spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', lp], { env, windowsHide: true, stdio: 'ignore' });
+  const child = spawn(powershellExe(), ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', lp], { env, windowsHide: true, stdio: 'ignore' });
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const launcherExit = new Promise((resolve) => { child.once('exit', (code) => resolve(code)); child.once('error', () => resolve(null)); });
   let agentPid = 0, grandPid = 0;
@@ -1305,7 +1375,7 @@ test('isOrchestratorSelfMod: 通用化识别自引用(编排/调度/TUI窗/源�
 
 // ---------- 安全加固回归：注册表锁老化回收 + 系统工具锚定 ----------
 const { withRegistryLock, REGISTRY_LOCK_FILE } = await import(importUrl(path.join(scripts, 'orchestrate-sdk.mjs')));
-const { systemToolExe, powershellExe } = await import(importUrl(path.join(scripts, 'core', 'contracts.mjs')));
+const { systemToolExe } = await import(importUrl(path.join(scripts, 'core', 'contracts.mjs')));
 
 test('registry lock: stale lock left by a killed controller is reclaimed and released', () => {
   fs.mkdirSync(path.dirname(REGISTRY_LOCK_FILE), { recursive: true });
@@ -1324,7 +1394,7 @@ test('registry lock: stale lock left by a killed controller is reclaimed and rel
 test('system tools resolve to SystemRoot-anchored paths (binary-planting guard)', () => {
   const ps = powershellExe();
   assert.equal(path.isAbsolute(ps), true);
-  assert.match(ps, /System32[/\\]WindowsPowerShell[/\\]v1\.0[/\\]powershell\.exe$/i);
+  assert.match(ps, /(?:^|[/\\])pwsh(?:\.exe)?$/i);
   const where = systemToolExe('where.exe');
   assert.equal(path.isAbsolute(where), true);
   assert.match(where, /System32[/\\]where\.exe$/i);

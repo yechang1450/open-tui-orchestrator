@@ -19,10 +19,10 @@ const pf = i >= 0 ? args[i + 1] : args[args.length - 1];
 const prompt = fs.readFileSync(pf, 'utf8');
 const token = /【本块唯一标识】\\s*([A-Za-z0-9][A-Za-z0-9_-]*)/.exec(prompt)?.[1] || 'tok';
 const ids = [...new Set([...prompt.matchAll(/任务 (T\\d+)/g)].map((m) => m[1]))];
-const cp = (helper, file, id, state) => spawnSync(process.execPath, [helper, file, id, state], { windowsHide: true });
-for (const m of prompt.matchAll(/开始前：node "([^"]+)" "([^"]+)" (\\S+) started/g)) cp(m[1], m[2], m[3], 'started');
+const cp = (carrier, id, state) => spawnSync(carrier, [id, state], { windowsHide: true, shell: true });
+for (const m of prompt.matchAll(/开始前："([^" ]+checkpoint[.]cmd)" ([^ ]+) started/g)) cp(m[1], m[2], 'started');
 for (const id of ids) fs.writeFileSync('receipt-' + id + '.json', JSON.stringify({ ok: true, token, id }));
-for (const m of prompt.matchAll(/完成自验后：node "([^"]+)" "([^"]+)" (\\S+) completed/g)) cp(m[1], m[2], m[3], 'completed');
+for (const m of prompt.matchAll(/完成自验后："([^" ]+checkpoint[.]cmd)" ([^ ]+) completed/g)) cp(m[1], m[2], 'completed');
 console.log('done __ORCH_DONE__ ' + token);
 `;
 

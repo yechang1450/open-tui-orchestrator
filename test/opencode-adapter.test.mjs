@@ -2,7 +2,16 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {resolveHost,launchArgs} from '../scripts/core/host-cli.mjs';
 import {opencodePlannerArgs} from '../scripts/core/opencode-host.mjs';
-test('installed opencode resolves its own CLI and never receives Codex flags',()=>{
+// 与 pi-adapter.test.mjs 同款：宿主 CLI 没装时这条用例前提不成立，按仓库既有惯例 skip；
+// CLI 在装时照旧跑全部断言。
+let opencodeAvailable = false;
+try {
+  opencodeAvailable = Boolean(resolveHost({env:{...process.env, ORCH_AGENT:'opencode'}}));
+} catch (error) {
+  if (!(error?.code === 'CLI_MISSING' || /CLI_MISSING/.test(String(error?.message)))) throw error;
+}
+const opencodeOnly = {skip: opencodeAvailable ? false : 'opencode CLI is not installed'};
+test('installed opencode resolves its own CLI and never receives Codex flags',opencodeOnly,()=>{
  const host=resolveHost({env:{...process.env,ORCH_AGENT:'opencode'}});
  assert.equal(host.agent,'opencode');
  assert.match(host.config.version,/^\d+\.\d+\.\d+$/);

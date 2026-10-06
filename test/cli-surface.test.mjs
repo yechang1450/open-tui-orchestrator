@@ -237,6 +237,9 @@ test('--help and --install-deps stay reachable when the runtime context is broke
     const help = run(ws, ['--help'], {ORCH_STATE_DIR: outside}, 60000);
     assert.equal(help.status, 0, help.all);
     assert.ok(help.stdout.includes('--doctor') && help.stdout.includes('--install-deps'), help.stdout.slice(0, 200));
+    const shortHelp = run(ws, ['-h'], {ORCH_STATE_DIR: outside}, 60000);
+    assert.equal(shortHelp.status, 0, shortHelp.all);
+    assert.ok(shortHelp.stdout.includes('--doctor') && shortHelp.stdout.includes('--install-deps'), shortHelp.stdout.slice(0, 200));
     const deps = run(ws, ['--install-deps'], {ORCH_STATE_DIR: outside}, 300000);
     assert.equal(deps.frames.length, 0, deps.all);
     assert.doesNotMatch(deps.all, /FATAL/, 'the bootstrap entry must not be gated by the runtime context: ' + deps.all);

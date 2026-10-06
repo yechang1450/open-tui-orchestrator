@@ -9,7 +9,7 @@
     "trackedFilesTouched": 18,
     "occurrencesNormalized": 77,
     "rule": "user name -> <user>; machine name -> <machine>; GitHub handle left public",
-    "verification": "git grep -c <user>  => only yechang1450 remains",
+    "verification": "identity scan => only public handle yechang1450 remains",
     "rootCausesFixed": [
       "test/collect-recovery-evidence.mjs scrubs the user-name segment on write (scrubDeep)",
       "scripts/core/adapt-lib.mjs records path.basename(cli) instead of the absolute path",

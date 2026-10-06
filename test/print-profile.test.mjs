@@ -3,8 +3,9 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
+import {powershellExe} from '../scripts/core/contracts.mjs';
 import {fileURLToPath} from 'node:url';
-import {resolveProfileHost,profileArgs} from '../scripts/core/print-profile.mjs';
+import {resolveProfileHost,profileArgs,loadProfile} from '../scripts/core/print-profile.mjs';
 import {writeProfileLauncher,waitProfileResult} from '../scripts/core/print-runtime.mjs';
 import {adaptAgent} from '../scripts/core/adapt-lib.mjs';
 import {discoverModelDetection} from '../scripts/core/adapt-lib.mjs';
@@ -23,10 +24,10 @@ const prompt = args[args.length - 1] || '';
 const adapt = /reply with exactly (ADAPTOK-\\S+) and nothing else/.exec(prompt);
 if (adapt) { console.log(adapt[1]); process.exit(0); }
 const token = /【本块唯一标识】\\s*([A-Za-z0-9][A-Za-z0-9_-]*)/.exec(prompt)?.[1] || 'tok';
-const cp = (helper, file, id, state) => spawnSync(process.execPath, [helper, file, id, state], { windowsHide: true });
-for (const m of prompt.matchAll(/开始前：node "([^"]+)" "([^"]+)" (\\S+) started/g)) cp(m[1], m[2], m[3], 'started');
+const cp = (carrier, id, state) => spawnSync(carrier, [id, state], { windowsHide: true, shell: true });
+for (const m of prompt.matchAll(/开始前："([^" ]+checkpoint[.]cmd)" ([^ ]+) started/g)) cp(m[1], m[2], 'started');
 fs.writeFileSync('receipt.json', JSON.stringify({ok: true, token}));
-for (const m of prompt.matchAll(/完成自验后：node "([^"]+)" "([^"]+)" (\\S+) completed/g)) cp(m[1], m[2], m[3], 'completed');
+for (const m of prompt.matchAll(/完成自验后："([^" ]+checkpoint[.]cmd)" ([^ ]+) completed/g)) cp(m[1], m[2], 'completed');
 console.log('done __ORCH_DONE__ ' + token);
 `;
 
@@ -81,7 +82,7 @@ test('the profile launcher round-trips prompt argv, checkpoints, receipt and res
     const host = resolveProfileHost({...process.env, ORCH_AGENT_PROFILES_DIR: s.profiles, ORCH_CLI: s.fake}, 'fakeprint');
     const prompt = '执行窗口任务 "带引号" 与中文\n【本块唯一标识】pptest1';
     const la = writeProfileLauncher(host.config, {key: 'B1', suffix: 'test', prompt, workspace: s.dir, temp: path.join(s.dir, 'temp')});
-    const result = spawnSync('powershell.exe', ['-NoProfile', '-File', la.lp], { windowsHide: true, encoding: 'utf8', timeout: 30000 });
+    const result = spawnSync(powershellExe(), ['-NoProfile', '-File', la.lp], { windowsHide: true, encoding: 'utf8', timeout: 30000 });
     assert.equal(result.status, 0, result.stderr);
     const r = JSON.parse(fs.readFileSync(la.rf, 'utf8').replace(/^\uFEFF/, '').split(/\r?\n/)[0]);
     assert.equal(r.__EXIT__, 0);
@@ -180,4 +181,15 @@ test('built-in agents are reported as already adapted and nothing is written', a
   const report = await adaptAgent({id: 'kimi', live: false, commit: false});
   assert.equal(report.passed, true);
   assert.equal(report.skipped, 'builtin');
+});
+
+test('profile ids cannot traverse outside the configured profile directory',()=>{
+ const dir=fs.mkdtempSync(path.join(family,'print-profile-path-'));
+ const profiles=path.join(dir,'profiles');
+ try{
+  fs.mkdirSync(profiles,{recursive:true});
+  fs.writeFileSync(path.join(dir,'evil.json'),JSON.stringify({schema:1,id:'evil',bin:['evil.exe'],helpFlags:[]}));
+  const env={...process.env,ORCH_AGENT_PROFILES_DIR:profiles};
+  assert.equal(loadProfile('../evil',env),null);
+ }finally{fs.rmSync(dir,{recursive:true,force:true});}
 });

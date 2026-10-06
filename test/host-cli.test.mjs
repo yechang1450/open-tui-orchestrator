@@ -36,9 +36,12 @@ test('host identity and resolved executable are preserved', () => {
   assert.equal(detectHostAgent({ CODEX_THREAD_ID:'x' }), 'codex');
   const host = resolveHost({env:{ORCH_AGENT:'codex'}, candidates:()=>['missing','native cli'], probe:p=>p==='native cli'});
   assert.equal(host.config.bin,'native cli');
-  assert.deepEqual(launchArgs(host.config,{cwd:'a b',sandbox:'read-only',approval:'never'}), ['--cd','a b','-a','never','--sandbox','read-only','-c','projects."a b".trust_level="trusted"',...networkArgs()]);
+  const restricted = launchArgs(host.config,{cwd:'a b',sandbox:'read-only',approval:'never'});
+  assert.deepEqual(restricted, ['--cd','a b','-a','never','--sandbox','read-only',...networkArgs()]);
+  assert.equal(restricted.some((arg) => arg.includes('trust_level')), false, 'restricted callers must not be granted project trust');
   const authorized = launchArgs(host.config,{cwd:'a b',sandbox:'danger-full-access',approval:'never'});
   assert.ok(authorized.includes('--dangerously-bypass-approvals-and-sandbox'));
+  assert.ok(authorized.includes('--dangerously-bypass-hook-trust'), 'authorized automation must bypass Codex hook-trust review instead of hanging on the first TUI screen');
   // Codex rejects the approval flag together with the dangerous bypass flag;
   // the bypass itself is the no-prompt authorization envelope for this mode.
   assert.equal(authorized.includes('-a'), false);

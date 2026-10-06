@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {spawnSync} from 'node:child_process';
+import {powershellExe} from '../scripts/core/contracts.mjs';
 import {writeClaudeLauncher,waitClaudeResult,runClaudePlanner,CLAUDE_DECOMPOSE_TIMEOUT_DEFAULT_MS,claudePlannerTimeoutMs} from '../scripts/core/claude-runtime.mjs';
 const family=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../temp');fs.mkdirSync(family,{recursive:true});
 test('claude planner keeps the prompt after -p and resolves stdout text',async()=>{
@@ -25,7 +26,7 @@ test('claude PowerShell launcher preserves prompt argv, captures the token line 
   fs.writeFileSync(worker,'import fs from "node:fs";\nconst p=process.argv.at(-1);\nconst m=/^capture:(.+)$/m.exec(p);\nfs.writeFileSync(m[1].trim(),JSON.stringify(process.argv.slice(2)));\nconsole.log("done 【本块唯一标识】 claudetest1");\n');
   const prompt='执行窗口任务 "带引号" 与中文\n第二行\n【本块唯一标识】claudetest1\ncapture:'+capture;
   const la=writeClaudeLauncher({bin:process.execPath,prefixArgs:[worker]},{key:'B1',suffix:'test',prompt,workspace:dir,temp:path.join(dir,'temp')});
-  const result=spawnSync('powershell.exe',['-NoProfile','-File',la.lp],{windowsHide:true,encoding:'utf8',timeout:20000});
+  const result=spawnSync(powershellExe(),['-NoProfile','-File',la.lp],{windowsHide:true,encoding:'utf8',timeout:20000});
   assert.equal(result.status,0,result.stderr);
   const r=JSON.parse(fs.readFileSync(la.rf,'utf8').replace(/^\uFEFF/,'').split(/\r?\n/)[0]);
   assert.equal(r.__EXIT__,0);assert.ok(r.__REPORT__.includes('claudetest1'));
@@ -40,6 +41,14 @@ test('claude result wait returns the launcher-written outcome immediately',async
   const rf=path.join(dir,'r.json');fs.writeFileSync(rf,JSON.stringify({__EXIT__:0,__DONE__:true,__REPORT__:'ok'}));
   const res=await waitClaudeResult(rf,5000,path.join(dir,'missing.pid'));
   assert.equal(res.done,true);assert.equal(res.exitCode,0);assert.equal(res.text,'ok');
+ }finally{fs.rmSync(dir,{recursive:true,force:true});}
+});
+test('claude result wait does not treat a malformed pid file as a dead launcher',async()=>{
+ const dir=fs.mkdtempSync(path.join(family,'claude-bad-pid-'));
+ try{
+  const pidf=path.join(dir,'window.pid');fs.writeFileSync(pidf,'abc','utf8');
+  const res=await waitClaudeResult(path.join(dir,'missing.json'),80,pidf);
+  assert.deepEqual(res,{done:false,exitCode:null,text:'Claude completion timeout'});
  }finally{fs.rmSync(dir,{recursive:true,force:true});}
 });
 test('claude planner timeout defaults to 240s and honors ORCH_DECOMPOSE_TIMEOUT_MS',()=>{

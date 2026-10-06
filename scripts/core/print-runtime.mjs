@@ -1,6 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import {spawn} from 'node:child_process';
+import {StringDecoder} from 'node:string_decoder';
 import {profileArgs} from './print-profile.mjs';
 import {nativeArgumentLines} from './native-argv.mjs';
 
@@ -13,21 +15,53 @@ export async function runProfilePlanner(config, prompt, cwd) {
   const args = [...profileArgs(config, {model: process.env.ORCH_MODEL, effort: process.env.ORCH_EFFORT}), prompt];
   return new Promise((resolve, reject) => {
     const child = spawn(config.bin, args, { cwd, env: process.env, windowsHide: true, shell: false, stdio: ['ignore', 'pipe', 'pipe'] });
-    let raw = '', errorText = '', timedOut = false;
+    let raw = '', errorText = '', timedOut = false, oversized = false, settled = false;
+    let exitCode = null, timer = null, killTimer = null, graceTimer = null;
+    const MAX_OUTPUT_BYTES = 8000000;
     const timeoutMs = (() => { const v = Number(process.env.ORCH_DECOMPOSE_TIMEOUT_MS); return Number.isFinite(v) && v > 0 ? v : 240000; })();
-    const timer = setTimeout(() => { timedOut = true; child.kill(); }, timeoutMs);
-    child.stdout.on('data', (b) => { raw += b; if (raw.length > 8000000) child.kill(); });
-    child.stderr.on('data', (b) => { errorText += b; });
-    child.on('error', (e) => { clearTimeout(timer); reject(e); });
-    child.on('exit', (code) => {
-      clearTimeout(timer);
+    const finish = (code) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer); if (killTimer) clearTimeout(killTimer); if (graceTimer) clearTimeout(graceTimer);
       try {
-        if (timedOut || code !== 0) throw new Error((timedOut ? 'PLANNER_TIMEOUT' : 'PLANNER_FAILED: exit ' + code) + (errorText ? ': ' + String(errorText).slice(0, 300) : ''));
+        if (oversized) throw new Error('PLANNER_OUTPUT_TOO_LARGE: planner output exceeded ' + MAX_OUTPUT_BYTES + ' bytes');
+        if (timedOut) throw new Error('PLANNER_TIMEOUT' + (errorText ? ': ' + String(errorText).slice(0, 300) : ''));
+        if (code !== 0) throw new Error('PLANNER_FAILED: exit ' + code + (errorText ? ': ' + String(errorText).slice(0, 300) : ''));
         const final = String(raw || '').trim();
         if (!final) throw new Error('PLANNER_EMPTY_RESPONSE' + (errorText ? ': ' + String(errorText).slice(0, 300) : ''));
         resolve({ final });
       } catch (e) { reject(e); }
+    };
+    timer = setTimeout(() => {
+      // 竞态守卫：计时器与 exit 同拍触发时，进程其实已干净退出，交给 exit/close 路径结算。
+      if (child.exitCode !== null || child.signalCode !== null) return;
+      timedOut = true;
+      try { child.kill(); } catch { /* already gone */ }
+      // 一次 kill 无效（包装器/句柄占用）时升级强杀，再宽限一段仍不收口就以已收数据强制结算，
+      // 保证 promise 永不悬挂。
+      killTimer = setTimeout(() => {
+        try { child.kill('SIGKILL'); } catch { /* already gone */ }
+        killTimer = setTimeout(() => finish(exitCode), 5000);
+      }, 5000);
+    }, timeoutMs);
+    // 跨分片的多字节 UTF-8 序列必须经 StringDecoder 拼接，逐 Buffer toString 会产生 U+FFFD。
+    const decoder = new StringDecoder('utf8');
+    let outputBytes = 0;
+    child.stdout.on('data', (b) => {
+      outputBytes += b.length;
+      raw += decoder.write(b);
+      if (!oversized && outputBytes > MAX_OUTPUT_BYTES) { oversized = true; try { child.kill(); } catch { /* already gone */ } }
     });
+    child.stdout.on('end', () => { raw += decoder.end(); });
+    child.stderr.on('data', (b) => { errorText += b; });
+    child.on('error', (e) => { if (settled) return; settled = true; clearTimeout(timer); if (killTimer) clearTimeout(killTimer); if (graceTimer) clearTimeout(graceTimer); reject(e); });
+    child.on('exit', (code) => {
+      exitCode = code;
+      // stdio 可能尚未排空（'close' 才是全部关闭之后）；正常情况 close 毫秒级到达，
+      // 管道被后代进程握住时以有界宽限结算，避免尾部输出丢失与 promise 悬挂。
+      if (!settled) graceTimer = setTimeout(() => finish(exitCode), 2000);
+    });
+    child.on('close', (code) => { finish(exitCode !== null ? exitCode : code); });
   });
 }
 
@@ -35,6 +69,7 @@ export function writeProfileLauncher(config, { key, prompt, suffix, workspace, t
   const stem = String(key + '-' + suffix).replace(/[^a-zA-Z0-9_-]/g, '-');
   const token = /【本块唯一标识】\s*([A-Za-z0-9][A-Za-z0-9_-]*)/.exec(prompt)?.[1];
   if (!token) throw new Error((config.label || config.id) + ' window requires a completion token');
+  const sanctionToken = crypto.randomBytes(18).toString('hex');
   fs.mkdirSync(temp, { recursive: true });
   const lp = path.join(temp, 'win-launch-' + stem + '.ps1');
   const pidf = path.join(temp, 'window-' + stem + '.pid');
@@ -52,10 +87,11 @@ export function writeProfileLauncher(config, { key, prompt, suffix, workspace, t
     'chcp 65001 | Out-Null',
     '[Console]::InputEncoding = [System.Text.Encoding]::UTF8',
     'Write-Host "============================================="',
-    'Write-Host "  ' + String(config.label || config.id).toUpperCase() + ' TASK RUNNING - closes automatically on completion"',
+    'Write-Host ' + quote('  ' + String(config.label || config.id).toUpperCase() + ' TASK RUNNING - closes automatically on completion'),
     'Write-Host "============================================="',
     `Set-Location -LiteralPath ${quote(workspace)}`,
     `$env:ORCH_WINDOW = '1'`,
+    `$env:ORCH_WINDOW_TOKEN = ${quote(sanctionToken)}`,
     `$token = ${quote(token)}`,
     `$log = ${quote(log)}`,
     `$resultFile = ${quote(rf)}`,
@@ -88,7 +124,7 @@ export function writeProfileLauncher(config, { key, prompt, suffix, workspace, t
     'exit 0',
   ].join('\r\n');
   fs.writeFileSync(lp, '\uFEFF' + body, 'utf8');
-  return { lp, pidf, pf, rf, log };
+  return { lp, pidf, pf, rf, log, sanctionToken };
 }
 
 export async function waitProfileResult(rf, timeoutMs, pidf) {

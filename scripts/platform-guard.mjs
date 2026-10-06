@@ -17,7 +17,9 @@ export const PLATFORM_NEUTRAL_ARGS = new Set(['--version', '--help', '-h', '--in
 
 export function enforceWindowsOnly(argv = process.argv.slice(2), platform = process.platform) {
   if (platform === 'win32') return false;
-  if (argv.some((arg) => PLATFORM_NEUTRAL_ARGS.has(arg))) return false;
-  console.error('[orchestrator] FATAL: Windows-only: this build drives Windows Terminal, the ConPTY carrier and the HKCU coordinator; detected platform "' + platform + '" — only --version, --help and --install-deps are available here');
+  // 豁免必须是「整个调用就是中立面」：任意位置混入 --help 不能把一条真实命令洗白成排障调用。
+  // 空调用也不是中立面（要明确要求 --help/-h/--version/--install-deps）。
+  if (argv.length > 0 && argv.every((arg) => PLATFORM_NEUTRAL_ARGS.has(arg))) return false;
+  console.error('[orchestrator] FATAL: Windows-only: this build drives Windows Terminal, the ConPTY carrier and the HKCU coordinator; detected platform "' + platform + '" — only --version, --help/-h and --install-deps are available here');
   return true;
 }

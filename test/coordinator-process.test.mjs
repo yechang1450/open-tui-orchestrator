@@ -49,26 +49,44 @@ test('coordinatorDir never touches the machine-wide locator under the test runne
 // PS 跑不到自己的清理，锁票会在协调器目录无界堆积（实测 576 个）。以下判据都可红：
 // 回到写死等待＝第一条超时；去掉重试＝第二条失败；去掉按龄回收＝第三条 stale 收不掉 / fresh 被误收。
 const {randomUUID}=await import('node:crypto');
-const {processSnapshot,transaction,sweepStaleMutexTickets}=await import('../scripts/core/leases.mjs');
+const {processSnapshot,transaction,sweepStaleMutexTickets,launcherIdentity,claimRun}=await import('../scripts/core/leases.mjs');
 const {powershellExe}=await import('../scripts/core/contracts.mjs');
 const leaseLock=fileURLToPath(new URL('../scripts/core/lease-lock.ps1',import.meta.url));
 // 一次快照全文件共用：processSnapshot 是一次 PowerShell CIM 全表查询（满载下几秒），
 // 每个用例各来一次会把套件整体负载推高、连累其它时序敏感文件（2026-09-14 实测）。
 const OWNER_ONCE=processSnapshot().get(process.pid);
 
+test('launcherIdentity returns null for an unpublished pid without doing a process snapshot',{skip:process.platform!=='win32'},()=>{
+ const previous=process.env.ORCH_PS_TIMEOUT_MS;
+ process.env.ORCH_PS_TIMEOUT_MS='1';
+ try{
+  const pidFile=path.join(family,'identity-invalid','window-B1.pid');
+  assert.equal(launcherIdentity(0,pidFile),null);
+ }finally{
+  if(previous===undefined)delete process.env.ORCH_PS_TIMEOUT_MS;else process.env.ORCH_PS_TIMEOUT_MS=previous;
+ }
+});
+
 async function holdCoordinatorMutex(dir){
  const owner=OWNER_ONCE;
  const ticket=path.join(dir,'lock-'+randomUUID());
  const child=spawn(powershellExe(),['-NoProfile','-File',leaseLock,'-Directory',dir,'-Ticket',ticket,'-Owner',String(owner.ProcessId),'-Started',owner.Started],{windowsHide:true,stdio:'ignore'});
+ const exited=new Promise(r=>child.once('exit',r));
  const deadline=Date.now()+30000;
  while(!fs.existsSync(ticket+'.ready')&&Date.now()<deadline)await pause(50);
- assert.ok(fs.existsSync(ticket+'.ready'),'fixture failed to acquire the coordinator mutex');
+ if(!fs.existsSync(ticket+'.ready')){
+  // 超时不是“调用方 finally 会清”——holder 在调用方 try 之外 spawn，这里必须自己收口：
+  // kill 后等退出再抛，否则已持有的协调器互斥与锁票被后续用例继承、进程超出套件寿命。
+  try{child.kill();}catch{/* already gone */}
+  await exited;
+  assert.fail('fixture failed to acquire the coordinator mutex');
+ }
  return {
   release:()=>fs.writeFileSync(ticket+'.release','release'),
   // 放锁必须由**独立进程**在指定时刻做：transaction 的等待是同步阻塞的，本进程的 setTimeout
   // 在阻塞期间根本不会触发（这一坑测试自己踩过一次）。
   releaseLater:ms=>spawn(process.execPath,['-e',`setTimeout(()=>{try{require('fs').writeFileSync(${JSON.stringify(ticket+'.release')},'release')}catch{}},${ms})`],{windowsHide:true,stdio:'ignore'}).unref(),
-  exited:new Promise(r=>child.once('exit',r)),
+  exited,
  };
 }
 const winOnly={skip:process.platform==='win32'?false:'coordinator mutex is Windows-only'};
@@ -177,4 +195,65 @@ test('resolving the coordinator directory reclaims aged tickets',async()=>{
   assert.ok(fs.existsSync(fresh),'a fresh ticket must survive entry housekeeping');
   assert.ok(fs.existsSync(leases),'leases.json must never be touched');
  }finally{fs.rmSync(workspace,{recursive:true,force:true});}
+});
+
+
+test("claimRun preserves an owner that appears after the pre-lock snapshot", {skip: process.platform !== "win32", timeout: 120000}, async () => {
+  fs.mkdirSync(family, {recursive: true});
+  const dir = fs.mkdtempSync(path.join(family, "snapshot-lock-barrier-"));
+  const nodeExe = "C:/Program Files/nodejs/node.exe";
+  const moduleUrl = new URL("../scripts/core/leases.mjs", import.meta.url).href;
+  const aWorker = path.join(dir, "claim-a.mjs");
+  const bWorker = path.join(dir, "claim-b.mjs");
+  const aReady = path.join(dir, "a-ready");
+  const bClaimed = path.join(dir, "b-claimed");
+  const aClaimed = path.join(dir, "a-claimed");
+  const bDone = path.join(dir, "b-done");
+  const waitFor = async (file, ms = 30000) => {
+    const end = Date.now() + ms;
+    while (!fs.existsSync(file) && Date.now() < end) await pause(100);
+    assert.ok(fs.existsSync(file), "timed out waiting for " + file);
+  };
+  fs.writeFileSync(aWorker, [
+    "import fs from \"node:fs\";",
+    "import {claimRun} from " + JSON.stringify(moduleUrl) + ";",
+    "const [dir, ready, bClaimed, aClaimed] = process.argv.slice(2);",
+    "const waitFor = file => { const cell = new Int32Array(new SharedArrayBuffer(4)); const end = Date.now() + 30000; while (!fs.existsSync(file) && Date.now() < end) Atomics.wait(cell, 0, 0, 50); if (!fs.existsSync(file)) throw new Error(\"timed out waiting for B claim\"); };",
+    "const claim = claimRun(dir, \"controller-a\", {afterSnapshot: () => { fs.writeFileSync(ready, \"ready\"); waitFor(bClaimed); }});",
+    "fs.writeFileSync(aClaimed, JSON.stringify(claim));",
+  ].join(String.fromCharCode(10)), "utf8");
+  fs.writeFileSync(bWorker, [
+    "import fs from \"node:fs\";",
+    "import {claimRun} from " + JSON.stringify(moduleUrl) + ";",
+    "const pause = ms => new Promise(resolve => setTimeout(resolve, ms));",
+    "const [dir, claimed, done] = process.argv.slice(2);",
+    "const claim = claimRun(dir, \"controller-b\");",
+    "fs.writeFileSync(claimed, JSON.stringify(claim));",
+    "while (!fs.existsSync(done)) await pause(50);",
+  ].join(String.fromCharCode(10)), "utf8");
+  let a = null;
+  let b = null;
+  try {
+    a = spawn(nodeExe, [aWorker, dir, aReady, bClaimed, aClaimed], {windowsHide: true, stdio: "ignore"});
+    await waitFor(aReady);
+    b = spawn(nodeExe, [bWorker, dir, bClaimed, bDone], {windowsHide: true, stdio: "ignore"});
+    await waitFor(bClaimed);
+    await waitFor(aClaimed);
+    const owners = JSON.parse(fs.readFileSync(path.join(dir, "run-owners.json"), "utf8"));
+    assert.ok(owners["controller-b"], "the owner claimed after the first snapshot must survive");
+    assert.ok(owners["controller-a"], "the later controller claim must also be present");
+    fs.writeFileSync(bDone, "done");
+    if (a.exitCode === null) await new Promise(resolve => a.once("exit", resolve));
+    if (b.exitCode === null) await new Promise(resolve => b.once("exit", resolve));
+    assert.equal(a.exitCode, 0);
+    assert.equal(b.exitCode, 0);
+  } finally {
+    fs.writeFileSync(bDone, "done");
+    for (const child of [a, b]) {
+      if (child && child.exitCode === null) {
+        try { child.kill(); } catch {}
+      }
+    }
+    fs.rmSync(dir, {recursive: true, force: true});
+  }
 });

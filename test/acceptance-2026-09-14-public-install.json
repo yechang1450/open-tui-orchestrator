@@ -5,6 +5,12 @@
   "feature": "public-install path — --install-deps entry (idempotent, pure-data stdout, clean failure with the manual fallback), INSTALL.md / INSTALL-zh.md / README install sections / CHANGELOG.md / issue template / docs/public-readiness.md",
   "releasedCopy": "C:/Users/<user>/.tools/releases/0.9.2/open-tui-orchestrator",
   "installPathVerified": {
+    "measuredOn": "0.9.1 tarball build (open-tui-orchestrator-0.9.1.tgz, packed before the 0.9.2 version bump); the 0.9.2 release did not re-run this pack->install->--install-deps->--doctor chain — see acceptance-2026-09-14-release-prep.json for the later state",
+    "evidenceStatus": "historical-mixed-version",
+    "packVersion": "0.9.1",
+    "releasedCopyVersion": "0.9.2",
+    "validity": "This object is not a 0.9.2 install acceptance; use acceptance-2026-09-14-release-prep.json for the later 0.9.2/0.9.3 state.",
+    "supersededBy": "acceptance-2026-09-14-release-prep.json",
     "pack": "npm pack -> open-tui-orchestrator-0.9.1.tgz, 403.3 kB tarball / 162 files / 1.1 MB unpacked (node_modules, temp/ and the private flags stay out of the tarball)",
     "install": "npm install --prefix D:/temp/orch-pubtest <tarball> -> added 1 package in 4s",
     "beforeDeps": "cli.mjs --agent codex --doctor -> `[orchestrator] FATAL: RELEASE_DEPENDENCY_MISSING: install the locked SDK dependency with npm ci --prefix \"<pkg>\\scripts\\\"` (already a precise one-line diagnostic naming the fix)",

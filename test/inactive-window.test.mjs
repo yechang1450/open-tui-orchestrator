@@ -5,8 +5,9 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {quoteWindowsArgument,spawnInactiveWindow,spawnInactiveWindowDetached} from '../scripts/core/inactive-window.mjs';
 import {powershellExe} from '../scripts/core/contracts.mjs';
+import {EventEmitter} from 'node:events';
 
-// 拉起宿主统一锚定 SystemRoot 的 powershell.exe（裸名会先按 cwd=任意工作区解析，防二进制投毒）。
+// 拉起宿主统一使用受信任位置解析出的 pwsh.exe，防止按 cwd 解析二进制。
 const PS_EXE=powershellExe();
 const HELPER=path.join(path.dirname(fileURLToPath(import.meta.url)),'..','scripts','core','inactive-window.ps1');
 
@@ -46,7 +47,7 @@ test('inactive launch fails explicitly instead of falling back to a focusing win
  assert.throws(()=>spawnInactiveWindow('missing',[],'D:\\',{invoke:()=>({status:0,stdout:''})}),/INACTIVE_WINDOW_LAUNCH_FAILED/);
 });
 
-test('detached inactive launch starts the focus-restoring helper without blocking the scheduler',()=>{
+test('detached inactive launch starts the non-interfering helper without blocking the scheduler',()=>{
  let called=0,unref=0;
  const child={unref(){unref++;}};
  const result=spawnInactiveWindowDetached('C:\\Windows\\wt.exe',['-w','win-x'],'D:\\',{invoke:(file,args,options)=>{
@@ -57,14 +58,34 @@ test('detached inactive launch starts the focus-restoring helper without blockin
  }});
  assert.equal(result,child);assert.equal(called,1);assert.equal(unref,1);
 });
+test('detached inactive launch consumes asynchronous spawn errors instead of crashing the process',()=>{
+ const child=new EventEmitter();child.unref=()=>{};
+ spawnInactiveWindowDetached('C:\\Windows\\wt.exe',[],'D:\\',{invoke:()=>child});
+ assert.ok(child.listenerCount('error')>0,'detached child must have an error listener');
+ assert.doesNotThrow(()=>child.emit('error',new Error('spawn failed')));
+});
 
 test('inactive-window.ps1 stays ANSI-safe (ASCII only, LF) and is PowerShell-parseable', async () => {
  const buf=fs.readFileSync(HELPER);
  const text=buf.toString('utf8');
- assert.ok(!buf.includes(0x0d),'必须 LF 换行（PS5.1 兼容）');
- assert.ok(!/[^\x00-\x7F]/.test(text),'必须纯 ASCII：PS5.1 把无 BOM 的 UTF-8 当 ANSI 读，非 ASCII 会乱码');
+ assert.ok(!buf.includes(0x0d),'必须 LF 换行（PowerShell 兼容）');
+ assert.ok(!/[^\x00-\x7F]/.test(text),'必须纯 ASCII，避免无 BOM 脚本在不同 PowerShell 编码策略下乱码');
  assert.match(text,/\$Activate/,'必须实现 -Activate 开关');
  assert.match(text,/\\"ok\\":/,'必须输出机读裁决 JSON');
+ assert.match(text,/public uint cbSize;public IntPtr hwnd;/,'FlashInfo.hwnd must remain pointer-sized on x64');
+ assert.doesNotMatch(text,/fi\.hwnd=\(uint\)/,'FlashInfo.hwnd must not truncate a 64-bit HWND');
+ assert.match(text,/GetWindowThreadProcessId\(h,out windowPid\)/,'fresh-window selection must be tied to the launched owner pid');
+ assert.match(text,/GetWindowThreadProcessId\(h,out windowPid\)==0/,'DWORD Win32 return must be compared with zero, not negated as a boolean');
+ assert.match(text,/windowPid!=p\.pid/,'unrelated windows must be rejected');
+ assert.match(text,/ownerPid/,'the verdict must report the owner pid used for filtering');
+ // No-activate is a non-interference contract: SW_SHOWNOACTIVATE asks Windows not to
+ // foreground the child, and this helper must not keep reclaiming the user's foreground
+ // window after launch. The real foreground/window policy remains a live-only boundary.
+ assert.match(text,/s\.show=4/,'non-activate launch must request SW_SHOWNOACTIVATE');
+ assert.doesNotMatch(text,/SetForegroundWindow\(baseline\)/,'non-activate mode must not reclaim the initiating foreground');
+ assert.doesNotMatch(text,/Environment\.TickCount64\+2500/,'non-activate mode must not poll/reassert the foreground for 2.5 seconds');
+ assert.doesNotMatch(text,/GetLastInputInfo|inputAtStart/,'non-activate mode must not need an input-polling escape hatch');
+ assert.ok(text.includes('if(!activate)return "{\\"ok\\":true,\\"activated\\":false}";'),'non-activate JSON must remain valid C# string syntax');
  // 语法自检：PowerShell 解析器真跑一次（不拉起任何窗口）。
  const {spawnSync}=await import('node:child_process');
  const script="[void][System.Management.Automation.Language.Parser]::ParseFile('"+HELPER+"',[ref]$null,[ref]$errs);if($errs -and $errs.Count){$errs[0].Message;exit 1}else{'OK'}";

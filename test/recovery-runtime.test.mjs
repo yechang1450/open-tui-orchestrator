@@ -44,10 +44,10 @@ test('actual partial execution is recovered without repeating its completed side
  fs.writeFileSync(rf,JSON.stringify({exitCode:0,attempt:a.number}));`);
  const checks=path.join(d,'acceptance.json');fs.writeFileSync(checks,JSON.stringify({T001:[{type:'json',path:'count.json',equals:{count:1}}],T002:{retrySafe:true,checks:[{type:'json',path:'done.json',equals:{done:true}}]}}));
  const hooks={plan:async()=>[{title:'linked',type:'linked',tasks:[{prompt:'执行甲'},{prompt:'执行乙'}]}],compact:p=>p,infer:()=>[],prompt:p=>p,
-  launcher:(key,prompt,suffix)=>{const file=/开始前：node "[^"]+" "([^"]+)"/.exec(prompt)[1];attempts.push(JSON.parse(fs.readFileSync(file)).taskIds);
+  launcher:(key,prompt,suffix)=>{const carrier=/开始前："([^" ]+checkpoint[.]cmd)"/.exec(prompt)[1];const file=path.join(path.dirname(carrier),'attempt.json');attempts.push(JSON.parse(fs.readFileSync(file)).taskIds);
    const pidf=path.join(d,'window-'+suffix+'.pid'),lp=path.join(d,'win-launch-'+suffix+'.ps1'),rf=path.join(d,suffix+'.result');
    fs.writeFileSync(lp,'\ufeff'+`$PID | Set-Content -LiteralPath ${lit(pidf)} -Encoding UTF8\n& ${lit(process.execPath)} ${lit(worker)} ${lit(file)} ${lit(rf)} ${lit(d)}\nexit 0`);return{pidf,lp,rf};},
-  spawn:async(lp,_title,pidf)=>{const child=spawn('powershell.exe',['-NoProfile','-File',lp],{windowsHide:true,stdio:'ignore'});children.push(child);const end=Date.now()+15000;while(!fs.existsSync(pidf)&&Date.now()<end)await pause(20);return fs.existsSync(pidf);},
+  spawn:async(lp,_title,pidf)=>{const child=spawn('pwsh.exe',['-NoProfile','-File',lp],{windowsHide:true,stdio:'ignore'});children.push(child);const end=Date.now()+15000;while(!fs.existsSync(pidf)&&Date.now()<end)await pause(20);return fs.existsSync(pidf);},
   readPid:p=>{try{return fs.existsSync(p)?Number(fs.readFileSync(p,'utf8').replace(/^\uFEFF/,'')):0;}catch{return 0;}},
   session:async()=> 'controlled',wait:async(_session,_timeout,rf)=>{fs.writeFileSync(rf+'.go','go');const end=Date.now()+15000;while(!fs.existsSync(rf)&&Date.now()<end)await pause(20);return {done:fs.existsSync(rf),exitCode:JSON.parse(fs.readFileSync(rf)).exitCode};},
   exitCode:rf=>fs.existsSync(rf)?JSON.parse(fs.readFileSync(rf)).exitCode:null,
@@ -72,10 +72,10 @@ test('resume and verify refuse a tampered acceptance contract',async()=>{
  fs.writeFileSync(rf,JSON.stringify({exitCode:0,attempt:a.number}));`);
  const checks=path.join(d,'acceptance-src.json');fs.writeFileSync(checks,JSON.stringify({T001:[{type:'json',path:'done.json',equals:{done:true}}]}));
  const hooks={plan:async()=>[{title:'only',type:'parallel',tasks:[{prompt:'执行甲'}]}],compact:p=>p,infer:()=>[],prompt:p=>p,
-  launcher:(key,prompt,suffix)=>{const file=/开始前：node "[^"]+" "([^"]+)"/.exec(prompt)[1];
+  launcher:(key,prompt,suffix)=>{const carrier=/开始前："([^" ]+checkpoint[.]cmd)"/.exec(prompt)[1];const file=path.join(path.dirname(carrier),'attempt.json');
    const pidf=path.join(d,'window-'+suffix+'.pid'),lp=path.join(d,'win-launch-'+suffix+'.ps1'),rf=path.join(d,suffix+'.result');
    fs.writeFileSync(lp,'\uFEFF'+`$PID | Set-Content -LiteralPath ${lit(pidf)} -Encoding UTF8\n& ${lit(process.execPath)} ${lit(worker)} ${lit(file)} ${lit(rf)} ${lit(d)}\nexit 0`);return{pidf,lp,rf};},
-  spawn:async(lp,_title,pidf)=>{const child=spawn('powershell.exe',['-NoProfile','-File',lp],{windowsHide:true,stdio:'ignore'});children.push(child);const end=Date.now()+15000;while(!fs.existsSync(pidf)&&Date.now()<end)await pause(20);return fs.existsSync(pidf);},
+  spawn:async(lp,_title,pidf)=>{const child=spawn('pwsh.exe',['-NoProfile','-File',lp],{windowsHide:true,stdio:'ignore'});children.push(child);const end=Date.now()+15000;while(!fs.existsSync(pidf)&&Date.now()<end)await pause(20);return fs.existsSync(pidf);},
   readPid:p=>{try{return fs.existsSync(p)?Number(fs.readFileSync(p,'utf8').replace(/^\uFEFF/,'')):0;}catch{return 0;}},
   session:async()=> 'controlled',wait:async(_session,_timeout,rf)=>{fs.writeFileSync(rf+'.go','go');const end=Date.now()+15000;while(!fs.existsSync(rf)&&Date.now()<end)await pause(20);return {done:fs.existsSync(rf),exitCode:JSON.parse(fs.readFileSync(rf)).exitCode};},
   exitCode:rf=>fs.existsSync(rf)?JSON.parse(fs.readFileSync(rf)).exitCode:null,

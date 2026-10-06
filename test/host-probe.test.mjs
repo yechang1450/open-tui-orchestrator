@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import {probeCli} from '../scripts/core/host-probe.mjs';
+import {probeCli,normalizeProbeTimeout} from '../scripts/core/host-probe.mjs';
 import {resolveHost} from '../scripts/core/host-cli.mjs';
 
 // 假 kimi CLI（.mjs 形态，走 resolveKimiHost 的 prefixArgs 分支）：
@@ -60,6 +60,21 @@ test('probeCli never retries deterministic failures',()=>{
   assert.equal(r.status,1);
   assert.equal(callCount(state),1);
  }finally{cleanup();}
+});
+test('probeCli normalizes invalid bounds and treats zero attempts as one attempt',()=>{
+ const {fake,state,env,cleanup}=setup('exit1');
+ try{
+  const r=probeCli(process.execPath,[fake,'--help'],{env,timeoutMs:-1,attempts:0});
+  assert.equal(r.status,1);
+  assert.equal(callCount(state),1);
+ }finally{cleanup();}
+});
+test('probeCli gives timeoutMs=0 an explicit default-timeout meaning',()=>{
+ assert.equal(normalizeProbeTimeout(undefined),10000);
+ assert.equal(normalizeProbeTimeout(0),10000);
+ assert.equal(normalizeProbeTimeout(-1),10000);
+ assert.equal(normalizeProbeTimeout(Infinity),10000);
+ assert.equal(normalizeProbeTimeout(150000),120000);
 });
 
 test('kimi resolution survives a transient probe timeout (fake CLI)',()=>{

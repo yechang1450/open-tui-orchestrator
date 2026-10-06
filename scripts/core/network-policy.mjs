@@ -34,8 +34,15 @@ export function codexProviderMode({ env = process.env } = {}) {
     const home = env.CODEX_HOME || path.join(os.homedir(), '.codex');
     text = fs.readFileSync(path.join(home, 'config.toml'), 'utf8');
   } catch { /* no config: keep the default OpenAI behaviour */ }
-  const match = /^\s*model_provider\s*=\s*"([^"]+)"/m.exec(text);
-  const provider = match ? match[1] : 'openai';
+  let provider = 'openai';
+  let root = true;
+  for (const rawLine of text.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (line.startsWith('[')) { root = false; continue; }
+    if (!root) continue;
+    const match = /^model_provider\s*=\s*(['"])([^'"]+)\1(?:\s*#.*)?$/.exec(line);
+    if (match) { provider = match[2]; break; }
+  }
   return provider === 'openai' ? 'on' : 'off';
 }
 export function codexNetworkArgs(options) {

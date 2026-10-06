@@ -9,9 +9,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import assert from 'node:assert/strict';
-import {spawn} from 'node:child_process';
+import {spawn,spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {processSnapshot,sameProcess} from '../scripts/core/leases.mjs';
+import {loadDecomposeCache,captureProcessIdentity,inspectProcess,collectOwnedProcessTargets,readJsonDiagnostic,controllerRecords} from './live-safety.mjs';
 const repo=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..'),workspace=process.cwd();
 // Default agent is kimi: codex windows (gpt-6-astra/ultra) were observed to
 // stall after printing their TODO list or to run the checkpoint command via
@@ -20,7 +21,8 @@ const repo=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..'),works
 const agent=process.env.ORCH_LIVE_AGENT||'kimi';
 const entry=process.env.ORCH_LIVE_ENTRY||path.join(repo,'scripts','orchestrate-sdk.mjs');
 const runId='recovery-'+crypto.randomUUID(),root=path.join(workspace,'temp',runId);
-const runDir=path.join(workspace,'temp','orchestrator','runs',runId);
+const stateDir=path.join(root,'state');
+const runDir=path.join(stateDir,'runs',runId);
 const summaryFile=path.join(runDir,'summary.json');
 const guardianFile=path.join(runDir,'guardian.json');
 const coreHash=()=>crypto.createHash('sha256').update(fs.readdirSync(path.join(repo,'scripts','core')).filter(n=>/\.(mjs|ps1|txt)$/.test(n)).sort().map(n=>n+':'+crypto.createHash('sha256').update(fs.readFileSync(path.join(repo,'scripts','core',n))).digest('hex')).join('\n')).digest('hex');
@@ -50,23 +52,32 @@ const planBlocks=[
 ];
 const hintsKey=JSON.stringify({moduleToProj:{},foldRules:{},tailKeywords:['清爽','清理','保持干净','收尾','整理']});
 const decomposeHash=crypto.createHash('sha1').update(CORE_VERSION+'|'+request+'|'+hintsKey).digest('hex');
-const cacheFile=path.join(workspace,'temp','orchestrator','orchestrator-decompose-cache.json');
-let cache={version:CORE_VERSION,entries:{}};
-try{const j=JSON.parse(fs.readFileSync(cacheFile,'utf8').replace(/^\uFEFF/,''));if(j&&j.version===CORE_VERSION&&j.entries)cache=j;}catch{}
+const cacheFile=path.join(stateDir,'orchestrator-decompose-cache.json');
+let cache=loadDecomposeCache(cacheFile,CORE_VERSION);
 cache.entries[decomposeHash]={createdAt:Date.now(),blocks:planBlocks};
 fs.mkdirSync(path.dirname(cacheFile),{recursive:true});
 fs.writeFileSync(cacheFile,JSON.stringify(cache),'utf8');
 // ORCH_GUARDIAN=0: no detached guardian may race the manual --resume-run below.
-const env={...process.env,ORCH_AGENT:agent,ORCH_SPAWN_MODE:'window',ORCH_RUN_ID:runId,ORCH_ACCEPTANCE_FILE:acceptance,ORCH_MAX_POLL_MS:'600000',ORCH_GUARDIAN:'0'};
-for(const key of ['WORKSPACE_DIR','ORCH_STATE_DIR','ORCH_TUI','ORCH_APPROVAL','ORCH_SANDBOX','NODE_TEST_CONTEXT'])delete env[key];
+const env={...process.env,ORCH_AGENT:agent,ORCH_SPAWN_MODE:'window',ORCH_RUN_ID:runId,ORCH_ACCEPTANCE_FILE:acceptance,ORCH_MAX_POLL_MS:'600000',ORCH_GUARDIAN:'0',ORCH_STATE_DIR:stateDir,ORCH_COORDINATOR_DIR:path.join(root,'coordinator')};
+for(const key of ['WORKSPACE_DIR','ORCH_TUI','ORCH_APPROVAL','ORCH_SANDBOX','NODE_TEST_CONTEXT'])delete env[key];
 const children=[];
 function launch(args,label){
- const child=spawn(process.execPath,[entry,...args],{cwd:workspace,env,windowsHide:true});let output='';children.push(child);
+ const child=spawn(process.execPath,[entry,...args],{cwd:workspace,env,windowsHide:true});let output='';
  for(const pipe of [child.stdout,child.stderr])pipe.on('data',b=>{output+=b.toString();process.stdout.write('['+label+'] '+b);});
  const done=new Promise(resolve=>{child.on('exit',code=>resolve(code));child.on('error',e=>resolve(String(e)));});
- return {child,done,output:()=>output};
+ const run={child,done,output:()=>output,identity:null,identityState:null,label};
+ children.push(run);
+ return run;
 }
 const pause=ms=>new Promise(r=>setTimeout(r,ms));
+const capture=async(run,label,timeoutMs=30000)=>{
+ const result=await captureProcessIdentity(run.child.pid,{snapshot:processSnapshot,sleep:pause,timeoutMs,isStopped:()=>run.child.exitCode!==null});
+ run.identityState=result;
+ if(result.state==='live')run.identity=result.identity;
+ else run.identity=null;
+ if(result.state!=='live')console.error('[identity] '+label+': '+(result.reason||result.state));
+ return result;
+};
 async function until(fn,label,ms=240000){const end=Date.now()+ms;while(Date.now()<end){if(fn())return;await pause(500);}throw new Error('Timed out: '+label);}
 const read=()=>{try{return JSON.parse(fs.readFileSync(summaryFile,'utf8'));}catch{return null;}};
 // The barrier task is T002 (project B): its block's launcher must stay alive
@@ -82,6 +93,8 @@ console.log(JSON.stringify({root,runId,entry,agent}));
 try {
  first=launch(['--run-windows',request],'first');
  await until(()=>fs.existsSync(summaryFile)||first.child.exitCode!==null,'run ledger created (or engine exited early)',180000);
+ const firstIdentity=await capture(first,'first controller');
+ if(firstIdentity.state!=='live')throw new Error('first controller identity unavailable: '+(firstIdentity.reason||firstIdentity.state));
  if(!fs.existsSync(summaryFile))throw new Error('Engine exited before creating the run (planning/policy): '+first.output().slice(-600));
  // Wait until T001 is checkpoint-completed (so the resume verifies it without
  // re-execution) and T002 sits on the barrier inside a live, adoptable window.
@@ -95,10 +108,14 @@ try {
  const before=read();assert.equal(before.blocks.length,2);
  originalLauncher=barrierLauncher(before);
  assert.ok(originalLauncher,'a live block window exists');
- first.child.kill();await first.done;
+ const firstController=inspectProcess(first.identity,()=>processSnapshot());
+ if(firstController.state!=='live')throw new Error('first controller identity changed before crash injection: '+(firstController.reason||firstController.state));
+ killTree(firstController.pid);await first.done;
  // Manual recovery: this test relaunches --resume-run itself. With the guardian
  // disabled, nothing else can claim the run first.
  second=launch(['--resume-run',runId],'resume');
+ const secondIdentity=await capture(second,'manual resume controller');
+ if(secondIdentity.state!=='live')throw new Error('manual resume controller identity unavailable: '+(secondIdentity.reason||secondIdentity.state));
  await until(()=>/adopting live B2/.test(second.output()),'adoption without relaunch',120000);
  assert.ok(sameProcess(originalLauncher,processSnapshot().get(originalLauncher.ProcessId)));
  assert.ok(!fs.existsSync(guardianFile),'guardian stayed disabled; recovery is manual-only');
@@ -117,15 +134,71 @@ try {
  report={passed:true,runId,entry,workspace,root,agent,coreVersion:after.version,coreHash:hashBefore,coreUnchanged:true,generation:after.generation,windowLaunches:2,attempts,firstTaskExecutions:1,controllerCrashInjected:true,guardianAutoResume:false,manualResume:true,adoptedSameLauncher:true,closed:true,summary:after};
 }catch(error){report={passed:false,runId,entry,workspace,root,agent,error:String(error),summary:read()};process.exitCode=1;}
 finally {
- fs.writeFileSync(path.join(root,'release'),'continue');
- fs.writeFileSync(path.join(root,'first.log'),first?.output()||'');
- fs.writeFileSync(path.join(root,'resume.log'),second?.output()||'');
- fs.writeFileSync(path.join(root,'report.json'),JSON.stringify(report,null,2));
- console.log('[result] '+JSON.stringify({passed:report.passed,root,error:report.error}));
- // If the manual resume never landed the run, salvage it so no orphan window remains.
- if(!report.passed&&fs.existsSync(summaryFile)&&!read()?.finishedAt){
-  const salvage=launch(['--resume-run',runId],'salvage');
-  await Promise.race([salvage.done,pause(180000)]);
+ let salvage={started:false},cleanup={state:'not-run'};
+ try {
+  fs.writeFileSync(path.join(root,'release'),'continue');
+  fs.writeFileSync(path.join(root,'first.log'),first?.output()||'');
+  fs.writeFileSync(path.join(root,'resume.log'),second?.output()||'');
+  const readWindowRecords=()=>{
+   const file=path.join(stateDir,'orchestrator-windows.json');
+   const parsed=readJsonDiagnostic(file,{label:'orchestrator-windows.json'});
+   const diagnostics=[];
+   let records=[];
+   if(parsed.kind==='missing')records=[];
+   else if(!parsed.ok||!Array.isArray(parsed.value))diagnostics.push(parsed.message||'orchestrator-windows.json is invalid');
+   else records=parsed.value;
+   const sum=read();
+   for(const [index,value] of Object.values(sum?.results||{}).entries())if(value?.launcher&&Number(value.launcher.ProcessId)>0)
+    if(!records.some(r=>sameProcess(r?.identity,value.launcher)))records.push({runId,title:'summary-launcher-'+index,identity:value.launcher});
+   return {records,diagnostics};
+  };
+  const owned=controllers=>{
+   const registry=readWindowRecords();
+   const found=collectOwnedProcessTargets({controllers,runId,windows:registry.records},()=>processSnapshot());
+   return {...found,diagnostics:[...registry.diagnostics,...found.diagnostics],state:registry.diagnostics.length?'unknown':found.state};
+  };
+  const stateOf=run=>!run?{state:'clean'}:run.identity
+   ?inspectProcess(run.identity,()=>processSnapshot())
+   :{state:'unknown',reason:run.label+' identity was not captured'};
+  const firstState=stateOf(first),secondState=stateOf(second);
+  if(!report?.passed&&fs.existsSync(summaryFile)&&!read()?.finishedAt) {
+   if(firstState.state==='live')salvage={started:false,skipped:'first-controller-active'};
+   else if(firstState.state==='unknown'||firstState.state==='mismatch')salvage={started:false,skipped:'first-controller-identity-'+firstState.state,diagnostic:firstState.reason};
+   else if(secondState.state==='live')salvage={started:false,skipped:'manual-resume-active'};
+   else if(secondState.state==='unknown'||secondState.state==='mismatch')salvage={started:false,skipped:'manual-resume-identity-'+secondState.state,diagnostic:secondState.reason};
+   else {
+    const child=launch(['--resume-run',runId],'salvage');
+    const identity=await capture(child,'salvage controller',10000);
+    const outcome=await Promise.race([child.done.then(code=>({finished:true,code})),pause(180000).then(()=>({finished:false,code:null}))]);
+    let forced=false,cleanupState=identity.state;
+    if(!outcome.finished){
+     if(identity.state==='live'){
+      const current=inspectProcess(identity.identity,()=>processSnapshot());
+      if(current.state==='live'){killTree(current.pid);forced=true;cleanupState='killed-after-identity-check';}
+      else cleanupState='identity-'+current.state;
+     } else cleanupState='identity-'+identity.state;
+     await Promise.race([child.done,pause(5000)]);
+    }
+    salvage={started:true,finished:outcome.finished,exitCode:outcome.code,childPid:child.child.pid,forced,cleanupState};
+   }
+  } else if(!report?.passed)salvage={started:false,skipped:'summary-finished-or-missing'};
+  const controllers=controllerRecords(children);
+  const before=owned(controllers),killed=[];
+  for(const target of before.targets||[]){killTree(target.pid);killed.push({label:target.label,pid:target.pid});}
+  let after=before;
+  const end=Date.now()+10000;
+  while(killed.length&&Date.now()<end){
+   await pause(250);after=owned(controllers);
+   if(after.state==='clean'||after.state==='unknown'||after.state==='mismatch')break;
+  }
+  cleanup={state:after.state,killed,diagnostics:after.diagnostics};
+  report.salvage=salvage;report.cleanup=cleanup;
+  fs.writeFileSync(path.join(root,'report.json'),JSON.stringify(report,null,2));
+ } catch(error) {
+  report=report||{passed:false,runId,entry,workspace,root,agent};
+  report.salvage=salvage;report.cleanup={state:'unknown',error:String(error)};
+  try{fs.writeFileSync(path.join(root,'report.json'),JSON.stringify(report,null,2));}catch{}
  }
+ console.log('[result] '+JSON.stringify({passed:report?.passed,root,error:report?.error,salvage,cleanup}));
  // Never kill a shared terminal host. Failed tests leave identifiable evidence for the parent to reconcile.
 }

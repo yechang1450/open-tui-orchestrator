@@ -57,6 +57,10 @@ SUITE_LINE = re.compile(r'actual: pass=(\d+) fail=(\d+) skipped=(\d+) cancelled=
 SUITE_REDS_LINE = re.compile(r'\[gate\] suite reds \((\d+)\): (.*)')
 
 
+class StateUnreadable(RuntimeError):
+    pass
+
+
 def now_str():
     return datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
@@ -97,6 +101,57 @@ def p_gate_ok(rc, text):
     return rc == 0 and verdict == 'PASS'
 
 
+def parse_judge_probe(returncode, stdout):
+    """返回 True/False；探测失败、输出不唯一或非数字均返回 None（UNKNOWN）。"""
+    if returncode != 0:
+        return None
+    value = stdout.decode('utf-8', 'replace') if isinstance(stdout, bytes) else str(stdout or '')
+    value = value.strip()
+    if not re.fullmatch(r'\d+', value):
+        return None
+    return int(value) > 0
+
+
+def powershell_exe():
+    """解析受信 PowerShell 7 绝对路径；绝不从当前 PATH 裸取 pwsh。"""
+    if os.name != 'nt':
+        return None
+    system_root = os.environ.get('SystemRoot') or os.environ.get('WINDIR') or r'C:\\Windows'
+    program_files = os.environ.get('ProgramW6432') or os.environ.get('ProgramFiles') or r'C:\\Program Files'
+    local_alias = (
+        os.path.join(os.environ.get('LOCALAPPDATA', ''), 'Microsoft', 'WindowsApps', 'pwsh.exe')
+        if os.environ.get('LOCALAPPDATA') else ''
+    )
+    trusted_roots = [
+        os.path.normcase(os.path.abspath(os.path.join(program_files, 'PowerShell', '7'))),
+        os.path.normcase(os.path.abspath(os.path.join(program_files, 'WindowsApps'))),
+        os.path.normcase(os.path.abspath(os.path.dirname(local_alias))) if local_alias else '',
+    ]
+    candidates = [os.path.join(program_files, 'PowerShell', '7', 'pwsh.exe')]
+    where_exe = os.path.join(system_root, 'System32', 'where.exe')
+    try:
+        result = subprocess.run([where_exe, 'pwsh.exe'], capture_output=True, timeout=5)
+        for raw in (result.stdout or b'').decode('utf-8', 'replace').splitlines():
+            candidate = os.path.abspath(raw.strip())
+            if not candidate or os.path.basename(candidate).lower() != 'pwsh.exe':
+                continue
+            normalized = os.path.normcase(candidate)
+            if any(normalized == os.path.join(root, 'pwsh.exe') or normalized.startswith(root + os.sep)
+                   for root in trusted_roots if root):
+                candidates.append(candidate)
+    except Exception:
+        pass
+    if local_alias:
+        candidates.append(local_alias)
+    for candidate in candidates:
+        try:
+            if os.path.isfile(candidate) or os.path.lexists(candidate):
+                return candidate
+        except OSError:
+            continue
+    return None
+
+
 def p_judge_eligible(head, dirty_count, last_judged_head, force):
     """判前资格：有 HEAD ∧ 树干净（dirty==0）∧（强制 或 该 HEAD 未判过）。脏树/无头不判。"""
     return bool(head) and dirty_count == 0 and (bool(force) or head != last_judged_head)
@@ -110,6 +165,8 @@ def p_self_red_cases():
         'gate_malformed': not p_gate_ok(0, 'ORCH_GATE: PASS — five criteria'),
         'judge_dirty_tree': not p_judge_eligible('a' * 40, 2, None, False),
         'judge_empty_head': not p_judge_eligible('', 0, None, False),
+        'judge_probe_nonzero_is_unknown': parse_judge_probe(1, b'0') is None,
+        'judge_probe_malformed_is_unknown': parse_judge_probe(0, b'not-a-count') is None,
         'suite_reds_no_marker_no_claim': parse_suite_reds('✖ a failure without the gate marker') is None,
     }
 
@@ -120,6 +177,8 @@ def p_self_red_positives():
         'judge_new_clean_head': p_judge_eligible('b' * 40, 0, None, False),
         'judge_already_judged_skips': not p_judge_eligible('b' * 40, 0, 'b' * 40, False),
         'judge_force_overrides': p_judge_eligible('b' * 40, 0, 'b' * 40, True),
+        'judge_probe_zero_means_no_other_judge': parse_judge_probe(0, b'0') is False,
+        'judge_probe_positive_means_other_judge': parse_judge_probe(0, b'2') is True,
         'suite_reds_parses': (parse_suite_reds('  [gate] suite reds (2): red one @ test/a.test.mjs:1:1 | red two @ test/b.test.mjs:2:1') or {}).get('named') == ['red one @ test/a.test.mjs:1:1', 'red two @ test/b.test.mjs:2:1'],
         'suite_reds_unparsed_keeps_names_empty': (parse_suite_reds('  [gate] suite reds (2): unparsed') or {}).get('named') == [],
     }
@@ -129,20 +188,28 @@ def p_self_red_positives():
 
 def git_in(repo, *args):
     p = subprocess.run(['git', '-C', repo] + list(args), capture_output=True)
-    return p.stdout.decode('utf-8', 'replace').strip()
+    out = p.stdout.decode('utf-8', 'replace').strip()
+    if p.returncode != 0:
+        detail = p.stderr.decode('utf-8', 'replace').strip() or f'exit {p.returncode}'
+        raise RuntimeError(f"git {' '.join(args)} failed: {detail[:240]}")
+    return out
 
 
 def other_judge_running():
-    """其它判定/演练进程在跑？——本轮不抢（套件对负载敏感；BOSS 独立复跑、人工跑同理）。
-    83 的教训：不加 Name 过滤会把「自己」数进去 ⇒ 永远 defer；这里只数 node*/python*，
-    且模式串不含本脚本名（orch-patrol.py）。WMI 慢/退化时宁可照跑（except → False）。"""
-    ps = ("$n=(Get-CimInstance Win32_Process | Where-Object {($_.Name -like 'node*' -or $_.Name -like 'python*') "
-          "-and $_.CommandLine -match '%s'} | Measure-Object).Count; $n" % OTHER_PROCS)
+    """探测其它判定进程；True=已在跑，False=明确无人，None=UNKNOWN。"""
+    ps = ("$ErrorActionPreference='Stop'; try { "
+          "$items=@(Get-CimInstance Win32_Process | Where-Object {($_.Name -like 'node*' -or $_.Name -like 'python*') "
+          "-and $_.CommandLine -match '%s'}); "
+          "[Console]::Out.Write([string]$items.Count) "
+          "} catch { [Console]::Error.Write('judge probe failed'); exit 70 }" % OTHER_PROCS)
     try:
-        p = subprocess.run(['powershell', '-NoProfile', '-Command', ps], capture_output=True, timeout=30)
-        return int((p.stdout or b'').decode('utf-8', 'replace').strip() or '0') > 0
+        exe = powershell_exe()
+        if not exe:
+            return None
+        p = subprocess.run([exe, '-NoProfile', '-Command', ps], capture_output=True, timeout=30)
+        return parse_judge_probe(p.returncode, p.stdout)
     except Exception:
-        return False
+        return None
 
 
 # ---- commit gate ----
@@ -190,7 +257,7 @@ def run_gate(repo, state_dir):
     tail = [ln.strip() for ln in text.splitlines() if ln.strip()][-10:]
     ok = p_gate_ok(rc, text)
     meta = {'head': head, 'at': now_str(), 'rc': rc, 'secs': round(time.time() - t0, 1),
-            'gate': verdict if verdict != 'UNKNOWN' else 'FAIL', 'criteria': criteria,
+            'gate': verdict, 'criteria': criteria,
             'failed_ids': failed_ids, 'suite': suite, 'suite_reds': suite_reds, 'log': os.path.basename(out_log),
             'file': os.path.basename(out_json), 'tail': tail, 'ok': ok}
     with open(out_json, 'w', encoding='utf-8') as fh:
@@ -200,15 +267,39 @@ def run_gate(repo, state_dir):
 
 # ---- tick ----
 
+def load_state(path):
+    if not os.path.exists(path):
+        return {}
+    try:
+        with open(path, encoding='utf-8') as fh:
+            value = json.load(fh)
+        if not isinstance(value, dict):
+            raise ValueError('state root must be an object')
+        return value
+    except (OSError, ValueError, TypeError) as exc:
+        raise StateUnreadable(f"state.json unreadable: {type(exc).__name__}") from exc
+
+
+def status_for_tick(reds, unknowns, gate):
+    if reds:
+        return 'RED'
+    if unknowns:
+        return 'UNKNOWN'
+    if gate.get('gate') == 'PASS' and gate.get('judged'):
+        return 'PASS'
+    skipped = str(gate.get('skipped') or '')
+    if skipped.startswith('defer:'):
+        return 'DEFERRED'
+    if skipped:
+        return 'SKIPPED'
+    return 'UNKNOWN'
+
+
 def do_tick(args, state_dir):
-    state = {}
     sp = os.path.join(state_dir, 'state.json')
-    if os.path.exists(sp):
-        try:
-            state = json.load(open(sp, encoding='utf-8'))
-        except Exception:
-            state = {}
+    state = load_state(sp)
     reds = []
+    unknowns = []
     obs = {}
     # 判据自身的纯函数部分每 tick 默认复跑（毫秒级）：判卷解析/资格判定被改坏必须现形。
     cases, positives = p_self_red_cases(), p_self_red_positives()
@@ -217,48 +308,66 @@ def do_tick(args, state_dir):
                        'positives': '%d/%d' % (sum(positives.values()), len(positives))}
     if not self_red_ok:
         reds.append('self-red')
-    node_ok = os.path.exists(NODE_EXE)
+    node_ok = os.path.isfile(NODE_EXE)
     obs['node'] = {'exe': NODE_EXE, 'ok': node_ok}
     if not node_ok:
         reds.append('node-missing')
+
     head = branch = ''
     dirty = None
+    repo_known = False
     try:
         head = git_in(args.repo, 'rev-parse', 'HEAD')
+        if not head:
+            raise RuntimeError('empty HEAD')
         branch = git_in(args.repo, 'rev-parse', '--abbrev-ref', 'HEAD')
-        dirty = len([l for l in git_in(args.repo, 'status', '--porcelain').splitlines() if l.strip()])
-        obs['repo'] = {'head': head, 'branch': branch, 'dirty': dirty}
-    except Exception as e:  # noqa: BLE001
-        obs['repo'] = {'err': repr(e)}
-        reds.append('repo:exc')
+        status = git_in(args.repo, 'status', '--porcelain')
+        dirty = len([line for line in status.splitlines() if line.strip()])
+        obs['repo'] = {'status': 'known', 'head': head, 'branch': branch, 'dirty': dirty}
+        repo_known = True
+    except Exception as exc:  # noqa: BLE001
+        obs['repo'] = {'status': 'UNKNOWN', 'error': f'{type(exc).__name__}: {str(exc)[:240]}'}
+        unknowns.append('repo:unknown')
 
-    last_judged = state.get('last_judged') or {}
-    gate = {'head': head, 'skipped': 'not-run'}
-    if args.no_gate:
-        gate = {'head': head, 'skipped': 'no-gate(flag)'}
-    elif p_judge_eligible(head, dirty, last_judged.get('head'), args.force_judge) and node_ok and self_red_ok:
-        if other_judge_running():
-            gate = {'head': head, 'skipped': 'defer:judge-running'}
-        else:
-            gate = run_gate(args.repo, state_dir)
-            if not gate.get('ok'):
-                reds.append('commit-gate:%s' % head[:12])
-    elif head and dirty:
+    last_judged = state.get('last_judged') if isinstance(state.get('last_judged'), dict) else {}
+    gate = {'head': head, 'skipped': 'repo-unknown'}
+    if repo_known and dirty:
         gate = {'head': head, 'skipped': 'dirty-tree'}
-    elif head:
+    elif repo_known and args.no_gate:
+        gate = {'head': head, 'skipped': 'no-gate(flag)'}
+    elif repo_known and p_judge_eligible(head, dirty, last_judged.get('head'), args.force_judge):
+        if not node_ok or not self_red_ok:
+            gate = {'head': head, 'skipped': 'preflight-failed'}
+        else:
+            probe = other_judge_running()
+            if probe is None:
+                gate = {'head': head, 'skipped': 'judge-probe-unknown', 'probe': 'UNKNOWN'}
+                unknowns.append('judge-probe:unknown')
+            elif probe:
+                gate = {'head': head, 'skipped': 'defer:judge-running', 'probe': 'RUNNING'}
+            else:
+                gate = run_gate(args.repo, state_dir)
+                gate['judged'] = gate.get('gate') in ('PASS', 'FAIL')
+                if gate.get('gate') == 'FAIL':
+                    reds.append('commit-gate:%s' % head[:12])
+                elif gate.get('gate') == 'UNKNOWN':
+                    unknowns.append('commit-gate:%s' % head[:12])
+    elif repo_known:
         gate = {'head': head, 'skipped': 'already-judged'}
 
-    if gate.get('gate') in ('PASS', 'FAIL'):
+    if gate.get('judged') and gate.get('gate') in ('PASS', 'FAIL'):
         state['last_judged'] = {'head': gate['head'], 'at': gate['at'], 'gate': gate['gate'],
                                 'criteria': gate.get('criteria'), 'file': gate.get('file')}
         hist = state.get('judged_history') or []
         hist.append({'head': gate['head'][:12], 'gate': gate['gate'], 'at': gate['at'], 'secs': gate.get('secs')})
         state['judged_history'] = hist[-10:]
+
+    verdict = status_for_tick(reds, unknowns, gate)
     state.update({
         'updated_at': now_str(),
         'tick_seq': int(state.get('tick_seq') or 0) + 1,
         'head': head, 'branch': branch, 'dirty': dirty, 'repo': args.repo,
-        'verdict': 'OK' if not reds else 'RED', 'reds': reds,
+        'verdict': verdict, 'reds': reds, 'unknowns': unknowns,
         'last_judged': state.get('last_judged'),
         'checks': obs,
         'gate': gate,
@@ -268,20 +377,22 @@ def do_tick(args, state_dir):
     with open(sp, 'w', encoding='utf-8') as fh:
         json.dump(state, fh, ensure_ascii=False, indent=1)
     line = {'at': state['updated_at'], 'tick_seq': state['tick_seq'], 'head': (head or '')[:12],
-            'dirty': dirty, 'verdict': state['verdict'], 'reds': reds,
-            'gate': {k: gate.get(k) for k in ('gate', 'skipped') if gate.get(k) is not None}}
+            'dirty': dirty, 'verdict': verdict, 'reds': reds, 'unknowns': unknowns,
+            'gate': {k: gate.get(k) for k in ('gate', 'skipped', 'probe') if gate.get(k) is not None}}
     with open(os.path.join(state_dir, 'patrol-%s.jsonl' % datetime.date.today().isoformat()),
               'a', encoding='utf-8') as fh:
         fh.write(json.dumps(line, ensure_ascii=False) + '\n')
 
-    print('PATROL_TICK: %s seq=%s head=%s dirty=%s gate=%s reds=%s'
-          % (state['verdict'], state['tick_seq'], (head or '?')[:12], dirty,
-             gate.get('gate') or gate.get('skipped'), reds))
+    print('PATROL_TICK: %s seq=%s head=%s dirty=%s gate=%s reds=%s unknowns=%s'
+          % (verdict, state['tick_seq'], (head or '?')[:12], dirty,
+             gate.get('gate') or gate.get('skipped'), reds, unknowns))
     for r in reds:
         print('PATROL_RED: %s' % r)
+    for unknown in unknowns:
+        print('PATROL_UNKNOWN: %s' % unknown)
     for name in (gate.get('suite_reds') or {}).get('named', []):
         print('PATROL_GATE_RED: %s' % name)
-    return 0 if not reds else 1
+    return 0 if verdict in ('PASS', 'SKIPPED', 'DEFERRED') else 1
 
 
 # ---- self-red / red-demo ----
@@ -354,7 +465,11 @@ def do_status(args, state_dir):
     if not os.path.exists(sp):
         print('PATROL_STATUS: no state yet (%s)' % sp)
         return 1
-    st = json.load(open(sp, encoding='utf-8'))
+    try:
+        st = load_state(sp)
+    except StateUnreadable as exc:
+        print('PATROL_STATUS: UNKNOWN %s' % exc)
+        return 2
     age = ''
     try:
         dt = datetime.datetime.strptime(st['updated_at'], '%Y-%m-%d %H:%M:%S')
@@ -364,7 +479,8 @@ def do_status(args, state_dir):
     print('PATROL_STATUS: verdict=%s updated=%s age=%s tick=%s'
           % (st.get('verdict'), st.get('updated_at'), age, st.get('tick_seq')))
     print('  head=%s dirty=%s repo=%s' % ((st.get('head') or '?')[:12], st.get('dirty'), st.get('repo')))
-    print('  last_judged=%s reds=%s' % (json.dumps(st.get('last_judged'), ensure_ascii=False), st.get('reds')))
+    print('  last_judged=%s reds=%s unknowns=%s'
+          % (json.dumps(st.get('last_judged'), ensure_ascii=False), st.get('reds'), st.get('unknowns')))
     for h in (st.get('judged_history') or [])[-5:]:
         print('  hist: %s %s %s %ss' % (h.get('head'), h.get('gate'), h.get('at'), h.get('secs')))
     return 0
@@ -416,6 +532,9 @@ def main():
             return 0
     try:
         return do_tick(args, state_dir)
+    except StateUnreadable as exc:
+        print('PATROL_TICK: UNKNOWN %s' % exc)
+        return 2
     except Exception as e:  # noqa: BLE001
         print('PATROL_TICK: internal-error %r' % e)
         return 2

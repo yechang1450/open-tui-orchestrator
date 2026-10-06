@@ -8,6 +8,20 @@ import {pathToFileURL, fileURLToPath} from 'node:url';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const family = path.join(root, 'temp');
 const cliEntry = path.join(root, 'cli.mjs');
+const PKG_FILES = ['cli.mjs', 'orch.mjs', 'repair.mjs', 'package.json', 'release.json', 'README.md', 'LICENSE'];
+
+function installFixture() {
+  fs.mkdirSync(family, {recursive: true});
+  const pkg = fs.mkdtempSync(path.join(family, 'windows-only-install-'));
+  for (const rel of PKG_FILES) fs.copyFileSync(path.join(root, rel), path.join(pkg, rel));
+  fs.cpSync(path.join(root, 'scripts'), path.join(pkg, 'scripts'), {recursive: true, filter: src => !src.includes(`${path.sep}node_modules`)});
+  for (const name of ['@openai/codex-sdk', '@lydell/node-pty']) {
+    const dir = path.join(pkg, 'scripts', 'node_modules', ...name.split('/'));
+    fs.mkdirSync(dir, {recursive: true});
+    fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({name, version: '0.0.0'}));
+  }
+  return pkg;
+}
 
 // The front page promises "Windows-only: other platforms get a diagnostic instead of a
 // half-working install". That promise is only as good as its criterion, so it is enforced at
@@ -21,8 +35,8 @@ function linuxPreload() {
   fs.writeFileSync(file, "Object.defineProperty(process, 'platform', {value: 'linux'});\n");
   return pathToFileURL(file).href;
 }
-const runAsLinux = (args) => spawnSync(process.execPath, ['--import', linuxPreload(), cliEntry, ...args],
-  {cwd: root, encoding: 'utf8', windowsHide: true, timeout: 120000, env: {...process.env, ORCH_MAINTENANCE_LOCK: path.join(family, 'no-lock.json')}});
+const runAsLinux = (args, entry = cliEntry, cwd = root, extraEnv = {}) => spawnSync(process.execPath, ['--import', linuxPreload(), entry, ...args],
+  {cwd, encoding: 'utf8', windowsHide: true, timeout: 120000, env: {...process.env, ORCH_MAINTENANCE_LOCK: path.join(cwd, 'no-lock.json'), ...extraEnv}});
 
 test('a non-Windows platform is refused at the entry with one diagnostic line', () => {
   const r = runAsLinux(['--agent', 'codex', '--doctor']);
@@ -37,7 +51,10 @@ test('the platform-neutral entries still work on a non-Windows platform', () => 
   const version = runAsLinux(['--version']);
   assert.equal(version.status, 0, version.stderr || version.stdout);
   assert.match(version.stdout, /open-tui-orchestrator \d+\.\d+\.\d+(?:-\d+)? \(core \d+\.\d+\.\d+(?:-\d+)?\)/, version.stdout);
-  const deps = runAsLinux(['--install-deps']);
-  assert.equal(deps.status, 0, deps.stderr || deps.stdout);
-  assert.match(deps.stdout, /"action":"already-present"/, 'the bootstrap is platform-neutral: ' + deps.stdout);
+  const pkg = installFixture();
+  try {
+    const deps = runAsLinux(['--install-deps'], path.join(pkg, 'cli.mjs'), pkg);
+    assert.equal(deps.status, 0, deps.stderr || deps.stdout);
+    assert.match(deps.stdout, /\"action\":\"already-present\"/, 'the bootstrap is platform-neutral: ' + deps.stdout);
+  } finally { fs.rmSync(pkg, {recursive: true, force: true}); }
 });

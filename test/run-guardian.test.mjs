@@ -74,9 +74,27 @@ test('dead engine before finalization triggers exactly one guarded resume with r
   assert.equal(call.args[1],'--resume-run');assert.equal(call.args[2],runId);
   assert.equal(call.opts.cwd,workspace);assert.equal(call.opts.detached,true);assert.equal(call.opts.windowsHide,true);
   assert.equal(call.opts.env.ORCH_AGENT,'kimi');assert.equal(call.opts.env.ORCH_RUN_ID,runId);assert.equal(call.opts.env.WORKSPACE_DIR,workspace);
+  assert.equal(call.opts.env.ORCH_STATE_DIR,path.join(workspace,'temp','orchestrator'));
   const state=readGuardianState(file);
   assert.equal(state.status,'done');assert.equal(state.restarts,1);
   assert.equal(state.engines.length,2);assert.equal(state.engines[1].by,'guardian');assert.equal(state.engines[1].owner.ProcessId,1001);
+ }finally{fs.rmSync(workspace,{recursive:true,force:true});}
+});
+
+test('guardian resume preserves an explicitly isolated state directory',async()=>{
+ const {workspace,runId}=mkRun({},null);
+ const stateDir=path.join(workspace,'temp','isolated-state');
+ const file=guardianFile(workspace,runId,stateDir);
+ fs.rmSync(path.join(workspace,'temp'),{recursive:true,force:true});
+ atomicJson(file,{runId,guardianPid:0,restarts:0,maxRestarts:1,intervalMs:2000,timeoutMs:60000,createdAt:1_000_000,engines:[{owner:ENGINE,startedAt:1_000_000,by:'initiator'}],status:'watching',updatedAt:1_000_000});
+ try {
+  const summary=({spawns})=>spawns.length?{runId,finishedAt:1_020_000}:{runId,startedAt:1_000_000,agent:'kimi'};
+  const {hooks,spawns}=mkHooks(workspace,runId,{summary,alive:[]});
+  hooks.env.ORCH_STATE_DIR=stateDir;
+  const code=await runMain(workspace,runId,hooks);
+  assert.equal(code,0);assert.equal(spawns.length,1);
+  assert.equal(spawns[0].opts.env.ORCH_STATE_DIR,stateDir);
+  assert.equal(readGuardianState(file).status,'done');
  }finally{fs.rmSync(workspace,{recursive:true,force:true});}
 });
 
@@ -122,6 +140,22 @@ test('pid reuse by an unrelated process is not the engine (identity must match)'
   const code=await runMain(workspace,runId,hooks);
   assert.equal(code,0);assert.equal(spawns.length,1);
   assert.equal(readGuardianState(file).restarts,1);
+ }finally{fs.rmSync(workspace,{recursive:true,force:true});}
+});
+
+test('a lagging snapshot does not orphan the resumed engine identity (bounded grace retry)',async()=>{
+ const {workspace,runId,file}=mkRun({},null);
+ try{
+  const summary=({spawns})=>spawns.length?{runId,finishedAt:1_020_000}:{runId,startedAt:1_000_000,agent:'kimi'};
+  const {hooks,spawns,live}=mkHooks(workspace,runId,{summary,alive:[]});
+  // WMI 滞后：spawn 后的前几次 snapshot 看不到新进程（旧代码单次读失手 → identity=null）。
+  let misses=0;
+  hooks.snapshot=()=>{const m=new Map(live);for(const pid of [...m.keys()])if(pid>=1000){if(misses++<3)m.delete(pid);}return m;};
+  const code=await runMain(workspace,runId,hooks);
+  assert.equal(code,0);assert.equal(spawns.length,1);
+  const state=readGuardianState(file);
+  assert.equal(state.engines.length,2,'the resumed engine identity must be adopted despite a lagging snapshot');
+  assert.equal(state.engines[1].owner.ProcessId,1001);
  }finally{fs.rmSync(workspace,{recursive:true,force:true});}
 });
 
@@ -194,22 +228,25 @@ test('ensureRunGuardian is disabled by env and adopts a live guardian',()=>{
 test('runWindows arms the guardian on fresh runs only, and guardian failure never fails the run',async()=>{
  fs.mkdirSync(family,{recursive:true});
  const workspace=fs.mkdtempSync(path.join(family,'guardian-runner-'));
- const calls=[];
+ const calls=[];let spawnCalls=0;
  const hooks={
   plan:async()=>[{title:'A',tasks:[{prompt:'执行甲'}]}],
   compact:p=>p,infer:()=>[],prompt:p=>p,
   launcher:key=>({pidf:path.join(workspace,'window-'+key+'.pid')}),
-  register:()=>{},unregister:()=>{},cleanup:()=>{},spawn:async()=>false,readPid:()=>0,
+  register:()=>{},unregister:()=>{},cleanup:()=>{},spawn:async()=>{spawnCalls++;return false;},readPid:()=>0,
   guardian:g=>{calls.push(g);throw new Error('guardian spawn exploded');},
  };
  try {
-  const sum=await runWindows('执行甲',hooks,{workspace,capacity:8,runId:'guarded',auth:'test',coordinator:path.join(workspace,'temp','coordinator'),timeoutMs:90000});
-  assert.equal(sum.success,false);assert.equal(sum.taskResults.T001.status,'popup-failed');
+  const previousUnproductive=process.env.ORCH_UNPRODUCTIVE_RETRIES;
+  process.env.ORCH_UNPRODUCTIVE_RETRIES='0';
+  const sum=await runWindows('执行甲',hooks,{workspace,capacity:8,runId:'guarded',auth:'test',coordinator:path.join(workspace,'temp','coordinator'),timeoutMs:90000,maxAttempts:2});
+  assert.equal(sum.success,false);assert.equal(sum.taskResults.T001.status,'failed');assert.equal(spawnCalls,2);
   assert.equal(calls.length,1);
   assert.equal(calls[0].runId,'guarded');assert.equal(calls[0].workspace,path.resolve(workspace));
   assert.equal(calls[0].timeoutMs,90000);assert.ok(calls[0].owner?.ProcessId>0);
-  const resumed=await runWindows('',hooks,{workspace,capacity:8,runId:'guarded',auth:'test',coordinator:path.join(workspace,'temp','coordinator'),resume:true,agent:'codex'});
+  const resumed=await runWindows('',hooks,{workspace,capacity:8,runId:'guarded',auth:'test',coordinator:path.join(workspace,'temp','coordinator'),resume:true,agent:'codex',maxAttempts:2});
   assert.equal(resumed.generation,2);
   assert.equal(calls.length,1); // resumed runs stay under the original guardian
+  if(previousUnproductive===undefined)delete process.env.ORCH_UNPRODUCTIVE_RETRIES;else process.env.ORCH_UNPRODUCTIVE_RETRIES=previousUnproductive;
  }finally{await new Promise(r=>setTimeout(r,500));fs.rmSync(workspace,{recursive:true,force:true});}
 });

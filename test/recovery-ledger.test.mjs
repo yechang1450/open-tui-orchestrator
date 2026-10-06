@@ -30,6 +30,7 @@ test('saved recovery ledger rejects inconsistent inventories without mutating in
     state => { state.acceptanceSha256 = 'not-a-sha256-hex'; },
     state => { state.results.B1.attempts = [{runId: 'ledger', token: 't', file: 'f', taskIds: ['T001']}];
                state.results.B1.launcherFiles = {lp: path.join(path.dirname(process.cwd()), 'win-launch-evil.ps1'), pidf: 'p', rf: 'r'}; },
+    state => { state.results.B1.attempts = [{runId: 'ledger', token: 't', file: path.join(path.dirname(process.cwd()), 'attempt.json'), taskIds: ['T001']}]; },
   ];
   for (const change of changes) {
     const value = structuredClone(valid);
@@ -40,7 +41,7 @@ test('saved recovery ledger rejects inconsistent inventories without mutating in
   }
   // launcherFiles 解析到工作区之内（含相对路径形式）是合法的，不得误伤。
   const legit = structuredClone(valid);
-  legit.results.B1.attempts = [{runId: 'ledger', token: 't', file: 'f', taskIds: ['T001']}];
+  legit.results.B1.attempts = [{runId: 'ledger', token: 't', file: path.join(process.cwd(), 'temp', 'orchestrator', 'runs', 'ledger', 'attempts', 'B1', '1', 'attempt.json'), taskIds: ['T001']}];
   legit.results.B1.launcherFiles = {lp: 'temp/win-launch-x.ps1', pidf: path.join(process.cwd(), 'temp', 'window-x.pid'), rf: path.join(process.cwd(), 'temp', 'win-x.result.json')};
   legit.acceptanceSha256 = 'a'.repeat(64);
   validateRecoverySummary(legit);
@@ -50,7 +51,7 @@ test('launcher containment accepts drive-root workspaces', () => {
   // path.resolve 后的盘符根自带尾分隔符；拼sep变双分隔符会把根工作区的合法账本全误判逃逸。
   const root = path.parse(process.cwd()).root;
   const state = fixture(root);
-  state.results.B1.attempts = [{runId: 'ledger', token: 't', file: 'f', taskIds: ['T001']}];
+  state.results.B1.attempts = [{runId: 'ledger', token: 't', file: path.join(root, 'temp', 'orchestrator', 'runs', 'ledger', 'attempts', 'B1', '1', 'attempt.json'), taskIds: ['T001']}];
   state.results.B1.launcherFiles = {lp: path.join(root, 'temp', 'win-launch-x.ps1'), pidf: path.join(root, 'temp', 'window-x.pid'), rf: path.join(root, 'temp', 'win-x.result.json')};
   validateRecoverySummary(state);
   const escaped = structuredClone(state);

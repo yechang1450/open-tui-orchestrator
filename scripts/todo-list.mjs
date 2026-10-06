@@ -73,7 +73,20 @@ function check(text, strict) {
 
 export { check, reportOk };
 
-const isMain = process.argv[1] && process.argv[1].replace(/\\/g, '/').toLowerCase() === fileURLToPath(import.meta.url).replace(/\\/g, '/').toLowerCase();
+// junction/符号链接入口下 argv[1] 是链接路径而 import.meta.url 已是 realpath；纯词法比较会把
+// 主入口误判为 import（校验器静默不跑=假通过）。两侧都解析真实路径再比较，大小写只在 win32 折叠。
+let entryIdentityError = null;
+const isMain = (() => {
+  try {
+    const self = fs.realpathSync(fileURLToPath(import.meta.url));
+    const entry = process.argv[1] ? fs.realpathSync(process.argv[1]) : '';
+    return !!entry && (process.platform === 'win32' ? entry.toLowerCase() === self.toLowerCase() : entry === self);
+  } catch (error) { entryIdentityError = error; return false; }
+})();
+if (entryIdentityError) {
+  console.error('[orchestrator] FATAL: ENTRY_IDENTITY_UNAVAILABLE: ' + (entryIdentityError?.message || String(entryIdentityError)));
+  process.exit(1);
+}
 if (isMain) {
   if (!file) {
     console.log('用法: node todo-list.mjs --check <清单文件> [--json] [--strict]');

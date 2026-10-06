@@ -1,7 +1,9 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import {spawn} from 'node:child_process';
+import {StringDecoder} from 'node:string_decoder';
 import {expandUnitArgs} from './unit-command.mjs';
 import {nativeArgumentLines} from './native-argv.mjs';
 
@@ -24,21 +26,47 @@ export async function runUnitPlanner(config, prompt, cwd) {
     return await new Promise((resolve, reject) => {
       const child = spawn(unit.bin, args, { cwd, env: process.env, windowsHide: true, shell: false, stdio: [useStdin ? 'pipe' : 'ignore', 'pipe', 'pipe'] });
       if (useStdin && child.stdin) { try { child.stdin.end(String(prompt)); } catch { /* stdin closed early */ } }
-      let raw = '', errorText = '', timedOut = false;
+      let raw = '', errorText = '', timedOut = false, oversized = false, settled = false;
+      let exitCode = null, timer = null, killTimer = null, graceTimer = null;
+      const MAX_OUTPUT_BYTES = 8000000;
       const timeoutMs = (() => { const v = Number(process.env.ORCH_DECOMPOSE_TIMEOUT_MS); return Number.isFinite(v) && v > 0 ? v : 240000; })();
-      const timer = setTimeout(() => { timedOut = true; child.kill(); }, unit.timeoutMs ? Math.min(unit.timeoutMs, timeoutMs) : timeoutMs);
-      child.stdout.on('data', (b) => { raw += b; if (raw.length > 8000000) child.kill(); });
-      child.stderr.on('data', (b) => { errorText += b; });
-      child.on('error', (e) => { clearTimeout(timer); reject(e); });
-      child.on('exit', (code) => {
-        clearTimeout(timer);
+      const finish = (code) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer); if (killTimer) clearTimeout(killTimer); if (graceTimer) clearTimeout(graceTimer);
         try {
-          if (timedOut || code !== 0) throw new Error((timedOut ? 'PLANNER_TIMEOUT' : 'PLANNER_FAILED: exit ' + code) + (errorText ? ': ' + String(errorText).slice(0, 300) : ''));
+          if (oversized) throw new Error('PLANNER_OUTPUT_TOO_LARGE: unit output exceeded ' + MAX_OUTPUT_BYTES + ' bytes');
+          if (timedOut) throw new Error('PLANNER_TIMEOUT' + (errorText ? ': ' + String(errorText).slice(0, 300) : ''));
+          if (code !== 0) throw new Error('PLANNER_FAILED: exit ' + code + (errorText ? ': ' + String(errorText).slice(0, 300) : ''));
           const final = String(raw || '').trim();
           if (!final) throw new Error('PLANNER_EMPTY_RESPONSE' + (errorText ? ': ' + String(errorText).slice(0, 300) : ''));
           resolve({ final });
         } catch (e) { reject(e); }
+      };
+      timer = setTimeout(() => {
+        if (child.exitCode !== null || child.signalCode !== null) return;
+        timedOut = true;
+        try { child.kill(); } catch { /* already gone */ }
+        killTimer = setTimeout(() => {
+          try { child.kill('SIGKILL'); } catch { /* already gone */ }
+          killTimer = setTimeout(() => finish(exitCode), 5000);
+        }, 5000);
+      }, unit.timeoutMs ? Math.min(unit.timeoutMs, timeoutMs) : timeoutMs);
+      const decoder = new StringDecoder('utf8');
+      let outputBytes = 0;
+      child.stdout.on('data', (b) => {
+        outputBytes += b.length;
+        raw += decoder.write(b);
+        if (!oversized && outputBytes > MAX_OUTPUT_BYTES) { oversized = true; try { child.kill(); } catch { /* already gone */ } }
       });
+      child.stdout.on('end', () => { raw += decoder.end(); });
+      child.stderr.on('data', (b) => { errorText += b; });
+      child.on('error', (e) => { if (settled) return; settled = true; clearTimeout(timer); if (killTimer) clearTimeout(killTimer); if (graceTimer) clearTimeout(graceTimer); reject(e); });
+      child.on('exit', (code) => {
+        exitCode = code;
+        if (!settled) graceTimer = setTimeout(() => finish(exitCode), 2000);
+      });
+      child.on('close', (code) => { finish(exitCode !== null ? exitCode : code); });
     });
   } finally {
     try { fs.rmSync(planDir, { recursive: true, force: true }); } catch { /* best effort */ }
@@ -50,6 +78,7 @@ export function writeUnitLauncher(config, { key, prompt, suffix, workspace, temp
   const stem = String(key + '-' + suffix).replace(/[^a-zA-Z0-9_-]/g, '-');
   const token = TOKEN_RE.exec(prompt)?.[1];
   if (!token) throw new Error((unit.label || unit.id) + ' unit requires a completion token');
+  const sanctionToken = crypto.randomBytes(18).toString('hex');
   fs.mkdirSync(temp, { recursive: true });
   const lp = path.join(temp, 'win-launch-' + stem + '.ps1');
   const pidf = path.join(temp, 'window-' + stem + '.pid');
@@ -71,10 +100,11 @@ export function writeUnitLauncher(config, { key, prompt, suffix, workspace, temp
     'chcp 65001 | Out-Null',
     '[Console]::InputEncoding = [System.Text.Encoding]::UTF8',
     'Write-Host "============================================="',
-    'Write-Host "  ' + String(unit.label || unit.id).toUpperCase() + ' TASK RUNNING - closes automatically on completion"',
+    'Write-Host ' + quote('  ' + String(unit.label || unit.id).toUpperCase() + ' TASK RUNNING - closes automatically on completion'),
     'Write-Host "============================================="',
     `Set-Location -LiteralPath ${quote(workspace)}`,
     `$env:ORCH_WINDOW = '1'`,
+    `$env:ORCH_WINDOW_TOKEN = ${quote(sanctionToken)}`,
     `$token = ${quote(token)}`,
     `$log = ${quote(log)}`,
     `$resultFile = ${quote(rf)}`,
@@ -103,5 +133,5 @@ export function writeUnitLauncher(config, { key, prompt, suffix, workspace, temp
     'exit 0',
   ].join('\r\n');
   fs.writeFileSync(lp, '\uFEFF' + body, 'utf8');
-  return { lp, pidf, pf, rf, log };
+  return { lp, pidf, pf, rf, log, sanctionToken };
 }

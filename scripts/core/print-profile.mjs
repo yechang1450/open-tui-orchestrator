@@ -22,10 +22,12 @@ export function profilesDir(env = process.env) {
 }
 
 export function loadProfile(id, env = process.env) {
-  const file = path.join(profilesDir(env), String(id || '') + '.json');
+  const requested = String(id || '');
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(requested) || requested.includes('..')) return null;
+  const file = path.join(profilesDir(env), requested + '.json');
   try {
     const profile = JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, ''));
-    if (profile && profile.schema === 1 && profile.id && Array.isArray(profile.bin) && profile.bin.length) return profile;
+    if (profile && profile.schema === 1 && profile.id === requested && Array.isArray(profile.bin) && profile.bin.length) return profile;
     return null;
   } catch { return null; }
 }

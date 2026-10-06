@@ -8,12 +8,14 @@ import {coordinatorDir,reserve,bind,release,prepare,atomicJson,launcherIdentity,
 import {scheduleReady,recoveryTasks,taskPolicy,validateRecoverySummary} from './recovery.mjs';
 import {readCheckpoints} from './checkpoint.mjs';
 import {boardSignature,boardJson,boardSummaryLine} from './run-board.mjs';
-import {memConfig, loadUnitMemory, saveUnitMemory, recordUnitPeak, unitMemoryStorePath} from './unit-memory.mjs';
+import {runDirectory} from './runtime-context.mjs';
+import {memConfig, loadUnitMemory, saveUnitMemory, recordUnitPeak, unitMemoryStorePath, unitEstimateMb, estimateBlockMemoryMb} from './unit-memory.mjs';
 import {spawn} from 'node:child_process';
 // 队列退避参数（env 可调，测试提速用）：首等 base、指数 ×1.7、封顶 max（抖动上界 ×1.2）。
 const WAIT_BACKOFF={base:Math.max(50,Number(process.env.ORCH_WAIT_BACKOFF_MS||600)||600),max:0};
 WAIT_BACKOFF.max=Math.max(WAIT_BACKOFF.base,Number(process.env.ORCH_WAIT_BACKOFF_MAX_MS||5000)||5000);
-export {scheduleReady,recoveryTasks};
+export {scheduleReady,recoveryTasks,runDirectory};
+export function escapeCmdBatchPath(value) { return String(value).replaceAll('%', '%%'); }
 const pause=ms=>new Promise(r=>setTimeout(r,ms));
 // 单元停滞看门狗（2026-09-17 用户令：不要让调用方手动 Ctrl-D 退出僵死窗）：
 // agent 进程活着但不再产出（典型：账号额度耗尽后 TUI 停在错误横幅、或界面卡在等输入）时，
@@ -86,6 +88,10 @@ const TRANSIENT_BACKOFF_MS=Math.max(0,Number(process.env.ORCH_TRANSIENT_BACKOFF_
 // 进度戳：任一证据文件（检查点/结果/启动器 out·pty 日志/宿主会话）mtime 前进即视为有进展。
 // 只读 mtime，不解析宿主格式——对全部宿主一视同仁，也不依赖模型侧配合。
 function progressStamp(paths){let t=0;for(const p of paths){try{t=Math.max(t,fs.statSync(p).mtimeMs);}catch{}}return t;}
+export function firstCheckpointTimedOut({firstCheckpointMs,now,baseline,checkpointMtime}){
+  const limit=Math.max(0,Number(firstCheckpointMs)||0);
+  return !!limit&&Number(now)-Number(baseline)>limit&&Number(checkpointMtime||0)<=Number(baseline);
+}
 export async function waitWithStallWatchdog(hooks,la,session,active,timeoutMs){
   const stallMs=Math.max(1000,Number(process.env.ORCH_UNIT_STALL_MS||UNIT_STALL_MS)||UNIT_STALL_MS);
   // 首检查点期限（2026-09-18 用户令“执行遇到问题甚至中断要能自愈”）：契约要求每项任务“开始前”先写
@@ -98,12 +104,12 @@ export async function waitWithStallWatchdog(hooks,la,session,active,timeoutMs){
   const stem=path.basename(String(la.lp||'')).replace(/\.ps1$/,'');
   const paths=[active.file,la.rf,la.pidf,path.join(base,stem+'.out.log'),path.join(base,stem+'.pty.log')];
   if(typeof session==='string')paths.push(session);else if(session&&typeof session==='object'&&session.file)paths.push(session.file);
-  const started=Date.now();let last=progressStamp(paths)||started;let iv=null;
+  const started=Date.now(),baseline=Number(active?.createdAt)||started;let last=progressStamp(paths)||baseline;let iv=null;
   const watchdog=new Promise(resolve=>{iv=setInterval(()=>{const now=Date.now(),s=progressStamp(paths);
     if(s>last)last=s;
     const cpDir=path.join(path.dirname(active.file),'checkpoints');
     const cpMs=firstCheckpointMs?(()=>{try{return fs.statSync(cpDir).mtimeMs;}catch{return 0;}})():0;
-    if(firstCheckpointMs&&now-started>firstCheckpointMs&&cpMs<=started){clearInterval(iv);resolve({stall:'unproductive: no task checkpoint within '+Math.round(firstCheckpointMs/1000)+'s (the unit never started its first task); retrying within the attempt budget'});}
+    if(firstCheckpointTimedOut({firstCheckpointMs,now,baseline,checkpointMtime:cpMs})){clearInterval(iv);resolve({stall:'unproductive: no task checkpoint within '+Math.round(firstCheckpointMs/1000)+'s (the unit never started its first task); retrying within the attempt budget'});}
     else if(now-last>stallMs){clearInterval(iv);resolve({stall:'stalled: no unit progress for '+Math.round((now-last)/1000)+'s; retrying within the attempt budget'});}
     else if(now-started>timeoutMs){clearInterval(iv);resolve({stall:'stalled: unit timeout after '+Math.round((now-started)/1000)+'s with no result'});}
   },Math.min(5000,Math.max(250,Math.floor(stallMs/4))));});
@@ -148,10 +154,6 @@ export async function waitForProcessExit(expected,{timeoutMs=15000,intervalMs=25
 async function coordinate(fn,deadline) {
   while(Date.now()<deadline){try{return fn();}catch(e){if(!/busy|initializing|abandoned/.test(e.message))throw e;await pause(200);}}
   throw new Error('Coordinator transaction timeout');
-}
-export function runDirectory(workspace,runId) {
-  if(!/^[a-zA-Z0-9_-]{1,100}$/.test(runId||''))throw new Error('A valid --run-id is required');
-  return path.join(workspace,'temp','orchestrator','runs',runId);
 }
 // 调用方给的验收契约与运行自带的账本一样是**输入文件**：畸形必须点名文件，不能甩裸 JSON 偏移
 // （实测旧行为：'Expected \',\' or \'}\' after property value in JSON at position 23'——不知道是哪个文件坏了）。
@@ -219,8 +221,8 @@ export function collectVerification(sum,checks,workspace) {
   }
   return sum;
 }
-export function verifyRun(workspace,runId,acceptanceFile) {
-  const dir=runDirectory(workspace,runId),file=path.join(dir,'summary.json');
+export function verifyRun(workspace,runId,acceptanceFile,stateDir) {
+  const dir=runDirectory(workspace,runId,stateDir),file=path.join(dir,'summary.json');
   // 机器可调用契约：未知 run 必须 fail-closed 且只回一行可读诊断（不许裸栈帧/ENOENT 甩路径）。
   if(!fs.existsSync(file))throw new Error('Run not found: '+runId+' (no summary.json in '+dir+')');
   const sum=readRunLedger(file,runId);
@@ -245,7 +247,7 @@ export async function runWindows(request,hooks,options={}) {
   // planning keeps the full memory-derived capacity so block shape is unchanged.
   // let（非 const）：resume 时若当前可用内存低于建账块数，只收紧准入，不失败。
   let windowCap=Math.max(1,Math.min(capacity,Number(options.windowCap)||capacity));
-  const runId=options.runId||crypto.randomUUID(),dir=runDirectory(workspace,runId),summaryFile=path.join(dir,'summary.json');
+  const runId=options.runId||crypto.randomUUID(),dir=runDirectory(workspace,runId,options.stateDir),summaryFile=path.join(dir,'summary.json');
   const deadline=Date.now()+(options.timeoutMs||21600000),coordinator=options.coordinator||coordinatorDir(workspace);
   const runKey='run:'+dir.toLowerCase(),claim=await coordinate(()=>claimRun(coordinator,runKey),deadline);
   let sum;
@@ -308,7 +310,7 @@ export async function runWindows(request,hooks,options={}) {
     // Auto-recovery: a detached guardian watches this controller and relaunches
     // --resume-run if it dies before finalizing. Fresh runs only — a resumed run
     // is already watched by the original guardian. Never let the guard fail a run.
-    if(!options.resume&&hooks.guardian)try{hooks.guardian({runId,workspace,coordinator,timeoutMs:options.timeoutMs||21600000,owner:claim.owner,dir});}catch(e){console.warn('[guardian] unavailable: '+e.message);}
+    if(!options.resume&&hooks.guardian)try{hooks.guardian({runId,workspace,stateDir:options.stateDir,coordinator,timeoutMs:options.timeoutMs||21600000,owner:claim.owner,dir});}catch(e){console.warn('[guardian] unavailable: '+e.message);}
     // Optional spawn pacing (options.spawnStaggerMs, from ORCH_WINDOW_STAGGER_MS):
     // serializes window births within this run so a burst of first turns cannot
     // trip the agent account's per-minute rate limiter. 0 keeps the burst as-is.
@@ -367,7 +369,7 @@ export async function runWindows(request,hooks,options={}) {
             // 说明这轮 agent 只是“说了没干”（模型偶发跑偏/被中断/只顾分析），属可自愈的瞬时行为，
             // 不该把失败直接甩给调用方。次数由 ORCH_UNPRODUCTIVE_RETRIES 控制（默认 1，0=关闭）。
             const unproductiveMax=(()=>{const v=Number(process.env.ORCH_UNPRODUCTIVE_RETRIES);return Number.isFinite(v)&&v>=0?Math.floor(v):1;})();
-            const noProgress=recovery.pending.length>0&&recovery.pending.every(id=>!cps[id]);
+            const noProgress=recovery.pending.length>0&&recovery.pending.every(id=>!cps[id]&&!taskPolicy(checks[id]).retryVeto);
             if(noProgress&&unproductiveRetries<unproductiveMax){
               unproductiveRetries++;transientGrant=true;
               e.unproductiveRetries=(e.unproductiveRetries||0)+1;
@@ -395,10 +397,19 @@ export async function runWindows(request,hooks,options={}) {
           active={file:attemptFile,runId,token,number,taskIds:recovery.pending,createdAt:Date.now()};
           atomicJson(attemptFile,active);e.attempts.push(active);
           const helper=fileURLToPath(new URL('./checkpoint.mjs',import.meta.url));
-          const command=(id,state)=>`node "${helper}" "${attemptFile}" ${id} ${state}`;
+          // checkpoint 载体（2026-10-01）：宿主直接拼 `node "abs" "abs" <id> <state>` 在跨 shell 场景下会被
+          // 引号语义吃掉（cmd 把引号并进路径 ⇒ MODULE_NOT_FOUND；Git Bash 宿主则会陷入 MSYS/cmd 多层转义的
+          // 自我推演而根本不执行）。这里为每个 attempt 预生成一个路径写死的 checkpoint.cmd，prompt 只下发
+          // 单一令牌 + id + state，宿主无需理解任何 shell 语义。
+          const cpCmdFile=path.join(path.dirname(attemptFile),'checkpoint.cmd');
+          fs.writeFileSync(cpCmdFile,
+            '@echo off\r\n'+
+            'node "'+escapeCmdBatchPath(helper)+'" "'+escapeCmdBatchPath(attemptFile)+'" %1 %2\r\n'+
+            'exit /b %errorlevel%\r\n','utf8');
+          const command=(id,state)=>`"${cpCmdFile}" ${id} ${state}`;
           const body=options.auth+'\n本窗目录为 '+workspace+'；所有工具 workdir 保持此目录，除非原始任务明确另指定。\n'+
             '仅按顺序执行下列待办任务。每项开始前必须成功执行 started 命令，失败则停止该项，禁止重复执行。完成并自验后立即执行 completed 命令。每项都立即写检查点，不能等整块完成。任何项失败则停止后续任务，说明情况并退出本轮，不自行重跑整块。\n'+
-            '【硬规则】原始任务若包含要在 Windows 上执行的命令行（尤其含引号或 \\" 转义的 cmd 风格命令行），必须把整行原样交给 cmd /c 执行，禁止用 PowerShell 直接执行、也禁止按 PowerShell 语法改写参数——PowerShell 会吞掉或重排引号，导致目标程序收到的参数失真。\n'+
+            '【硬规则】检查点命令形如 "<路径>\\checkpoint.cmd" <任务ID> <状态> —— 它是一条**完整可执行命令**（路径已写死在该 .cmd 内）。PowerShell（Codex Windows 默认 shell）执行带引号路径时必须使用调用运算符 `& "<路径>\\checkpoint.cmd" <任务ID> <状态>`；cmd.exe 或 Git Bash 则使用各自宿主的原生执行方式，不要把命令再交给另一层 shell 包装，也不要把路径内引号当成命令名。不要拆分、重组或改写路径和参数。执行后必须确认该 attempt 的 checkpoints/<任务ID>.json 已生成（状态为 started 或 completed），未生成即视为该命令失败。\n'+
             (recovery.verified.length?'已独立验收的任务禁止重做：'+recovery.verified.join(', ')+'\n':'')+
             '【硬规则】本窗只做下列任务：不要阅读、分析或讨论本提示词的生成方式或编排器的实现（runner、模板、检查点工具内部细节），也不要据此推断任务背景；下面给出的命令行照原样执行即可。\n'+
             recovery.pending.map(id=>`任务 ${id}\n开始前：${command(id,'started')}\n原始任务：${tasks.find(t=>t.id===id).prompt}\n完成自验后：${command(id,'completed')}`).join('\n\n')+
@@ -407,10 +418,15 @@ export async function runWindows(request,hooks,options={}) {
           catch(error){await coordinate(()=>release(coordinator,leaseId),deadline);throw error;}
           e={...e,status:'launching',leaseId,token,launcherFiles:la,launcher:null,endedAt:null,startedAt:Date.now()};sum.results[r.key]=e;persist();
           try {
-            hooks.register({id:leaseId,runId,title:r.title,keys:r.keys,pidFile:la.pidf,pid:0,pending:true,reservedAt:Date.now()});
+            hooks.register({id:leaseId,runId,title:r.title,keys:r.keys,pidFile:la.pidf,pid:0,pending:true,sanctionToken:la.sanctionToken,reservedAt:Date.now()});
             await coordinate(()=>prepare(coordinator,leaseId,la.pidf),deadline);
             await stagger();
-            if(!await hooks.spawn(la.lp,r.title,la.pidf,1,token))throw new Error('Visible window did not start');
+            // 起窗重试预算：交给 spawnHeadlessWithRetry 自己的默认值（3），不再写死 1。
+            // 实测（exam-v6-opencode）：传 1 时 35s 确认窗一次不过即抛 'Visible window did not start'，
+            // 一个 12 题巨块因此整块判死（run.log: "launch FAILED after 1 attempts for [fit-merged-12]"）。
+            // spawnHeadlessWithRetry 的形参默认值本就是 3，原注释写明「keep the retry budget for
+            // cold-start hiccups」——调用方传 1 把这层保护作废了。
+            if(!await hooks.spawn(la.lp,r.title,la.pidf,3,token))throw new Error('Visible window did not start');
             spawnConfirmed=true;
             // 秒退单元：结果文件已落盘时无需身份绑定（launcher 已退出，身份无法取得），直接进入结果读取路径。
             if(fs.existsSync(la.rf)){
@@ -447,14 +463,14 @@ export async function runWindows(request,hooks,options={}) {
               const firstCheckpointMs=rawFirst===undefined?300000:Math.max(0,Number(rawFirst)||0);
               const cpDir=path.join(path.dirname(active.file),'checkpoints');
               const cpDirMtime=()=>{try{return fs.statSync(cpDir).mtimeMs;}catch{return 0;}};
-              const waitStarted=Date.now();
+              const waitStarted=Date.now(),waitBaseline=Number(active?.createdAt)||waitStarted;
               let stall=null;
               while(Date.now()<endAt){
                 if(fs.existsSync(la.rf)){done=true;exitCode=hooks.exitCode(la.rf);break;}
                 const cps=blockCheckpoints(e,b,sum);
                 const rec=recoveryTasks(tasks,cps,checks,workspace);
                 if(rec.verified.length===tasks.length){done=true;exitCode=0;break;}
-                if(firstCheckpointMs&&Date.now()-waitStarted>firstCheckpointMs&&cpDirMtime()<=waitStarted){
+                if(firstCheckpointTimedOut({firstCheckpointMs,now:Date.now(),baseline:waitBaseline,checkpointMtime:cpDirMtime()})){
                   stall='unproductive: no task checkpoint within '+Math.round(firstCheckpointMs/1000)+'s (the unit never started its first task; a hidden TUI can be sitting on a prompt that needs a human); retrying within the attempt budget';
                   break;
                 }
@@ -463,7 +479,7 @@ export async function runWindows(request,hooks,options={}) {
               waited=stall?{stall}:{result:{done,exitCode}};
             }
             if(waited.stall){e.status='failed';e.reason=waited.stall;}
-            else {const result=waited.result||{};e.exitCode=result.exitCode??hooks.exitCode(la.rf);e.status=result.done?'awaiting-verification':'timeout';}
+            else {const result=waited.result||{};e.exitCode=result.exitCode??hooks.exitCode(la.rf);e.status=result.done?'awaiting-verification':'timeout';if(result.terminal){e.status='failed';e.reason=result.text||'Adapter preflight failed';e.terminalFailure=true;}}
           }
         }catch(error){e.status='failed';e.reason=error.message;}
         finally {
@@ -479,13 +495,25 @@ export async function runWindows(request,hooks,options={}) {
           e.endedAt=Date.now();active.endedAt=e.endedAt;active.exitCode=e.exitCode;
           collectVerification(sum,checks,workspace);persist();
         }
+        if(e.terminalFailure){mark(r,'failed',e.reason||'Adapter preflight failed');return;}
         if(e.status==='verified')return;
-        if(!identity&&e.attempts.length&&e.reason==='Visible window did not start'){mark(r,'popup-failed',e.reason);return;}
+        // A launcher-start failure is recoverable. Let the normal attempt,
+        // transient, and unproductive-retry budgets decide when to stop; an
+        // early popup-failed return here used to bypass all recovery.
       }
       mark(r,'timeout','Run deadline exhausted');
     }
+    const memCfg=memConfig();
+    const memStore=loadUnitMemory(unitMemoryStorePath(process.env));
+    const unitMb=unitEstimateMb(memStore,options.agent||sum.agent||'caller',memCfg);
+    const expectedMemory=r=>estimateBlockMemoryMb(r.b,unitMb,memCfg);
+    const onReadyWave=ready=>{
+      const order=ready.map(({record,score})=>record.key+'('+score+'MB)').join(' -> ');
+      console.log('[schedule] ready wave launch order: '+order);
+    };
     await scheduleReady(sum.plan,async r=>{try{await execute(r);}catch(e){mark(r,'failed',e.message);}},key=>sum.results[key]?.status,
-      (r,failed)=>mark(r,'blocked','Predecessors not verified: '+failed.join(', ')));
+      (r,failed)=>mark(r,'blocked','Predecessors not verified: '+failed.join(', ')),
+      {priority:expectedMemory,onWave:onReadyWave});
     for(const r of sum.plan)if(!TERMINAL.has(sum.results[r.key]?.status))mark(r,'failed','No terminal result');
     sum.finishedAt=Date.now();sum.success=summaryComplete(sum,true);persist();
     console.log(`[run] finalized runId=${runId} success=${sum.success} summary=${summaryFile}`);

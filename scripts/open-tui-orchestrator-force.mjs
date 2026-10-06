@@ -35,6 +35,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { powershellExe, systemToolExe } from "./core/contracts.mjs";
+import { launcherIdentity, processSnapshot, sameProcess } from "./core/leases.mjs";
 
 // 锚定 SystemRoot：裸名会先按进程 cwd（任意工作区）解析，防二进制投毒。
 const PS_EXE = powershellExe();
@@ -83,7 +84,7 @@ function pidAlive(pid) {
       const out = String(r.stdout || "");
       if (!/"\S+","\d+"/.test(out)) return false; // 该 PID 无对应行
       const img = String(out.split(/\r?\n/)[0] || "").split(",")[0].replace(/"/g, "");
-      const codexish = /codex|powershell/i.test(img);
+      const codexish = /codex|powershell|pwsh/i.test(img);
       if (!codexish) return false;
       // 命令行动态核对：编排器工作窗的 launcher 命令行是 `powershell -File ...\win-launch-*.ps1`
       // （其 agent 子进程命令行不含编排器字样），故需命中 win-launch-*.ps1；同时保留 orchestrate-sdk.mjs / --run-windows 以兼容旧判定。
@@ -97,15 +98,86 @@ function pidAlive(pid) {
   }
   try { process.kill(pid, 0); return true; } catch (e) { return e && (e.code === "EPERM" || e.code === "EACCES") ? true : false; } // EPERM/EACCES = 存在但无权限, 不视为 dead
 }
-// Only windows whose process is really alive are returned. A record whose pidFile exists but whose
-// process has already exited is treated as NOT alive and dropped from the result.
+// The registry is cooperative state, not proof by itself. A live record must carry the
+// identity captured from the exact launcher path, and that identity must still match the
+// current process snapshot (including its creation time via sameProcess()).
+function processParentMap() {
+  if (process.platform !== "win32") return null;
+  const rawTimeout = Number(process.env.ORCH_PS_TIMEOUT_MS);
+  const timeout = Number.isFinite(rawTimeout) && rawTimeout > 0 ? Math.min(120000, Math.ceil(rawTimeout)) : 15000;
+  try {
+    const result = spawnSync(PS_EXE, ["-NoProfile", "-Command", "$ErrorActionPreference='Stop'; Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId | ConvertTo-Json -Compress"], { encoding: "utf8", windowsHide: true, timeout });
+    if (result.status !== 0) return null;
+    const parsed = JSON.parse(String(result.stdout || "null"));
+    const rows = Array.isArray(parsed) ? parsed : (parsed ? [parsed] : []);
+    const parents = new Map();
+    for (const row of rows) {
+      const pid = Number(row?.ProcessId);
+      const parent = Number(row?.ParentProcessId);
+      if (Number.isInteger(pid) && pid > 0 && Number.isInteger(parent) && parent >= 0) parents.set(pid, parent);
+    }
+    return parents;
+  } catch {
+    return null;
+  }
+}
+
+function exactLauncherIdentity(w, snapshot) {
+  if (!w?.pidFile || !w?.identity || !isRegularFile(w.pidFile)) return null;
+  const pid = pidOf(w);
+  if (!pid || Number(w.identity.ProcessId) !== pid) return null;
+  const actual = snapshot?.get(pid);
+  if (!actual || !sameProcess(w.identity, actual)) return null;
+  try {
+    const identified = launcherIdentity(pid, w.pidFile, snapshot);
+    return identified && sameProcess(w.identity, identified) ? identified : null;
+  } catch {
+    return null;
+  }
+}
+
+function isCurrentProcessDescendantOf(expected, snapshot, parents) {
+  if (!expected || !(snapshot instanceof Map) || !(parents instanceof Map)) return false;
+  let pid = Number(process.pid);
+  const seen = new Set();
+  while (Number.isInteger(pid) && pid > 0 && !seen.has(pid)) {
+    seen.add(pid);
+    const actual = snapshot.get(pid);
+    if (!actual) return false; // unknown identity is never evidence
+    if (sameProcess(expected, actual)) return true;
+    const parent = parents.get(pid);
+    if (!Number.isInteger(parent) || parent <= 0 || parent === pid) return false;
+    pid = parent;
+  }
+  return false;
+}
+
+// Only windows with a committed, exact launcher identity are live. A pid file,
+// command-line marker, or Start-Sleep process is not a window proof.
 function liveWindows() {
   const reg = loadJson(WINDOWS_REG, []);
   if (!Array.isArray(reg)) { console.error("[force] refusing: orchestrator-windows.json is not an array (fail-closed)."); return []; }
-  return reg.filter((w) => {
-    if (!w.pidFile) return false;
-    return pidAlive(pidOf(w));
-  });
+  let snapshot;
+  try { snapshot = processSnapshot(); } catch { return []; }
+  return reg.filter((w) => Boolean(exactLauncherIdentity(w, snapshot)));
+}
+
+function sanctionedWindow(wins = liveWindows(), env = process.env, deps = {}) {
+  if (String(env?.ORCH_WINDOW || "") !== "1") return null;
+  const token = String(env?.ORCH_WINDOW_TOKEN || "");
+  if (!token) return null;
+  const candidates = (Array.isArray(wins) ? wins : []).filter((w) => String(w?.sanctionToken || "") === token);
+  if (candidates.length !== 1) return null;
+  let snapshot;
+  try { snapshot = (deps.snapshot || processSnapshot)(); } catch { return null; }
+  if (!(snapshot instanceof Map)) return null;
+  let parents;
+  try { parents = deps.parentMap === undefined ? processParentMap() : deps.parentMap; } catch { return null; }
+  if (!(parents instanceof Map)) return null;
+  return candidates.find((w) => {
+    const identity = exactLauncherIdentity(w, snapshot);
+    return identity && isCurrentProcessDescendantOf(identity, snapshot, parents);
+  }) || null;
 }
 
 const mode = process.argv[2];
@@ -143,13 +215,14 @@ function runCli() {
     if (!armed()) { console.log("ok: orchestrator not armed."); process.exit(0); }
     if (process.env.ORCH_WINDOW === "1") {
       const wins = liveWindows();
-      if (wins.length > 0) {
-        console.log("ok: sanctioned orchestration window (" + wins.length + " live registered window(s)).");
+      const current = sanctionedWindow(wins);
+      if (current) {
+        console.log("ok: sanctioned orchestration window [" + (current.title || "?") + "].");
         process.exit(0);
       }
       console.log(
-        "REFUSED: ORCH_WINDOW=1 but no live registered orchestration window (orchestrator-windows.json). " +
-          "The env var alone is not accepted — it may be forged. Route through  node orchestrate-sdk.mjs --run-windows \"<request>\"  (a real, visible agent TUI window)."
+        "REFUSED: ORCH_WINDOW=1 but no live registered orchestration window matches ORCH_WINDOW_TOKEN (the env var alone is not accepted; it may be forged). " +
+          "Route through  node orchestrate-sdk.mjs --run-windows \"<request>\"  (a real, visible agent TUI window)."
       );
       process.exit(1);
     }
@@ -193,39 +266,51 @@ function runCli() {
     }
     const wins = liveWindows();
     const lower = realFile.toLowerCase().replace(/\\/g, "/");
-    const covering = wins.filter((w) => {
+    // 键匹配分级：路径键（含分隔符）能把命中唯一归因到该文件（strong）；裸文件名/裸段键可命中
+    // 任意目录的同名对象（weak）——weak 命中不足以支撑 PASS（证据不支持），只能记 INDETERMINATE。
+    const matchLevel = (kk) => {
+      let raw = String(kk).trim().replace(/^__\s*/, "");
+      if (!raw) return false;
+      // 去掉 SDK 归约键的资源前缀（file:/dir:/port:/service:），再做路径感知匹配，不做裸子串匹配。
+      raw = raw.replace(/^(file|dir|port|service):/i, "").trim();
+      if (!raw) return false;
+      const norm = raw.toLowerCase().replace(/\\/g, "/").replace(/\/+$/, "");
+      if (!norm) return false;
+      if (norm === lower) return "strong";
+      if (lower.startsWith(norm + "/")) return "strong";
+      if (norm === lower.split("/").pop()) return "weak";
+      if (!norm.includes("/") && lower.includes("/" + norm + "/")) return "weak";
+      return false;
+    };
+    const keysOf = (w) => {
       const rawKeys = Array.isArray(w.keys) ? w.keys.map(String) : [];
-      const keys = rawKeys.length ? rawKeys : ["__" + (w.title || "block")];
-      return keys.some((kk) => {
-        let raw = String(kk).trim().replace(/^__\s*/, "");
-        if (!raw) return false;
-        // 去掉 SDK 归约键的资源前缀（file:/dir:/port:/service:），再做路径感知匹配，不做裸子串匹配。
-        raw = raw.replace(/^(file|dir|port|service):/i, "").trim();
-        if (!raw) return false;
-        const norm = raw.toLowerCase().replace(/\\/g, "/").replace(/\/+$/, "");
-        if (!norm) return false;
-        // 路径感知：精确 / 目录前缀(带分隔符) / 文件名；裸目录名(无分隔符)按路径段匹配。
-        if (norm === lower) return true;
-        if (lower.startsWith(norm + "/")) return true;
-        if (norm === lower.split("/").pop()) return true;
-        if (!norm.includes("/") && lower.includes("/" + norm + "/")) return true;
-        return false;
-      });
-    });
+      return rawKeys.length ? rawKeys : ["__" + (w.title || "block")];
+    };
     if (wins.length === 0) {
       console.log("VIOLATION: no live registered orchestration window exists; this change cannot be confirmed as an in-window write. Verify/re-run inside a window (node orchestrate-sdk.mjs --run-windows \"<request>\").");
       process.exit(1);
     }
-    if (wins.length > 1) {
-      console.log("INDETERMINATE: " + wins.length + " live orchestration window(s) exist; the change cannot be uniquely attributed to one window. Confirm per-window attribution for [" + wins.map((w) => w.title).join(", ") + "].");
+    // A conflict key describes a task, not authorship. Only the current process's
+    // proven launcher ancestor can turn a strong path match into PASS. A caller
+    // outside the window must remain INDETERMINATE rather than becoming a false green.
+    const current = sanctionedWindow(wins);
+    if (!current) {
+      console.log("INDETERMINATE: live orchestration window(s) exist, but this process is not a verified descendant of the matching launcher; conflictKeys alone cannot prove file authorship.");
       process.exit(2);
     }
-    // 恰好一个活窗：按其 conflictKeys 归因。
-    if (covering.length === 1) {
-      console.log("PASS: change attributed to live sanctioned orchestration window [" + (wins[0].title || "?") + "] (conflictKeys hit).");
+    const levels = keysOf(current).map(matchLevel);
+    if (levels.includes("strong")) {
+      console.log("PASS: change attributed to live sanctioned orchestration window [" + (current.title || "?") + "] (verified launcher ancestry + conflictKeys hit).");
       process.exit(0);
     }
-    console.log("VIOLATION: the only live orchestration window [" + (wins[0].title || "?") + "] does not cover this file's conflictKeys; cannot attribute to a sanctioned in-window write.");
+    if (levels.includes("weak")) {
+      console.log(
+        "INDETERMINATE: the current sanctioned window carries only a non-path conflictKey that can match same-named objects in other directories; " +
+          "the evidence does not support attribution. Confirm the write location or use a path-scoped conflictKey (e.g. dir:<sub/path>)."
+      );
+      process.exit(2);
+    }
+    console.log("VIOLATION: the current sanctioned orchestration window [" + (current.title || "?") + "] does not cover this file's conflictKeys; cannot attribute to a sanctioned in-window write.");
     process.exit(1);
   } else {
     console.log("Usage: open-tui-orchestrator-force.mjs --enable | --disable | --status | --assert <kind> | --verify <file>");
@@ -233,7 +318,19 @@ function runCli() {
 }
 
 // Only run the CLI when this module is the main entrypoint, so open-tui-orchestrator-preflight.mjs can reuse armed()/liveWindows().
-const isMain = process.argv[1] && path.resolve(process.argv[1]).toLowerCase() === fileURLToPath(import.meta.url).toLowerCase();
+// junction/符号链接入口下两侧路径形态不同，纯词法比较会把主入口误判为 import（CLI 静默不执行）。
+let entryIdentityError = null;
+const isMain = (() => {
+  try {
+    const self = realpathSync(fileURLToPath(import.meta.url));
+    const entry = process.argv[1] ? realpathSync(path.resolve(process.argv[1])) : '';
+    return !!entry && (process.platform === 'win32' ? entry.toLowerCase() === self.toLowerCase() : entry === self);
+  } catch (error) { entryIdentityError = error; return false; }
+})();
+if (entryIdentityError) {
+  console.error('[orchestrator] FATAL: ENTRY_IDENTITY_UNAVAILABLE: ' + (entryIdentityError?.message || String(entryIdentityError)));
+  process.exit(1);
+}
 if (isMain) runCli();
 
-export { armed, liveWindows, pidAlive, pidOf, WINDOWS_REG, TMP, FLAG, STATE_DIR };
+export { armed, liveWindows, sanctionedWindow, pidAlive, pidOf, WINDOWS_REG, TMP, FLAG, STATE_DIR };

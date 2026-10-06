@@ -5,21 +5,27 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {spawnSync} from 'node:child_process';
 import {opencodeAssistantText,writeOpenCodeLauncher,waitOpenCodeResult} from '../scripts/core/opencode-runtime.mjs';
+import {powershellExe} from '../scripts/core/contracts.mjs';
 const family=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../temp');fs.mkdirSync(family,{recursive:true});
+const PS_EXE=powershellExe();
+const winOnly={skip:process.platform==='win32'?false:'PowerShell launcher is Windows-only'};
 test('opencode planner consumes assistant text events only and rejects failed responses',()=>{
  const ok=['{"type":"step_start"}','{"type":"text","part":{"type":"text","text":"first"}}','{"type":"text","part":{"type":"text","text":"final answer"}}'].join('\n');
  assert.equal(opencodeAssistantText(ok),'final answer');
  assert.throws(()=>opencodeAssistantText('{"type":"error","error":"boom"}'),/OPENCODE_RESPONSE_FAILED/);
  assert.equal(opencodeAssistantText('not json\n{"type":"tool_use","part":{"type":"tool","text":"ignored"}}'),'');
 });
-test('opencode PowerShell launcher preserves prompt argv, captures the token line and writes the result',()=>{
+test('opencode PowerShell launcher preserves prompt argv, captures the token line and writes the result',winOnly,()=>{
  const dir=fs.mkdtempSync(path.join(family,'opencode-launch-'));
  try{
   const worker=path.join(dir,'fake opencode.mjs'),capture=path.join(dir,'argv.json');
   fs.writeFileSync(worker,'import fs from "node:fs";\nconst p=process.argv.at(-1);\nconst m=/^capture:(.+)$/m.exec(p);\nfs.writeFileSync(m[1].trim(),JSON.stringify(process.argv.slice(2)));\nconsole.log("done 【本块唯一标识】 octest1");\n');
   const prompt='执行窗口任务 "带引号" 与中文\n第二行 D:\\path\\\n【本块唯一标识】octest1\ncapture:'+capture;
   const la=writeOpenCodeLauncher({bin:process.execPath,prefixArgs:[worker]},{key:'B1',suffix:'test',prompt,workspace:dir,temp:path.join(dir,'temp')});
-  const result=spawnSync('powershell.exe',['-NoProfile','-File',la.lp],{windowsHide:true,encoding:'utf8',timeout:20000});
+  const result=spawnSync(PS_EXE,['-NoProfile','-ExecutionPolicy','Bypass','-File',la.lp],{windowsHide:true,encoding:'utf8',timeout:20000});
+  assert.equal(result.error,undefined,result.error?.message || result.stderr || 'PowerShell spawn failed');
+  assert.equal(result.signal,null,result.stderr || 'PowerShell terminated by signal');
+  assert.notEqual(result.status,null,result.stderr || 'PowerShell returned no exit status');
   assert.equal(result.status,0,result.stderr);
   const r=JSON.parse(fs.readFileSync(la.rf,'utf8').replace(/^\uFEFF/,'').split(/\r?\n/)[0]);
   assert.equal(r.__EXIT__,0);assert.ok(r.__REPORT__.includes('octest1'));
@@ -47,7 +53,7 @@ test('opencode planner passes the prompt after -- and consumes the final text ev
   assert.equal(argv[argv.length-2],'--');assert.equal(argv[argv.length-1],'规划 "带引号" 任务');
  }finally{fs.rmSync(dir,{recursive:true,force:true});}
 });
-test('opencode launcher with ORCH_MODEL emits --model before the prompt through real PowerShell argv',()=>{
+test('opencode launcher with ORCH_MODEL emits --model before the prompt through real PowerShell argv',winOnly,()=>{
  const pm=process.env.ORCH_MODEL;process.env.ORCH_MODEL='oc-k3';
  const dir=fs.mkdtempSync(path.join(family,'opencode-launch-model-'));
  try{
@@ -55,19 +61,25 @@ test('opencode launcher with ORCH_MODEL emits --model before the prompt through 
   fs.writeFileSync(worker,'import fs from "node:fs";\nconst p=process.argv.at(-1);\nconst m=/^capture:(.+)$/m.exec(p);\nfs.writeFileSync(m[1].trim(),JSON.stringify(process.argv.slice(2)));\nconsole.log("done 【本块唯一标识】 octest2");\n');
   const prompt='带 model 的窗口任务\n【本块唯一标识】octest2\ncapture:'+capture;
   const la=writeOpenCodeLauncher({bin:process.execPath,prefixArgs:[worker]},{key:'B1',suffix:'test2',prompt,workspace:dir,temp:path.join(dir,'temp')});
-  const result=spawnSync('powershell.exe',['-NoProfile','-File',la.lp],{windowsHide:true,encoding:'utf8',timeout:20000});
+  const result=spawnSync(PS_EXE,['-NoProfile','-ExecutionPolicy','Bypass','-File',la.lp],{windowsHide:true,encoding:'utf8',timeout:20000});
+  assert.equal(result.error,undefined,result.error?.message || result.stderr || 'PowerShell spawn failed');
+  assert.equal(result.signal,null,result.stderr || 'PowerShell terminated by signal');
+  assert.notEqual(result.status,null,result.stderr || 'PowerShell returned no exit status');
   assert.equal(result.status,0,result.stderr);
   assert.deepEqual(JSON.parse(fs.readFileSync(capture,'utf8')),['run','-i','--auto','--dir',dir,'--model','oc-k3',prompt.trim()]);
  }finally{if(pm===undefined)delete process.env.ORCH_MODEL;else process.env.ORCH_MODEL=pm;fs.rmSync(dir,{recursive:true,force:true});}
 });
-test('opencode launcher unwraps native stderr (no NativeCommandError) but keeps it in the log',()=>{
+test('opencode launcher unwraps native stderr (no NativeCommandError) but keeps it in the log',winOnly,()=>{
  const dir=fs.mkdtempSync(path.join(family,'opencode-launch-stderr-'));
  try{
   const worker=path.join(dir,'fake opencode stderr.mjs');
   fs.writeFileSync(worker,'console.error("opencode 1.2.3 fake-diag");\nconsole.log("done 【本块唯一标识】 octest3");\n');
   const prompt='stderr 外观测试\n【本块唯一标识】octest3';
   const la=writeOpenCodeLauncher({bin:process.execPath,prefixArgs:[worker]},{key:'B1',suffix:'test3',prompt,workspace:dir,temp:path.join(dir,'temp')});
-  const result=spawnSync('powershell.exe',['-NoProfile','-File',la.lp],{windowsHide:true,encoding:'utf8',timeout:20000});
+  const result=spawnSync(PS_EXE,['-NoProfile','-ExecutionPolicy','Bypass','-File',la.lp],{windowsHide:true,encoding:'utf8',timeout:20000});
+  assert.equal(result.error,undefined,result.error?.message || result.stderr || 'PowerShell spawn failed');
+  assert.equal(result.signal,null,result.stderr || 'PowerShell terminated by signal');
+  assert.notEqual(result.status,null,result.stderr || 'PowerShell returned no exit status');
   assert.equal(result.status,0,result.stderr);
   assert.doesNotMatch(result.stderr,/NativeCommandError/);
   const buf=fs.readFileSync(la.log);

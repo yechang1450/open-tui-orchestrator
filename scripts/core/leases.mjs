@@ -5,7 +5,7 @@ import {fileURLToPath} from 'node:url';
 import {spawn,spawnSync} from 'node:child_process';
 import {keysOverlap,powershellExe,bootId} from './contracts.mjs';
 
-// 锚定 SystemRoot 的 powershell.exe：裸名会先按进程 cwd（任意工作区）解析，防二进制投毒。
+// 使用 powershellExe() 解析受信任的 pwsh.exe；裸名会先按进程 cwd 解析，可能造成二进制投毒。
 const PS_EXE=powershellExe();
 
 export function processSnapshotTimeoutMs(override) {
@@ -37,8 +37,15 @@ export function processSnapshot(timeoutMs) {
 export function sameProcess(expected,actual) {
   return !!expected&&!!actual&&expected.ProcessId===actual.ProcessId&&expected.Started===actual.Started&&expected.Name===actual.Name&&expected.CommandLine===actual.CommandLine;
 }
-export function launcherIdentity(pid,pidFile,snapshot=processSnapshot()) {
-  const actual=snapshot.get(Number(pid));
+export function processAlive(pid,kill=process.kill) {
+  const value=Number(pid);
+  if(!Number.isInteger(value)||value<=0)return false;
+  try{kill(value,0);return true;}catch(error){return error?.code==='EPERM'||error?.code==='EACCES';}
+}
+export function launcherIdentity(pid,pidFile,snapshot) {
+  const value=Number(pid);
+  if(!Number.isInteger(value)||value<=0||!pidFile)return null;
+  const actual=(snapshot||processSnapshot()).get(value);
   const script=path.join(path.dirname(pidFile),path.basename(pidFile).replace(/^window-/,'win-launch-').replace(/\.pid$/,'.ps1'));
   const args=String(actual?.CommandLine||'').toLowerCase().replaceAll('/','\\');
   if(!/^(powershell|pwsh)\.exe$/i.test(actual?.Name||'')||!args.includes(script.toLowerCase().replaceAll('/','\\')))return null;
@@ -102,7 +109,7 @@ function acquireCoordinatorMutex(dir,owner,waitMs,script){
   child.on('error',error=>{spawnError=error;});child.unref();
   const deadline=Date.now()+waitMs+2500;
   const readStatus=()=>{try{return String(fs.readFileSync(statusFile,'utf8')).trim();}catch{return '';}};
-  const childAlive=()=>{try{process.kill(child.pid,0);return true;}catch(error){return !error||error.code!=='ESRCH';}};
+  const childAlive=()=>processAlive(child?.pid);
   let reason='';
   while(!fs.existsSync(ticket+'.ready')){
     reason=readStatus();
@@ -118,24 +125,38 @@ function acquireCoordinatorMutex(dir,owner,waitMs,script){
 }
 export function atomicJson(file,value){
   fs.mkdirSync(path.dirname(file),{recursive:true});
-  const tmp=file+'.'+process.pid+'.tmp';
+  const nonce=crypto.randomUUID();
+  const tmp=file+'.'+process.pid+'.'+nonce+'.tmp';
+  const backup=file+'.'+process.pid+'.'+nonce+'.prev';
   // 断电 P0（2026-09-18）：显式 fsync 再 rename —— 只落页缓存的话，真断电会留下 0 字节/半截 JSON，
   // 恢复侧就会把合法账本读成损坏。目录项 fsync 在 Windows 上不支持，这里有意跳过（rename 是原子替换）。
   const fd=fs.openSync(tmp,'w');
   try{fs.writeFileSync(fd,JSON.stringify(value,null,2));fs.fsyncSync(fd);}finally{fs.closeSync(fd);}
   // Windows: renameSync 不覆盖已存在目标，且目标被杀软/索引器瞬时占用时报 EPERM/EACCES。
-  // 单次 remove+rename 仍有窗口，这里做短暂退避重试；非暂时性错误立即上抛，临时文件不残留。
+  // 绝不先删除旧目标：先把旧状态移到同目录备份，再替换；任何失败都先恢复备份，避免状态凭空消失。
   const sleepSync=sleepFor;
   let lastError=null;
   for(let attempt=0;attempt<6;attempt++){
+    let movedOld=false;
     try{fs.renameSync(tmp,file);return;}
     catch(error){
       lastError=error;
-      if(!error||!['EEXIST','EPERM','EACCES'].includes(error.code))break;
-      try{fs.rmSync(file,{force:true});}catch{}
+      try{
+        if(fs.existsSync(file)) { fs.renameSync(file,backup); movedOld=true; }
+        fs.renameSync(tmp,file);
+        try{if(movedOld)fs.rmSync(backup,{force:true});}catch{}
+        return;
+      }catch(replaceError){
+        lastError=replaceError;
+        if(movedOld&&!fs.existsSync(file)){
+          try{fs.renameSync(backup,file);movedOld=false;}catch(restoreError){lastError=restoreError;break;}
+        }
+      }
+      if(!lastError||!['EEXIST','EPERM','EACCES'].includes(lastError.code))break;
       sleepSync(60+attempt*80);
     }
   }
+  try{if(fs.existsSync(backup)&&!fs.existsSync(file))fs.renameSync(backup,file);}catch(restoreError){lastError=restoreError;}
   try{fs.rmSync(tmp,{force:true});}catch{}
   throw lastError;
 }
@@ -150,9 +171,11 @@ export function readState(file,fallback){
     throw new Error('Invalid orchestration state: '+file+' ('+((error&&error.message)||String(error))+')');
   }
 }
-export function transaction(dir,fn,snapshot=processSnapshot) {
+export function transaction(dir,fn,snapshot=processSnapshot,options={}) {
   fs.mkdirSync(dir,{recursive:true});const lock=path.join(dir,'mutex.json'),file=path.join(dir,'leases.json');
-  let processes=snapshot();const owner=processes.get(process.pid);
+  let processes=snapshot();
+  if(snapshot===processSnapshot&&typeof options.afterSnapshot==="function")options.afterSnapshot();
+  let owner=processes.get(process.pid);
   if(!owner)throw new Error('Coordinator owner identity unavailable');
   // A kernel mutex is released by Windows on a crash. Unlike a stale lockfile,
   // it cannot be reclaimed by two contenders or strand an empty lock forever.
@@ -165,6 +188,10 @@ export function transaction(dir,fn,snapshot=processSnapshot) {
     for(let attempt=0;;attempt++) {
       const candidate=acquireCoordinatorMutex(dir,owner,waitMs,script);
       if(candidate.ready){held=candidate;break;}
+      if (candidate.reason === 'abandoned-mutex') {
+        candidate.discard();
+        throw new Error('Coordinator mutex acquisition failed (abandoned-mutex; refusing automatic retry)');
+      }
       candidate.release();
       // 失败路径的锁票清理延后到事件循环恢复之后（阻塞等待期间 setTimeout 也不会跑）；
       // 真正兜底的是 sweepStaleMutexTickets 的按龄回收。
@@ -175,10 +202,17 @@ export function transaction(dir,fn,snapshot=processSnapshot) {
     unlock=()=>held.release();
   }
   try {
-    // 关键（2026-09-22）：持锁期间**不再**做全表快照。processSnapshot 是一次 machine-wide CIM 查询
-    // （满载机器上几秒~十几秒），锁内执行会把每个排队者的等待预算吃光——3 并发套件里几十处
-    // "waited 60000ms x3" 假红的真根因。锁前那份快照本来就够用：下面的筛选只回答"属主还在不在"，
-    // 几百毫秒的偏差最多让一条刚死的租约多留一轮，代价远小于在锁里做全表查询。
+    // Refresh after taking the mutex: the pre-lock snapshot can miss a contender
+    // that claimed the same run between snapshot and lock acquisition.
+    if(snapshot===processSnapshot){
+      processes=snapshot();
+      owner=processes.get(process.pid);
+      if(!owner)throw new Error("Coordinator owner identity unavailable");
+    }
+    // 持锁后只保留上面那一次全表快照；下面不再重复查询。processSnapshot 是一次 machine-wide CIM 查询
+    // （满载机器上几秒~十几秒），额外的锁内查询会把每个排队者的等待预算吃光——3 并发套件里几十处
+    // `waited 60000ms x3` 假红的真根因。上面的单次刷新只用于跨越 snapshot/lock barrier，
+    // 下面的筛选只回答“属主还在不在”，不再引入新的锁内快照。
     let leases=readState(file,[]);
     leases=leases.filter(l=>{
       // 断电 P0（2026-09-18）：带开机标识且与本次开机不符 ⇒ 确定来自上一次开机，直接回收。
@@ -215,7 +249,7 @@ export function release(dir,id,snapshot){return transaction(dir,leases=>{const i
 
 export function prepare(dir,id,pidFile){return transaction(dir,leases=>{const l=leases.find(l=>l.id===id);if(!l)throw new Error("Reservation expired");l.pidFile=pidFile;});}
 
-export function claimRun(dir,key) {
+export function claimRun(dir,key,options={}) {
   return transaction(dir,(_leases,owner,processes)=>{
     const file=path.join(dir,'run-owners.json');
     const owners=readState(file,{});
@@ -223,7 +257,7 @@ export function claimRun(dir,key) {
     for(const [id,r] of Object.entries(owners))if((r.bootId!==undefined&&r.bootId!==bootId())||!sameProcess(r.owner,processes.get(r.owner.ProcessId)))delete owners[id];
     if(owners[key])throw new Error('Run already has a live controller');
     const claim={owner,token:crypto.randomUUID(),bootId:bootId()};owners[key]=claim;atomicJson(file,owners);return claim;
-  });
+  },processSnapshot,options);
 }
 export function releaseRun(dir,key,claim) {
   return transaction(dir,()=>{

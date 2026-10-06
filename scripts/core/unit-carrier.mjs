@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
+import { containedBy } from './path-security.mjs';
 
 // 单元载体（carrier）解析——工具适配 agent 的载体分级层。
 //
@@ -13,6 +14,7 @@ import { createRequire } from 'node:module';
 // → 常规包解析。绝不静默借用其它 agent 安装目录里的副本（各副本独立升级、独立封印）。
 const require = createRequire(import.meta.url);
 const CORE_DIR = path.dirname(fileURLToPath(import.meta.url));
+const TOOL_NODE_MODULES = path.join(CORE_DIR, '..', 'node_modules'); // scripts/node_modules：工具自带安装位
 
 export function normalizeUnitCarrier(value) {
   const v = String(value ?? '').trim().toLowerCase();
@@ -30,7 +32,7 @@ export function effectiveUnitCarrier(env = process.env, agentConfig = {}) {
 
 function ptyCandidates() {
   return [
-    path.join(CORE_DIR, '..', 'node_modules', '@lydell', 'node-pty', 'index.js'),
+    path.join(TOOL_NODE_MODULES, '@lydell', 'node-pty', 'index.js'),
     '@lydell/node-pty',
   ];
 }
@@ -38,8 +40,12 @@ function ptyCandidates() {
 export function ptyAvailability() {
   for (const candidate of ptyCandidates()) {
     try {
-      const resolved = path.isAbsolute(candidate) ? candidate : require.resolve(candidate);
-      if (fs.existsSync(resolved)) return { ok: true, resolved };
+      // 裸说明符也只认工具自带安装位：解析从 scripts/node_modules 起算，且结果（realpath）
+      // 必须落在该安装位内——绝不静默借用被提升/单仓根/外层安装的副本（各副本独立升级、独立封印）。
+      const resolved = path.isAbsolute(candidate) ? candidate : require.resolve(candidate, {paths: [TOOL_NODE_MODULES]});
+      const real = fs.realpathSync(resolved);
+      if (!containedBy(fs.realpathSync(TOOL_NODE_MODULES), real)) continue;
+      return { ok: true, resolved: real };
     } catch { /* try the next candidate */ }
   }
   return { ok: false, tried: ptyCandidates() };

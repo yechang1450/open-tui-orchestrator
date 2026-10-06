@@ -6,7 +6,16 @@ import {fileURLToPath} from 'node:url';
 import {resolveHost,launchArgs} from '../scripts/core/host-cli.mjs';
 
 const family=path.join(fileURLToPath(new URL('..',import.meta.url)),'temp');
-test('installed kimi resolves its own CLI and never receives Codex flags',()=>{
+// 与 pi-adapter.test.mjs 同款：宿主的 CLI 没装时这条用例的前提不成立，按仓库既有惯例 skip；
+// CLI 在装时照旧跑全部断言（宿主不在本机 ≠ 编排器适配坏了）。
+let kimiAvailable = false;
+try {
+  kimiAvailable = Boolean(resolveHost({env:{...process.env, ORCH_AGENT:'kimi'}}));
+} catch (error) {
+  if (!(error?.code === 'CLI_MISSING' || /CLI_MISSING/.test(String(error?.message)))) throw error;
+}
+const kimiOnly = {skip: kimiAvailable ? false : 'kimi CLI is not installed'};
+test('installed kimi resolves its own CLI and never receives Codex flags',kimiOnly,()=>{
  const host=resolveHost({env:{...process.env,ORCH_AGENT:'kimi'}});
  assert.equal(host.agent,'kimi');assert.match(host.config.bin,/kimi\.exe$/i);
  assert.match(host.config.version,/^\d+\.\d+\.\d+$/);

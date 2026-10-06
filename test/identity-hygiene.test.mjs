@@ -72,11 +72,16 @@ test('identity hygiene: the check goes red when a leak is injected', () => {
   const family = path.join(root, 'temp');
   fs.mkdirSync(family, {recursive: true});
   const dir = fs.mkdtempSync(path.join(family, 'ident-'));
-  const target = path.join(dir, rel);
-  fs.mkdirSync(path.dirname(target), {recursive: true});
-  fs.writeFileSync(target, fs.readFileSync(path.join(root, rel), 'utf8')
-    + `\n// injected leak: C:\\Users\\${ME}\n`, 'utf8');
-  const hits = scan(dir);
-  assert.ok(hits.length > 0, 'the injected leak must be caught');
-  assert.ok(hits.some((h) => h.includes('machine user name')), 'must name the machine-user hit: ' + hits.join(','));
+  try {
+    const target = path.join(dir, rel);
+    fs.mkdirSync(path.dirname(target), {recursive: true});
+    fs.writeFileSync(target, fs.readFileSync(path.join(root, rel), 'utf8')
+      + `\n// injected leak: C:\\Users\\${ME}\n`, 'utf8');
+    const hits = scan(dir);
+    assert.ok(hits.length > 0, 'the injected leak must be caught');
+    assert.ok(hits.some((h) => h.includes('machine user name')), 'must name the machine-user hit: ' + hits.join(','));
+  } finally {
+    // 每次运行都写入一份含机器用户名的副本：不清理就是判据自己禁止的残留（审计实测过 45 个）。
+    fs.rmSync(dir, {recursive: true, force: true});
+  }
 });

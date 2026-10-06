@@ -53,7 +53,10 @@ export function normalizeUnitProfile(input) {
   if (promptDelivery === 'arg' && hasFile) throw new Error('UNIT_CMD_INVALID: promptDelivery=arg must not use {promptFile}');
   if (promptDelivery === 'stdin' && (hasFile || hasPrompt)) throw new Error('UNIT_CMD_INVALID: promptDelivery=stdin must not use prompt placeholders');
 
-  return { schema: 1, id, label, bin, args, promptDelivery, modelArgs, effortArgs, timeoutMs, source: 'caller' };
+  // carrier 是文档化 schema 的可选字段（pty|stdio|null）；必须 normalize 后回传——host-cli 会读
+  // unit.carrier 决定载体，丢失它会让声明 pty 的 TUI 单元静默退回 stdio、无控制台秒退。
+  const carrier = normalizeUnitCarrier(input.carrier);
+  return { schema: 1, id, label, bin, args, promptDelivery, modelArgs, effortArgs, timeoutMs, carrier, source: 'caller' };
 }
 
 export function loadUnitProfile(env = process.env) {

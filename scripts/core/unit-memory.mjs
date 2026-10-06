@@ -16,6 +16,7 @@ export const MEM_DEFAULTS = Object.freeze({
   minSamples: 3,      // 学习生效所需的最少样本数（ORCH_UNIT_MEM_MIN_SAMPLES）
   maxSamples: 50,     // 每宿主保留的最近样本数
   blockGrowth: 0.15,  // 块内每多一个任务的成本增长（ORCH_UNIT_MEM_BLOCK_GROWTH，必须 <1 才能保证合并必降账）
+  maxTasksPerBlock: 0, // 单块题数上限（ORCH_UNIT_MEM_MAX_TASKS_PER_BLOCK）；0 = 不限制（保持既有行为）
 });
 
 export function memConfig(env = process.env) {
@@ -26,12 +27,17 @@ export function memConfig(env = process.env) {
   const rawText = String(env.ORCH_UNIT_MEM_BLOCK_GROWTH ?? '').trim();
   const growthRaw = rawText === '' ? NaN : Number(rawText);   // 空串≠0：未设置必须回落到默认值
   const growth = Number.isFinite(growthRaw) && growthRaw >= 0 ? Math.min(growthRaw, 0.9) : MEM_DEFAULTS.blockGrowth;
+  // 单块题数上限：0 是合法值（= 不限制），故不能走 num()（它只接受 >0）。空串/非数 ⇒ 回落默认 0。
+  const capRaw = String(env.ORCH_UNIT_MEM_MAX_TASKS_PER_BLOCK ?? '').trim();
+  const capNum = capRaw === '' ? NaN : Number(capRaw);
+  const maxTasksPerBlock = Number.isFinite(capNum) && capNum >= 0 ? Math.floor(capNum) : MEM_DEFAULTS.maxTasksPerBlock;
   return {
     floorMb: num('ORCH_MIN_FREE_MEM_MB', MEM_DEFAULTS.floorMb),
     defaultUnitMb: num('ORCH_UNIT_MEM_DEFAULT_MB', MEM_DEFAULTS.defaultUnitMb),
     safety: num('ORCH_UNIT_MEM_SAFETY', MEM_DEFAULTS.safety),
     minSamples: Math.max(1, Math.floor(num('ORCH_UNIT_MEM_MIN_SAMPLES', MEM_DEFAULTS.minSamples))),
     blockGrowth: growth,
+    maxTasksPerBlock,
   };
 }
 
@@ -128,29 +134,37 @@ function hintSet(block) {
 }
 
 // 选合并对：① 依赖对（本就该串行）→ ② 冲突提示有交集的相邻对 → ③ 任务数最多的一对（同数则取靠前者）。
-function pickPair(blocks) {
+function pickPair(blocks, maxTasksPerBlock = 0) {
+  const sizeOf = (b) => (b.tasks || []).length;
+  const overCap = (i, j) => maxTasksPerBlock > 0 && sizeOf(blocks[i]) + sizeOf(blocks[j]) > maxTasksPerBlock;
   const idxOf = new Map(blocks.map((b, i) => [b, i]));
   for (let j = 0; j < blocks.length; j += 1) {
     for (const dep of blocks[j].dependsOn || []) {
       const i = blocks.findIndex((b) => b.title === dep || (b.tasks || []).some((t) => t.id === dep));
-      if (i >= 0 && i !== j) return [Math.min(i, j), Math.max(i, j), 'dependency'];
+      if (i >= 0 && i !== j) {
+        const [a, b] = [Math.min(i, j), Math.max(i, j)];
+        // 依赖对是「本就该串行」的首选，但仍不得越过题数上限（越界则继续找其它对）。
+        if (!overCap(a, b)) return [a, b, 'dependency'];
+      }
     }
   }
   for (let i = 0; i < blocks.length - 1; i += 1) {
     const a = hintSet(blocks[i]);
     if (!a.size) continue;
     const b = hintSet(blocks[i + 1]);
-    for (const h of b) if (a.has(h)) return [i, i + 1, 'conflict-hint'];
+    for (const h of b) if (a.has(h)) { if (!overCap(i, i + 1)) return [i, i + 1, 'conflict-hint']; }
   }
   let best = null;
   for (let i = 0; i < blocks.length; i += 1) {
     for (let j = i + 1; j < blocks.length; j += 1) {
+      if (overCap(i, j)) continue;                       // 越过上限的对不参与「最大」选择
       const weight = (blocks[i].tasks || []).length + (blocks[j].tasks || []).length;
       if (!best || weight > best[2]) best = [i, j, weight];
     }
   }
   if (best) return [best[0], best[1], 'largest'];
-  return [0, 1, 'fallback'];
+  // 所有候对都会越过上限 ⇒ 无可用合并对（调用方据此停止，保留既有块划分）。
+  return null;
 }
 
 // 把两个块并成一个「串行块」：tasks 按原顺序拼接；dependsOn 合并、去掉指向被并块自身的边，
@@ -170,22 +184,37 @@ function mergeBlocks(blocks, i, j, seq) {
   return rest;
 }
 
-// 合并适配（纯函数）：F − Σest ≥ floor 不满足 ⇒ 依次合并，直到满足或只剩一块。
-// 返回 {blocks, unitMb, estMb, freeMb, floorMb, blockGrowth, merges, fits}；merges 记录每一步（可审计）。
+// 合并适配（纯函数）：F − Σest ≥ floor 不满足 ⇒ 依次合并，直到满足、只剩一块、或所有候对都越过题数上限。
+// 返回 {blocks, unitMb, estMb, freeMb, floorMb, blockGrowth, maxTasksPerBlock, merges, fits}；merges 记录每一步（可审计）。
+// 单块题数上限（cfg.maxTasksPerBlock，0=不限制）用于让「内存合并」不突破规划层已定的粒度：
+//   实测（exam-v6 五轮）opencode unitMb=995 ⇒ 19 题并成 8 块（B1 吞 12）、codex unitMb=1528 ⇒ 4 块（B1 并 16），
+//   一次起窗失败即连坐十余题；有上限后最大的块被钉在给定题数。
+export function estimateBlockMemoryMb(block, unitMb, cfg = memConfig()) {
+  const unit = Math.max(1, Number(unitMb) || cfg.defaultUnitMb);
+  const tasks = Array.isArray(block?.tasks) ? block.tasks.length : 0;
+  return Math.round((1 + cfg.blockGrowth * Math.max(0, tasks - 1)) * unit);
+}
+
 export function fitBlocks(blocks, freeMb, unitMb, cfg = memConfig()) {
   let cur = (blocks || []).map((b) => ({...b}));
   const merges = [];
+  const cap = Number(cfg.maxTasksPerBlock) > 0 ? Math.floor(Number(cfg.maxTasksPerBlock)) : 0;
   const estMb = (bs) => bs.reduce((sum, b) => sum + blockCost(b, cfg.blockGrowth) * unitMb, 0);
   const fits = (bs) => Number.isFinite(freeMb) ? freeMb - estMb(bs) >= cfg.floorMb : true;
   let seq = 1;
   while (cur.length > 1 && !fits(cur)) {
-    const [i, j, why] = pickPair(cur);
+    const pair = pickPair(cur, cap);
+    if (!pair) {                                   // 所有候对都会越过上限 ⇒ 保留既有块划分
+      merges.push({step: seq, why: 'ceiling', merged: []});
+      break;
+    }
+    const [i, j, why] = pair;
     const titles = [cur[i].title, cur[j].title];
     cur = mergeBlocks(cur, i, j, seq);
     merges.push({step: seq, why, merged: titles});
     seq += 1;
   }
-  return {blocks: cur, unitMb, estMb: estMb(cur), freeMb, floorMb: cfg.floorMb, blockGrowth: cfg.blockGrowth, merges, fits: fits(cur)};
+  return {blocks: cur, unitMb, estMb: estMb(cur), freeMb, floorMb: cfg.floorMb, blockGrowth: cfg.blockGrowth, maxTasksPerBlock: cap, merges, fits: fits(cur)};
 }
 
 // 供日志用的一行描述。

@@ -25,7 +25,7 @@ function harness({workspace, runId, checksValue, shortLive = true, attempt1Ms = 
   const launcherFor = key => {
     // 假启动器：活 3 秒（足够引擎完成身份绑定）后自然退出 ⇒ 下一轮循环取不到身份 ⇒ 走 recovery 而不是 adopt。
     const lp = path.join(workspace, 'win-launch-' + key + '.ps1');
-    fs.writeFileSync(lp, 'Start-Sleep -Seconds 3\n', 'utf8');
+    fs.writeFileSync(lp, 'Start-Sleep -Seconds 30\n', 'utf8');
     const pidf = path.join(workspace, 'window-' + key + '.pid');
     const child = spawn(ps, ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', lp], {windowsHide: true, stdio: 'ignore'});
     kids.push(child);
@@ -57,7 +57,10 @@ function harness({workspace, runId, checksValue, shortLive = true, attempt1Ms = 
     readPid: pidf => Number(fs.readFileSync(pidf, 'utf8').trim()),
     exitCode: () => 0,
     register: () => {}, unregister: () => {}, cleanup: () => {}, commit: () => {}, guardian: () => {},
-    close: async () => {},
+    close: async pid => {
+      const child = kids.find(item => item.pid === pid);
+      if (child) { try { spawnSync('taskkill', ['/PID', String(pid), '/T', '/F'], {windowsHide: true, timeout: 10000}); } catch {} }
+    },
   };
   const acceptanceFile = path.join(workspace, 'acceptance.json');
   const sessionFile = path.join(workspace, 'fake-session.jsonl');

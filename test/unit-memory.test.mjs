@@ -22,7 +22,7 @@ test('memConfig: generic defaults + env overrides', () => {
   assert.equal(d.defaultUnitMb, MEM_DEFAULTS.defaultUnitMb);
   assert.equal(d.safety, 1.3);
   const e = memConfig({ORCH_MIN_FREE_MEM_MB: '512', ORCH_UNIT_MEM_DEFAULT_MB: '800', ORCH_UNIT_MEM_SAFETY: '1.5', ORCH_UNIT_MEM_MIN_SAMPLES: '5'});
-  assert.deepEqual(e, {floorMb: 512, defaultUnitMb: 800, safety: 1.5, minSamples: 5, blockGrowth: 0.15});
+  assert.deepEqual(e, {floorMb: 512, defaultUnitMb: 800, safety: 1.5, minSamples: 5, blockGrowth: 0.15, maxTasksPerBlock: 0});
   const bad = memConfig({ORCH_MIN_FREE_MEM_MB: '-3', ORCH_UNIT_MEM_SAFETY: 'nope'});
   assert.equal(bad.floorMb, 1000);
   assert.equal(bad.safety, 1.3);

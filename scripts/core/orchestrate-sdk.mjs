@@ -69,7 +69,7 @@ const PS_EXE=powershellExe(),WHERE_EXE=systemToolExe("where.exe");
 import {runWindows,verifyRun} from "./runner.mjs";
 import {launcherIdentity,processSnapshot,sameProcess,coordinatorDir,reserve,release,bind} from "./leases.mjs";
 import {runPiPlanner,writePiLauncher,waitPiResult} from './pi-runtime.mjs';
-import {runOpenClawPlanner,writeOpenClawLauncher} from './openclaw-runtime.mjs';
+import {runOpenClawPlanner,writeOpenClawLauncher,waitOpenClawResult} from './openclaw-runtime.mjs';
 import {runOpenCodePlanner,writeOpenCodeLauncher,waitOpenCodeResult} from './opencode-runtime.mjs';
 import {runKimiPlanner,writeKimiLauncher,waitKimiResult} from './kimi-runtime.mjs';
 import {runClaudePlanner,writeClaudeLauncher,waitClaudeResult} from './claude-runtime.mjs';
@@ -84,7 +84,7 @@ import {watchRun, boardSummaryLine} from "./run-board.mjs";
 import { resolveAgent, launchArgs } from "./agent.mjs";
 import { inheritHostModelEffort, hasModelDetector } from "./host-model.mjs";
 import { detectHostAgent } from "./host-cli.mjs";
-import { writeFileSync, mkdirSync, readFileSync, existsSync, rmSync, readdirSync, statSync, statfsSync, openSync, readSync, closeSync, renameSync } from "node:fs";
+import { writeFileSync, mkdirSync, readFileSync, existsSync, rmSync, readdirSync, statSync, statfsSync, openSync, readSync, closeSync, renameSync, realpathSync } from "node:fs";
 import os from "node:os";
 import crypto from "node:crypto";
 import path from "node:path";
@@ -155,7 +155,7 @@ function assertUnitCarrierReady() {
   return carrier;
 }
 // Non-codex window completion is a launcher-written result file; each adapter owns its wait.
-const waitAdapterResult=(rf,timeout,pidf)=>AGENT.agent==='opencode'?waitOpenCodeResult(rf,timeout,pidf):AGENT.agent==='kimi'?waitKimiResult(rf,timeout,pidf):AGENT.agent==='claude'?waitClaudeResult(rf,timeout,pidf):(AGENT.config.profile||AGENT.config.unit)?waitProfileResult(rf,timeout,pidf):waitPiResult(rf,timeout,pidf);
+const waitAdapterResult=(rf,timeout,pidf,token)=>AGENT.agent==='openclaw'?waitOpenClawResult(rf,timeout,pidf,token):AGENT.agent==='opencode'?waitOpenCodeResult(rf,timeout,pidf):AGENT.agent==='kimi'?waitKimiResult(rf,timeout,pidf):AGENT.agent==='claude'?waitClaudeResult(rf,timeout,pidf):(AGENT.config.profile||AGENT.config.unit)?waitProfileResult(rf,timeout,pidf):waitPiResult(rf,timeout,pidf);
 const CODEX = String(AGENT.config?.bin || '');
 // PowerShell 单引号字符串内嵌路径：把 ' 转义成 ''，避免路径含引号时破坏脚本/注入。
 const WORKSPACE_Q = WORKSPACE.replace(/'/g, "''");
@@ -540,7 +540,7 @@ function auxAdmissionLimit(auxCap) {
 }
 function readSavedBlockCount() {
   try {
-    const p = path.join(WORKSPACE, 'temp', 'orchestrator', 'runs', String(process.env.ORCH_RUN_ID || ''), 'summary.json');
+    const p = path.join(STATE_DIR, 'runs', String(process.env.ORCH_RUN_ID || ''), 'summary.json');
     const n = JSON.parse(fs.readFileSync(p, 'utf8'))?.blocks?.length;
     if (Number.isInteger(n) && n > 0) return n;
   } catch {}
@@ -1224,9 +1224,9 @@ async function retryBlock(rec, rid, auth, maxRetry, closeDelayMs) {
   for (let attempt = 1; attempt <= maxRetry; attempt++) {
     const tk = rec.key + "-" + rid + "-" + Math.random().toString(36).slice(2, 8);
     const body = auth + buildBlockPrompt(blockBody(rec.b), tk);
-    const { lp, pidf, pf, rf } = writeInteractiveLauncher(rec.key, body, rid);
+    const { lp, pidf, pf, rf, sanctionToken } = writeInteractiveLauncher(rec.key, body, rid);
     // 重试窗同样走原子占位：让其它编排进程能看见/锁定它，也保证本窗满足 enforcement 的“活注册窗”判定。
-    const claim = { id: "claim-" + rid + "-" + rec.key + "-" + Math.random().toString(36).slice(2, 8), title: rec.title, keys: rec.keys, pidFile: pidf, pid: 0, locked: false, pending: true, reservedAt: Date.now() };
+    const claim = { id: "claim-" + rid + "-" + rec.key + "-" + Math.random().toString(36).slice(2, 8), title: rec.title, keys: rec.keys, pidFile: pidf, pid: 0, locked: false, pending: true, sanctionToken, reservedAt: Date.now() };
     const claimBlocker = tryReserveWindow(claim);
     if (claimBlocker) {
       console.log("  !! [retry " + rec.key + " att" + attempt + "] atomic claim blocked by [" + claimBlocker + "].");
@@ -1285,11 +1285,10 @@ async function retryBlock(rec, rid, auth, maxRetry, closeDelayMs) {
 function psKillDescendantsLines() {
   return [
     "$ErrorActionPreference = 'SilentlyContinue'",
-    "$known=@{}; $cutoff=@{}; $total=0",
+    "$known=@{}; $cutoff=@{}; $total=0; $victims=New-Object 'System.Collections.Generic.List[int]'; $victimSeen=@{}",
     "for($pass=0;$pass -lt 3;$pass++) {",
     "$all = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue",
     "if(-not $known.ContainsKey($root)){$known[$root]=$all|Where-Object ProcessId -eq $root}",
-    "$victims = New-Object 'System.Collections.Generic.List[int]'",
     "$queue = New-Object 'System.Collections.Generic.Queue[int]'",
     "$seen = @{}",
     "$seen[$root] = $true",
@@ -1300,11 +1299,12 @@ function psKillDescendantsLines() {
     "    if ($pr.ProcessId -ne $PID -and $pr.ParentProcessId -eq $cur -and -not $seen.ContainsKey($pr.ProcessId) -and $known[$cur] -and $pr.CreationDate -ge $known[$cur].CreationDate -and (-not $cutoff.ContainsKey($cur) -or $pr.CreationDate.ToUniversalTime() -le $cutoff[$cur])) {",
     "      $seen[$pr.ProcessId] = $true",
     "      $known[[int]$pr.ProcessId]=$pr",
-    "      $victims.Add($pr.ProcessId)",
+    "      if(-not $victimSeen.ContainsKey($pr.ProcessId)){$victimSeen[$pr.ProcessId]=$true;$victims.Add($pr.ProcessId)|Out-Null}",
     "      $queue.Enqueue($pr.ProcessId)",
     "    }",
     "  }",
     "}",
+    "if($pass -lt 2){Start-Sleep -Milliseconds 150;continue}",
     "$victims.Reverse()",
     "foreach ($v in $victims) { $before=$all | Where-Object ProcessId -eq $v; $now=Get-CimInstance Win32_Process -Filter ('ProcessId='+$v); if($now -and $now.CreationDate -eq $before.CreationDate -and $now.CommandLine -eq $before.CommandLine -and $now.Name -eq $before.Name){$cutoff[[int]$v]=[DateTime]::UtcNow;taskkill /PID $v /F 2>$null | Out-Null} }",
     "$total += $victims.Count",
@@ -1432,6 +1432,7 @@ function writeInteractiveLauncher(title, prompt, sfx) {
   // lands on the true block token.
   const tokenMatch = String(prompt || "").match(/【本块唯一标识】\s*([A-Za-z0-9][A-Za-z0-9_\-]*)/);
   const token = tokenMatch ? String(tokenMatch[1]) : "";
+  const sanctionToken = crypto.randomBytes(18).toString("hex");
   const BOM = "\uFEFF";
   // PowerShell 单引号字符串内嵌路径/变量：把 ' 转义成 ''，避免路径含引号时破坏脚本/注入。
   const pidfQ = String(pidf || "").replace(/'/g, "''");
@@ -1447,6 +1448,7 @@ function writeInteractiveLauncher(title, prompt, sfx) {
     "$env:TERM = 'xterm-256color'",
     ...(PY_Q ? ["$env:Path = '" + PY_Q + ";' + $env:Path"] : []),
     "$env:ORCH_WINDOW = '1'",
+    "$env:ORCH_WINDOW_TOKEN = '" + sanctionToken + "'",
     "if ($env:ORCH_SDIR) { $env:ORCH_SDIR = $env:ORCH_SDIR } elseif ($env:ORCH_SESSION_DIR) { $env:ORCH_SDIR = $env:ORCH_SESSION_DIR } elseif ($env:CODEX_HOME) { $env:ORCH_SDIR = Join-Path $env:CODEX_HOME 'sessions' } else { $env:ORCH_SDIR = Join-Path $env:USERPROFILE '.codex\\sessions' }",
     "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8",
     "$OutputEncoding = [System.Text.Encoding]::UTF8",
@@ -1685,7 +1687,7 @@ function writeInteractiveLauncher(title, prompt, sfx) {
     "exit 0",
   ].join("\r\n");
   writeFileSync(lp, BOM + body, "utf8");
-  return { lp, pidf, pf, rf };
+  return { lp, pidf, pf, rf, sanctionToken };
 }
 // ---- session-rollout discovery + task_complete detection (for interactive auto-close) ----
 function sessionDir() {
@@ -2073,7 +2075,7 @@ async function closeWindowRobust(w) {
     try {
       const esc = String(lp).replace(/'/g, "''");
       const r = spawnSync(PS_EXE, ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command",
-        "$ErrorActionPreference='SilentlyContinue'; $q = Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'powershell.exe' -and $_.CommandLine -like '*" + esc + "*' } | Select-Object -First 1; if ($q) { $q.ProcessId }"], { encoding: "utf8", windowsHide: true });
+        "$ErrorActionPreference='SilentlyContinue'; $q = Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'pwsh.exe' -and $_.CommandLine -like '*" + esc + "*' } | Select-Object -First 1; if ($q) { $q.ProcessId }"], { encoding: "utf8", windowsHide: true });
       pid = Number(String(r.stdout || "").trim());
     } catch { /* ignore */ }
   }
@@ -2380,7 +2382,7 @@ async function cleanStaleWindows() {
       }
     }
     const r = spawnSync(PS_EXE, ["-NoProfile","-ExecutionPolicy","Bypass","-Command",
-      "$ErrorActionPreference='SilentlyContinue'; Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'powershell.exe' -and $_.CommandLine -like '*win-launch-*' } | ForEach-Object { $_.ProcessId }"], { encoding: "utf8", windowsHide: true });
+      "$ErrorActionPreference='SilentlyContinue'; Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'pwsh.exe' -and $_.CommandLine -like '*win-launch-*' } | ForEach-Object { $_.ProcessId }"], { encoding: "utf8", windowsHide: true });
     const ids = String(r.stdout || "").split(/\r?\n/).map((s) => Number(String(s).trim())).filter((n) => Number.isFinite(n) && n > 0 && !protectedPids.has(n));
     if (!ids.length) { console.log("[orchestrator] no stale orchestrator windows from previous run."); return; }
     console.log("[orchestrator] cleaning " + ids.length + " stale orchestrator window(s) from previous run (protected live windows: " + protectedPids.size + ")...");
@@ -2515,9 +2517,9 @@ export async function main() {
     }
     const rid = Date.now().toString(36);
     const trackedPrompt = promptContent + "\n\n【本块唯一标识】spawn-" + rid + (AGENT.agent!=='codex'?"\n完成后最后只输出 __ORCH_DONE__ spawn-"+rid:"\n（最终汇报请以「【本块唯一标识】spawn-" + rid + " 完成」开头，并说明本块完成情况）");
-    const { lp, pidf, pf, rf } = writeInteractiveLauncher(title, trackedPrompt, rid);
+    const { lp, pidf, pf, rf, sanctionToken } = writeInteractiveLauncher(title, trackedPrompt, rid);
     const stok = "spawn-" + rid;
-    const claim = { id: "claim-" + rid + "-spawn", title: titleOf("spawn-" + rid, title), keys: ["spawn:" + rid], pidFile: pidf, pid: 0, locked: false, pending: true, reservedAt: Date.now() };
+    const claim = { id: "claim-" + rid + "-spawn", title: titleOf("spawn-" + rid, title), keys: ["spawn:" + rid], pidFile: pidf, pid: 0, locked: false, pending: true, sanctionToken, reservedAt: Date.now() };
     const claimBlocker = tryReserveWindow(claim);
     if (claimBlocker) {
       console.log("spawn REFUSED: atomic claim blocked by [" + claimBlocker + "]; not opening another window.");
@@ -2585,8 +2587,8 @@ export async function main() {
     const prompt =
       "这是 open-tui-orchestrator 的自动关闭自检窗。请只回复四个字：“自检OK”。不要执行任何其它动作，回复完即结束本窗。\n\n" +
       "【本块唯一标识】selftest-" + rid + "\n（最终汇报请以「【本块唯一标识】selftest-" + rid + " 完成」开头，并说明本块完成情况）";
-    const { lp, pidf, pf, rf } = writeInteractiveLauncher("selftest", prompt, rid);
-    const claim = { id: "claim-" + rid + "-selftest", title: "selftest-close", keys: ["selftest:" + rid], pidFile: pidf, pid: 0, locked: false, pending: true, reservedAt: Date.now() };
+    const { lp, pidf, pf, rf, sanctionToken } = writeInteractiveLauncher("selftest", prompt, rid);
+    const claim = { id: "claim-" + rid + "-selftest", title: "selftest-close", keys: ["selftest:" + rid], pidFile: pidf, pid: 0, locked: false, pending: true, sanctionToken, reservedAt: Date.now() };
     const claimBlocker = tryReserveWindow(claim);
     if (claimBlocker) {
       console.log("selftest REFUSED: atomic claim blocked by [" + claimBlocker + "].");
@@ -2645,7 +2647,7 @@ export async function main() {
   }
   if (mode === '--verify-run') {
     const id=process.argv[3]||process.env.ORCH_RUN_ID;
-    process.exitCode=verifyRun(WORKSPACE,id,process.env.ORCH_ACCEPTANCE_FILE)?0:1;return;
+    process.exitCode=verifyRun(WORKSPACE,id,process.env.ORCH_ACCEPTANCE_FILE,STATE_DIR)?0:1;return;
   }
   if (mode === '--install-deps') {
     // 公开安装路径的补依赖入口：npm 发行包里不带锁定 SDK 依赖（node-pty + codex-sdk），
@@ -2708,12 +2710,12 @@ export async function main() {
       plan:decomposeSafely,compact:capPlanBlocks,infer:inferTargetKeys,launcher:writeInteractiveLauncher,prompt:buildBlockPrompt,
       spawn:(...args)=>(SPAWN_MODE==="headless"?spawnHeadlessWithRetry:spawnWindowWithRetry)(...args,true),readPid:readPidFile,
       session:(AGENT.config.profile&&SPAWN_MODE==='window')?null:(AGENT.agent!=='codex'?async(_token,_timeout,rf)=>rf:waitForSessionFile),
-      wait:AGENT.agent!=='codex'?(async(_session,timeout,rf,_token,pidf)=>waitAdapterResult(rf,timeout,pidf)):waitTaskComplete,exitCode:readExitCode,
+      wait:AGENT.agent!=='codex'?(async(_session,timeout,rf,token,pidf)=>waitAdapterResult(rf,timeout,pidf,token)):waitTaskComplete,exitCode:readExitCode,
       register:r=>updateWindows(ws=>[...ws,r]),commit:commitReservation,unregister:cancelReservation,close:closeWindowByPid,
       sweep:(stem)=>sweepLeftoverRunWindows(stem),
       guardian:g=>ensureRunGuardian({...g,agent:AGENT.agent,env:process.env}),
       cleanup:la=>{const wsRoot=(()=>{const r=path.resolve(WORKSPACE);return r.endsWith(path.sep)?r:r+path.sep;})();for(const f of [la.lp,la.pf,la.pidf,la.rf,la.pidf+'.self-closed',la.rf+'.self-closed',String(la.lp||'').replace(/\.ps1$/,'.pty.log')])try{const resolved=path.resolve(String(f||''));if(resolved.startsWith(wsRoot))rmSync(resolved,{force:true});}catch{}}
-    },{workspace:WORKSPACE,capacity,resume,agent:AGENT.agent,unitProfile:AGENT.config.unit||null,modelPlan:MODEL_PLAN,runId:process.env.ORCH_RUN_ID,acceptanceFile:process.env.ORCH_ACCEPTANCE_FILE,timeoutMs:POLL_TIMEOUT_MS,auth:readAuthPrompt(),plan:preflightPlan,spawnMode:SPAWN_MODE,spawnStaggerMs:Math.max(0,Number(process.env.ORCH_WINDOW_STAGGER_MS||0)||0),windowCap:Math.max(0,Number(process.env.ORCH_MAX_WINDOWS||0)||0)||undefined});
+    },{workspace:WORKSPACE,stateDir:STATE_DIR,capacity,resume,agent:AGENT.agent,unitProfile:AGENT.config.unit||null,modelPlan:MODEL_PLAN,runId:process.env.ORCH_RUN_ID,acceptanceFile:process.env.ORCH_ACCEPTANCE_FILE,timeoutMs:POLL_TIMEOUT_MS,auth:readAuthPrompt(),plan:preflightPlan,spawnMode:SPAWN_MODE,spawnStaggerMs:Math.max(0,Number(process.env.ORCH_WINDOW_STAGGER_MS||0)||0),windowCap:Math.max(0,Number(process.env.ORCH_MAX_WINDOWS||0)||0)||undefined});
     // 收窗补丁（2026-09-15/0.9.15）：run 结束后再扫一次——跑完/被杀留下的尸体窗（单元已退出、无活进程引用）
     // 在此关掉，不让用户看到残留面板（pi 电池实测：成功跑完的 pi 窗也不会自动退）。判据同开跑前那次。
     await sweepLeftoverRunWindows();
@@ -2726,7 +2728,7 @@ export async function main() {
     const jsonl = process.argv.includes("--jsonl");
     const ivRaw = process.argv.indexOf("--interval-ms");
     const iv = ivRaw >= 0 ? Number(process.argv[ivRaw + 1]) : NaN;
-    process.exitCode = await watchRun({ workspace: WORKSPACE, runId: id, intervalMs: Number.isFinite(iv) && iv > 0 ? iv : 800, jsonl });
+    process.exitCode = await watchRun({ workspace: WORKSPACE, stateDir: STATE_DIR, runId: id, intervalMs: Number.isFinite(iv) && iv > 0 ? iv : 800, jsonl });
     return;
   }
   if (mode === "--status") {
@@ -2798,7 +2800,14 @@ export async function main() {
       "  node orchestrate-sdk.mjs --spawn <title> \"<prompt or .md>\"",
   );
 }
-const isMain = process.argv[1] && path.resolve(process.argv[1]).toLowerCase() === fileURLToPath(import.meta.url).toLowerCase();
+// junction/符号链接入口下两侧路径形态不同，纯词法比较会把主入口误判为 import。
+const isMain = (() => {
+  try {
+    const self = realpathSync(fileURLToPath(import.meta.url));
+    const entry = process.argv[1] ? realpathSync(path.resolve(process.argv[1])) : '';
+    return !!entry && (process.platform === 'win32' ? entry.toLowerCase() === self.toLowerCase() : entry === self);
+  } catch { return false; }
+})();
 // 机器可调用契约：首行保持 `[orchestrator] FATAL: <原因>`（完整栈帧仅 ORCH_DEBUG=1）。
 // 调用方管道里永远不该出现裸 Node 栈帧——数据与诊断分得开，才谈得上「任何 agent 都能调」。
 // 首行之后附 cause/tried/fix/docs 指引（用户令 2026-09-18：能自愈的自愈，修不了的必须给用户出路）。

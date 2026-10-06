@@ -121,7 +121,7 @@ function check() {
 function clean() {
   // 维护锁（建议性）：外部未上锁时本操作自行上锁、结束即解；维护会话已持锁则不碰它的锁。
   // 注意 process.exit() 不执行 finally，必须在每个退出点前显式释放。
-  const selfLocked = !lockedForMaintenance() && (acquireMaintenanceLock({ reason: 'repair.mjs --clean' }), true);
+  const selfLock = !lockedForMaintenance() ? acquireMaintenanceLock({ reason: 'repair.mjs --clean' }) : null;
   try {
     console.log(`[${SKILL}] --clean: removing runtime debris (use-and-discard only; source is untouched)`);
     const removed = [];
@@ -155,10 +155,10 @@ function clean() {
       }
     }
     console.log(`[${SKILL}] removed ${removed.length} debris item(s).`);
-    if (selfLocked) releaseMaintenanceLock();
+    if (selfLock) releaseMaintenanceLock(process.env, selfLock.ownerToken);
     process.exit(0);
   } catch (e) {
-    if (selfLocked) releaseMaintenanceLock();
+    if (selfLock) releaseMaintenanceLock(process.env, selfLock.ownerToken);
     console.error(`[${SKILL}] clean failed: ${e.message}`);
     process.exit(2);
   }
@@ -166,7 +166,7 @@ function clean() {
 
 function publish(targetRoot) {
   let staging;
-  let selfLocked = false;
+  let selfLock = null;
   try {
     if (!path.isAbsolute(targetRoot)) {
       console.error(`[${SKILL}] --target expects an absolute root, got: ${targetRoot}`);
@@ -176,7 +176,7 @@ function publish(targetRoot) {
     const missing = REQUIRED_FILES.filter((nf) => !isRegularFile(path.join(__dirname, nf)));
     if (missing.length) { console.error("[" + SKILL + "] publish aborted: missing " + missing.join(", ")); process.exit(2); }
     // 维护锁（建议性）：外部未上锁时本发布操作自行上锁、结束即解（process.exit 不跑 finally，逐退出点显式释放）。
-    selfLocked = !lockedForMaintenance() && (acquireMaintenanceLock({ reason: 'repair.mjs --target publish' }), true);
+    selfLock = !lockedForMaintenance() ? acquireMaintenanceLock({ reason: 'repair.mjs --target publish' }) : null;
     verifyRelease(__dirname);
     const dest = path.join(path.resolve(targetRoot), SKILL);
     if (fs.existsSync(dest)) throw new Error('Publish target already exists; choose a fresh version directory');
@@ -207,10 +207,10 @@ function publish(targetRoot) {
     fs.renameSync(staging, dest);
     staging = undefined;
     console.log(`[${SKILL}] published ${copied} file(s) to ${dest}.`);
-    if (selfLocked) releaseMaintenanceLock();
+    if (selfLock) releaseMaintenanceLock(process.env, selfLock.ownerToken);
     process.exit(0);
   } catch (e) {
-    if (selfLocked) releaseMaintenanceLock();
+    if (selfLock) releaseMaintenanceLock(process.env, selfLock.ownerToken);
     if (staging) { try { fs.rmSync(staging, {recursive: true, force: true}); } catch { /* preserve the original error */ } }
     console.error(`[${SKILL}] publish failed: ${e.message}`);
     process.exit(2);

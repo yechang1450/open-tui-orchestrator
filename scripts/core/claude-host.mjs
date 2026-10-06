@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {probeCli} from './host-probe.mjs';
-const HELP_FLAGS=['--print','--dangerously-skip-permissions','--model'];
+const HELP_FLAGS=['--print','--dangerously-skip-permissions','--model','--effort'];
 export function resolveClaudeHost(env=process.env) {
   const explicit=env.ORCH_CLI||env.CLAUDE_EXE;
   const candidates=explicit?[path.resolve(explicit)]:[

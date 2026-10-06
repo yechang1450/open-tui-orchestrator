@@ -3,8 +3,10 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {runWindows,runDirectory,verifyRun} from '../scripts/core/runner.mjs';
+import {runWindows,runDirectory,verifyRun,firstCheckpointTimedOut} from '../scripts/core/runner.mjs';
 const family=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../temp');
+// This file runs in its own Node test worker; pin the retry policy once so concurrent subtests do not race on process.env.
+process.env.ORCH_UNPRODUCTIVE_RETRIES='0';
 test('failed prerequisite retains both original tasks and never starts its dependent',async()=>{
  fs.mkdirSync(family,{recursive:true});const workspace=fs.mkdtempSync(path.join(family,'runner-'));
  let launches=0;
@@ -15,10 +17,10 @@ test('failed prerequisite retains both original tasks and never starts its depen
   register:()=>{},unregister:()=>{},cleanup:()=>{},spawn:async()=>false,readPid:()=>0,
  };
  try{
-  const sum=await runWindows('执行甲；执行乙',hooks,{workspace,capacity:8,runId:'failure',auth:'test',coordinator:path.join(workspace,'temp','coordinator')});
+  const sum=await runWindows('执行甲；执行乙',hooks,{workspace,capacity:8,runId:'failure',auth:'test',coordinator:path.join(workspace,'temp','coordinator'),maxAttempts:1});
   assert.equal(launches,1);assert.equal(sum.success,false);
   assert.deepEqual(Object.keys(sum.taskResults),['T001','T002']);
-  assert.equal(sum.taskResults.T001.status,'popup-failed');assert.equal(sum.taskResults.T002.status,'blocked');
+  assert.equal(sum.taskResults.T001.status,'failed');assert.match(String(sum.taskResults.T001.reason||''),/Safe recovery attempt budget exhausted/);assert.equal(sum.taskResults.T002.status,'blocked');
   const manifest=JSON.parse(fs.readFileSync(path.join(runDirectory(workspace,'failure'),'manifest.json'),'utf8'));
   assert.equal(manifest.tasks.length,2);
   await assert.rejects(()=>runWindows('执行甲',hooks,{workspace,runId:'failure'}),/already exists/);
@@ -39,7 +41,7 @@ test('spawnStaggerMs serializes window births within a run',async()=>{
   spawn:async()=>{times.push(Date.now());return false;},
  };
  try{
-  const sum=await runWindows('执行甲；执行乙；执行丙',hooks,{workspace,capacity:8,runId:'stagger',auth:'test',coordinator:path.join(workspace,'temp','coordinator'),spawnStaggerMs:200});
+  const sum=await runWindows('执行甲；执行乙；执行丙',hooks,{workspace,capacity:8,runId:'stagger',auth:'test',coordinator:path.join(workspace,'temp','coordinator'),spawnStaggerMs:200,maxAttempts:1});
   assert.deepEqual(times.length,3);
   const gaps=times.slice(1).map((t,i)=>t-times[i]);
   for(const gap of gaps)assert.ok(gap>=150,'spawn gap below stagger: '+JSON.stringify({times,gaps}));
@@ -59,7 +61,7 @@ test('windowCap throttles live-window admission below planning capacity',async()
   spawn:async()=>{spawns++;return false;},
  };
  try{
-  const sum=await runWindows('执行甲；执行乙；执行丙',hooks,{workspace,capacity:8,runId:'cap',auth:'test',coordinator:path.join(workspace,'temp','coordinator'),windowCap:1});
+  const sum=await runWindows('执行甲；执行乙；执行丙',hooks,{workspace,capacity:8,runId:'cap',auth:'test',coordinator:path.join(workspace,'temp','coordinator'),windowCap:1,maxAttempts:1});
   assert.equal(spawns,3);
   assert.equal(maxLive,1,'windows exceeded the admission cap');
   assert.equal(sum.blocks.length,3,'planning must keep all blocks');
@@ -83,4 +85,11 @@ test('unknown run fails closed with a one-line diagnostic on verify and resume',
   assert.match(resumeError.message,/Run not found: ghost-run/);
   assert.doesNotMatch(resumeError.message,/\s+at\s/,'resume diagnostic must not carry stack frames');
  }finally{await new Promise(r=>setTimeout(r,200));fs.rmSync(workspace,{recursive:true,force:true});}
+});
+
+test('first-checkpoint watchdog uses the persisted attempt baseline on resume', () => {
+ const createdAt=1000, checkpointMtime=0;
+ assert.equal(firstCheckpointTimedOut({firstCheckpointMs:300000, now:300000, baseline:createdAt, checkpointMtime}), false);
+ assert.equal(firstCheckpointTimedOut({firstCheckpointMs:300000, now:305000, baseline:createdAt, checkpointMtime}), true);
+ assert.equal(firstCheckpointTimedOut({firstCheckpointMs:0, now:999999, baseline:createdAt, checkpointMtime}), false);
 });

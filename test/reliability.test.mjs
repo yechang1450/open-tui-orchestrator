@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {SUCCESS,summaryComplete,keysOverlap,levelWaves,ledgerPlan,verifyTask} from '../scripts/core/contracts.mjs';
-import {reserve,release,sameProcess} from '../scripts/core/leases.mjs';
+import {reserve,release,sameProcess,processAlive} from '../scripts/core/leases.mjs';
 const family=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../temp');
 fs.mkdirSync(family,{recursive:true});
 test('strict accounting rejects missing blocks, missing tasks, extra identities and unverified termination',()=>{
@@ -32,6 +32,12 @@ test('process ID reuse never matches an old launcher identity',()=>{
  const a={ProcessId:42,Started:'first',Name:'powershell.exe',CommandLine:'launcher.ps1'};
  assert.equal(sameProcess(a,{...a}),true);assert.equal(sameProcess(a,{...a,Started:'second'}),false);
  assert.equal(sameProcess(a,{...a,CommandLine:'other.ps1'}),false);
+});
+test('processAlive rejects missing or malformed child pids and preserves permission-denied liveness',()=>{
+ assert.equal(processAlive(undefined,()=>{throw Object.assign(new Error('bad pid'),{code:'ERR_INVALID_ARG_TYPE'});}),false);
+ assert.equal(processAlive('abc',()=>{throw Object.assign(new Error('bad pid'),{code:'ERR_INVALID_ARG_TYPE'});}),false);
+ assert.equal(processAlive(42,()=>{throw Object.assign(new Error('denied'),{code:'EPERM'});}),true);
+ assert.equal(processAlive(42,()=>{throw Object.assign(new Error('gone'),{code:'ESRCH'});}),false);
 });
 test('global coordinator capacity counts all runs, not only resource conflicts',()=>{
  const dir=fs.mkdtempSync(path.join(family,'lease-test-'));

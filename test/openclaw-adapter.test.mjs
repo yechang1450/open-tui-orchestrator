@@ -1,5 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import {completionText, isolatedConfig,protectSecrets} from '../scripts/core/openclaw-config.mjs';
 import {resolveOpenClawHost} from '../scripts/core/openclaw-host.mjs';
 test('installed OpenClaw is resolved as its own versioned CLI',()=>{
@@ -18,6 +21,17 @@ test('installed OpenClaw is resolved as its own versioned CLI',()=>{
 });
 test('explicit missing OpenClaw CLI cannot fall back to another agent',()=>{
  assert.throws(()=>resolveOpenClawHost({...process.env,ORCH_CLI:'D:/missing-openclaw-cli-for-test.mjs'}),/CLI_MISSING/);
+});
+test('OpenClaw candidate directories and malformed package metadata fail closed with CLI_MISSING',()=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'otui-openclaw-host-'));
+ try{
+  assert.throws(()=>resolveOpenClawHost({...process.env,ORCH_CLI:dir}),/CLI_MISSING/);
+  const entry=path.join(dir,'openclaw.mjs');fs.writeFileSync(entry,'');
+  fs.mkdirSync(path.join(dir,'dist','plugin-sdk'),{recursive:true});
+  fs.writeFileSync(path.join(dir,'dist','plugin-sdk','config-runtime.js'),'');
+  fs.writeFileSync(path.join(dir,'package.json'),'{broken','utf8');
+  assert.throws(()=>resolveOpenClawHost({...process.env,ORCH_CLI:entry}),/CLI_MISSING/);
+ }finally{fs.rmSync(dir,{recursive:true,force:true});}
 });
 test('OpenClaw completion accepts only a final assistant marker for the exact token',()=>{
  const e=(role,text,stopReason='stop')=>({type:'message',message:{role,stopReason,content:[{type:'text',text}]}});

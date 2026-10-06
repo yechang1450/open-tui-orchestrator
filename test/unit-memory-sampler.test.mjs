@@ -123,3 +123,8 @@ test('a verified root start time still samples normally, and a dead root stops a
     fs.rmSync(dir, {recursive: true, force: true});
   }
 });
+
+test('the rescan never re-adopts the root slot after the original root was evicted', () => {
+  const src = fs.readFileSync(samplerScript, 'utf8');
+  assert.match(src, /if\s*\(\s*\$key\s*-eq\s*\$RootPid\s*\)\s*\{\s*continue\s*\}/, 'the rescan must skip the root slot (root identity comes only from -RootStarted / the first pin)');
+});

@@ -30,8 +30,14 @@ function Test-OwnerGone([int]$OwnPid,[string]$OwnStarted){
   return $false
 }
 try {
-  try {$held=$mutex.WaitOne($waitMs)} catch [Threading.AbandonedMutexException] {$held=$true}
-  if(-not $held){$reason='busy-timeout'}
+  try {$held=$mutex.WaitOne($waitMs)} catch [Threading.AbandonedMutexException] {
+    # 弃锁 ≠ 干净获取：助手被杀只证明助手死亡，不证明其属主离开了临界区——直接当获得会允许双入。
+    # fail-closed：持有并立即释放（消费掉弃锁状态），留区分性状态票退出；调用方有界重试时下一次获取是干净的。
+    try { $mutex.ReleaseMutex() } catch { }
+    $held=$false
+    $reason='abandoned-mutex'
+  }
+  if(-not $held){ if(-not $reason){ $reason='busy-timeout' } }
   else {
     $acquiredAt=Get-Date
     [IO.File]::WriteAllText($Ticket+'.ready','ready')

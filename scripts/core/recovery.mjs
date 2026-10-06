@@ -1,6 +1,7 @@
 import {levelWaves,verifyChecks,requestTasks,computeMaxWindows} from './contracts.mjs';
 import os from 'node:os';
 import path from 'node:path';
+import {realpathWithMissing,containedBy} from './path-security.mjs';
 
 // Validate persisted structure before recovery can change state or invoke tools.
 export function validateRecoverySummary(sum) {
@@ -9,7 +10,7 @@ export function validateRecoverySummary(sum) {
   const strings=x=>Array.isArray(x)&&x.every(v=>typeof v==='string'&&v.length>0);
   const same=(a,b)=>JSON.stringify(a)===JSON.stringify(b);
   const exact=(ids,value)=>object(value)&&new Set(ids).size===ids.length&&Object.keys(value).length===ids.length&&ids.every(id=>Object.hasOwn(value,id)&&object(value[id]));
-  if(!object(sum)||sum.protocol!==2||typeof sum.request!=='string'||!Number.isSafeInteger(sum.generation)||sum.generation<1||!Array.isArray(sum.history))fail('invalid header');
+  if(!object(sum)||sum.protocol!==2||!/^[-_a-zA-Z0-9]{1,100}$/.test(sum.runId||'')||typeof sum.workspace!=='string'||!sum.workspace||typeof sum.request!=='string'||!Number.isSafeInteger(sum.generation)||sum.generation<1||!Array.isArray(sum.history))fail('invalid header');
   if(sum.acceptanceSha256!==undefined&&(typeof sum.acceptanceSha256!=='string'||!/^[0-9a-f]{64}$/.test(sum.acceptanceSha256)))fail('invalid acceptance hash');
   const tasks=requestTasks(sum.request);
   if(!tasks.length||!Array.isArray(sum.tasks)||!same(sum.tasks.map(t=>({id:t?.id,prompt:t?.prompt})),tasks))fail('original task inventory mismatch');
@@ -20,10 +21,13 @@ export function validateRecoverySummary(sum) {
   const ids=tasks.map(t=>t.id),blockIds=sum.blocks.map(b=>b?.key);
   if(!strings(blockIds)||!exact(blockIds,sum.results)||!exact(ids,sum.taskResults))fail('result inventory mismatch');
   const covered=[];
-  // resolve 后的盘符根自带尾分隔符（D:\），再拼一个 sep 会变成 D:\\ 导致根工作区的
+  // resolve 后的盘符根自带尾分隔符（D:\），再拼一个 sep 会变 D:\\ 导致根工作区的
   // 合法 launcherFiles 全被误判为逃逸（E 验收实跑发现）；只在缺尾分隔符时补。
   const resolvedWorkspace=path.resolve(sum.workspace);
-  const workspaceRoot=resolvedWorkspace.endsWith(path.sep)?resolvedWorkspace:resolvedWorkspace+path.sep;
+  const stateRoot=path.join(resolvedWorkspace,'temp');
+  const realWorkspace=realpathWithMissing(resolvedWorkspace),realStateRoot=realpathWithMissing(stateRoot);
+  const insideWorkspace=file=>containedBy(realWorkspace,realpathWithMissing(path.resolve(resolvedWorkspace,file)));
+  const insideStateRoot=file=>containedBy(realStateRoot,realpathWithMissing(path.resolve(resolvedWorkspace,file)));
   for(let i=0;i<sum.blocks.length;i++) {
     const block=sum.blocks[i],plan=sum.plan[i],entry=sum.results[block.key];
     if(!strings(block.taskIds)||!block.taskIds.length||!object(plan)||plan.key!==block.key||!strings(plan.keys)||!strings(plan.dependsOn)||!Array.isArray(plan.b?.tasks))fail('invalid block or plan');
@@ -33,12 +37,12 @@ export function validateRecoverySummary(sum) {
     // launcherFiles 会被 resume 的 adopt/cleanup 直接使用（含 rmSync）：每个路径都必须
     // 解析到本工作区之内，否则被篡改的账本能借控制器之手删工作区外的任意文件。
     for(const f of Object.values(entry.launcherFiles||{})) {
-      const resolved=typeof f==='string'&&f?path.resolve(f):'';
-      if(!resolved||!resolved.startsWith(workspaceRoot))fail('launcher files escape the workspace');
+      const resolved=typeof f==='string'&&f?path.resolve(resolvedWorkspace,f):'';
+      if(!resolved||!insideWorkspace(resolved))fail('launcher files escape the workspace');
     }
     if(!entry.attempts.length&&(entry.launcherFiles||entry.launcher||entry.token||['launching','running','verified','awaiting-verification'].includes(entry.status)))fail('launched block has no attempt inventory');
     for(const attempt of entry.attempts) {
-      if(!object(attempt)||attempt.runId!==sum.runId||typeof attempt.token!=='string'||!attempt.token||typeof attempt.file!=='string'||!attempt.file||!strings(attempt.taskIds)||!attempt.taskIds.length||new Set(attempt.taskIds).size!==attempt.taskIds.length||attempt.taskIds.some(id=>!block.taskIds.includes(id)))fail('invalid attempt identity or task coverage');
+      if(!object(attempt)||attempt.runId!==sum.runId||typeof attempt.token!=='string'||!attempt.token||typeof attempt.file!=='string'||!attempt.file||!insideStateRoot(attempt.file)||!strings(attempt.taskIds)||!attempt.taskIds.length||new Set(attempt.taskIds).size!==attempt.taskIds.length||attempt.taskIds.some(id=>!block.taskIds.includes(id)))fail('invalid attempt identity or task coverage');
     }
   }
   if(covered.length!==ids.length||new Set(covered).size!==ids.length||covered.some(id=>!ids.includes(id)))fail('incomplete or duplicate task coverage');
@@ -46,20 +50,38 @@ export function validateRecoverySummary(sum) {
   return sum;
 }
 
-export async function scheduleReady(recs,execute,status,onBlocked=()=>{}) {
-  levelWaves(recs); // Validate the whole graph before any work starts.
+export async function scheduleReady(recs,execute,status,onBlocked=()=>{},options={}) {
+  const waves=levelWaves(recs); // Validate the whole graph before any work starts.
+  const priority=typeof options.priority==='function'?options.priority:()=>0;
+  const index=new Map(recs.map((r,i)=>[r.key,i]));
+  const score=r=>{const value=Number(priority(r));return Number.isFinite(value)?value:0;};
+  const compare=(a,b)=>{const delta=score(b)-score(a);return delta||((index.get(a.key)??0)-(index.get(b.key)??0));};
+  // 依赖语义**不得**退化成「整波栅栏」：每个块只等它自己的前置（原实现），
+  // 与它同波但不相关的块不得拖住它——否则一个长块会把同波所有依赖块一起拖到它结束。
+  // 本轮只加两件事：① start() 的调用顺序按预计内存降序（高者先弹出，同分按原索引稳定）；
+  // ② 每波启动前报一次 launch order（日志与事实一致：第一次真要跑该波时才报）。
   const byKey=new Map(recs.map(r=>[r.key,r])),jobs=new Map();
+  const waveOf=new Map();waves.forEach((w,i)=>w.forEach(r=>waveOf.set(r.key,i)));
+  const reported=new Set();
+  const reportWave=r=>{
+    if(typeof options.onWave!=='function')return undefined;
+    const i=waveOf.get(r.key);
+    if(i===undefined||reported.has(i))return undefined;
+    reported.add(i);
+    return options.onWave([...waves[i]].sort(compare).map(x=>({record:x,score:score(x)})));
+  };
   const start=r=>{
     if(jobs.has(r.key))return jobs.get(r.key);
     const job=Promise.resolve().then(async()=>{
       await Promise.all(r.dependsOn.map(id=>start(byKey.get(id))));
+      await reportWave(r);
       const failed=r.dependsOn.filter(id=>status(id)!=='verified');
       if(failed.length)return onBlocked(r,failed);
       return execute(r);
     });
     jobs.set(r.key,job);return job;
   };
-  await Promise.all(recs.map(start));
+  await Promise.all([...recs].sort(compare).map(start));
 }
 
 // retrySafe 三态：true=总是可重跑；false=明确否决（连瞬时故障也不重跑）；未声明=仅对"瞬时故障特征"

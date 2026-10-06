@@ -50,6 +50,37 @@ test('reboot scan finds the runs a power cut left behind, and only those', () =>
   }
 });
 
+test('a summary that parses to a non-object never crashes the scan', () => {
+  const workspace = fs.mkdtempSync(path.join(family, 'reboot-null-'));
+  try {
+    const dir = path.join(workspace, 'temp', 'orchestrator', 'runs', 'null-summary');
+    fs.mkdirSync(dir, {recursive: true});
+    fs.writeFileSync(path.join(dir, 'summary.json'), 'null', 'utf8');
+    const stale = scanStaleRuns(workspace);
+    const row = stale.find(s => s.runId === 'null-summary');
+    assert.ok(row, 'a literal null summary must be surfaced, not crash the scan: ' + JSON.stringify(stale));
+    assert.equal(row.status, 'unreadable');
+    assert.equal(row.resumeCommand, null);
+  } finally { fs.rmSync(workspace, {recursive: true, force: true}); }
+});
+
+test('the resume command quotes every user-controlled argument', () => {
+  const workspace = fs.mkdtempSync(path.join(family, 'reboot-quote-'));
+  try {
+    const weirdWs = "C:/tmp/weird dir's/ws";
+    const dir = path.join(workspace, 'temp', 'orchestrator', 'runs', 'run id x');
+    fs.mkdirSync(dir, {recursive: true});
+    fs.writeFileSync(path.join(dir, 'summary.json'), JSON.stringify({protocol: 2, runId: 'run id x', agent: 'pi', spawnMode: 'window', workspace: weirdWs, bootId: nowBoot - 100000, success: false, results: {}}), 'utf8');
+    const stale = scanStaleRuns(workspace);
+    const row = stale.find(s => s.runId === 'run id x');
+    assert.ok(row, 'the stale run must be reported');
+    assert.ok(row.resumeCommand.includes("--workspace 'C:/tmp/weird dir''s/ws'"), row.resumeCommand);
+    assert.ok(row.resumeCommand.includes("--resume-run 'run id x'"), row.resumeCommand);
+    assert.ok(row.resumeCommand.includes("--agent 'pi'"), row.resumeCommand);
+    assert.ok(row.resumeCommand.includes("--mode 'window'"), row.resumeCommand);
+  } finally { fs.rmSync(workspace, {recursive: true, force: true}); }
+});
+
 test('a lease carrying a previous bootId is reclaimed even when its PID matches a live process', async () => {
   fs.mkdirSync(family, {recursive: true});
   const workspace = fs.mkdtempSync(path.join(family, 'reboot-lease-'));

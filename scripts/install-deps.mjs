@@ -36,13 +36,18 @@ export function installDepsCli(pkgRoot = path.resolve(path.dirname(fileURLToPath
   const useCli = fs.existsSync(npmCli);
   // 企业镜像/自定义 npm：ORCH_NPM_BIN 显式指定优先（.cmd/.exe/路径皆可）。
   const npmBin = String(process.env.ORCH_NPM_BIN || '').trim();
+  // .cmd/.bat 不能直接 spawn（CreateProcess 无法执行批处理，实测 EINVAL）——走 cmd /s 的 verbatim 形态。
   const npm = npmBin
-    ? spawnSync(npmBin, ['ci', '--prefix', scriptsDir], {cwd: scriptsDir, encoding: 'utf8', windowsHide: true, timeout: 900000})
+    ? (process.platform === 'win32' && /\.(cmd|bat)$/i.test(npmBin)
+      ? spawnSync(process.env.ComSpec || 'cmd.exe', ['/d', '/s', '/c', '""' + npmBin + '" ci --prefix "' + scriptsDir + '""'], {cwd: scriptsDir, encoding: 'utf8', windowsHide: true, timeout: 900000, windowsVerbatimArguments: true})
+      : spawnSync(npmBin, ['ci', '--prefix', scriptsDir], {cwd: scriptsDir, encoding: 'utf8', windowsHide: true, timeout: 900000}))
     : (useCli
       ? spawnSync(process.execPath, [npmCli, 'ci', '--prefix', scriptsDir], {cwd: scriptsDir, encoding: 'utf8', windowsHide: true, timeout: 900000})
       : (process.platform === 'win32'
-        // 回落也避开 shell:true（DEP0190）：显式走 cmd /d /s /c，由 cmd 自己解析 npm.cmd 与引号。
-        ? spawnSync(process.env.ComSpec || 'cmd.exe', ['/d', '/s', '/c', 'npm ci --prefix "' + scriptsDir + '"'], {cwd: scriptsDir, encoding: 'utf8', windowsHide: true, timeout: 900000})
+        // 回落也避开 shell:true（DEP0190）：镜像 Node 官方的 shell 形态——整条命令外加一对引号
+        // （cmd /s 语义）+ windowsVerbatimArguments（不让 libuv 按 C-runtime 规则二次转义，
+        // 否则引号会进入路径、npm 收到坏 argv）。旧的无外层引号形态在含空格路径上实测必败。
+        ? spawnSync(process.env.ComSpec || 'cmd.exe', ['/d', '/s', '/c', '"npm ci --prefix "' + scriptsDir + '""'], {cwd: scriptsDir, encoding: 'utf8', windowsHide: true, timeout: 900000, windowsVerbatimArguments: true})
         : spawnSync('npm', ['ci', '--prefix', scriptsDir], {cwd: scriptsDir, encoding: 'utf8', windowsHide: true, timeout: 900000})));
   if (npm.status !== 0 || !shimPresent()) {
     const missingToolchain = npm.error && ['ENOENT', 'EINVAL'].includes(npm.error.code);

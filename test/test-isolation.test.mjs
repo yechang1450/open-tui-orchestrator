@@ -15,14 +15,24 @@ const root = fileURLToPath(new URL('..', import.meta.url));
 // <repo>\temp\caller-run-xBFpS2\temp\orchestrator\coordinator，该目录早已不存在）。
 // 红例（必红）：删掉任意一处 ORCH_COORDINATOR_DIR ⇒ 本判据点名该文件。
 test('every entry that drops the test marker pins a workspace-local coordinator', () => {
-  const rels = [
-    ...fs.readdirSync(path.join(root, 'test')).filter((n) => n.endsWith('.test.mjs')).map((n) => path.join('test', n)),
-    path.join('scripts', 'core', 'adapt-lib.mjs'),
-  ];
+  const walkMjs = (dir) => fs.readdirSync(dir, {withFileTypes: true}).flatMap((entry) => {
+    if (entry.name === 'node_modules' || entry.name === 'temp') return [];
+    const abs = path.join(dir, entry.name);
+    if (entry.isDirectory()) return walkMjs(abs);
+    return entry.name.endsWith('.mjs') ? [abs] : [];
+  });
+  const rels = [...walkMjs(path.join(root, 'test')), ...walkMjs(path.join(root, 'scripts'))]
+    .map((abs) => path.relative(root, abs))
+    .filter((rel) => rel !== 'test/test-isolation.test.mjs');
+  const required = ['scripts/core/adapt-lib.mjs'];
+  assert.deepEqual(required.filter((rel) => !fs.existsSync(path.join(root, rel))), [],
+    'explicit real-entry coverage disappeared: ' + required.join(', '));
   const offenders = [];
   for (const rel of rels) {
     const text = fs.readFileSync(path.join(root, rel), 'utf8');
-    if (/delete[^\n;]{0,40}NODE_TEST_CONTEXT/.test(text) && !text.includes('ORCH_COORDINATOR_DIR')) offenders.push(rel);
+    const pinsCoordinator=/(?:ORCH_COORDINATOR_DIR\s*[:=]|process\.env\.ORCH_COORDINATOR_DIR)/.test(text);
+    const dropsMarker=/(?:delete[^\n;]*NODE_TEST_CONTEXT|NODE_TEST_CONTEXT[^\n;]*delete)/.test(text);
+    if (dropsMarker && !pinsCoordinator) offenders.push(rel);
   }
   assert.deepEqual(offenders, [], 'these entries run the real machine-wide coordinator path: ' + offenders.join(', '));
 });

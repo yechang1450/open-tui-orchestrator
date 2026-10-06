@@ -78,6 +78,8 @@ while ($true) {
   if (($RescanEvery -gt 0) -and (($loops % $RescanEvery) -eq 0)) {
     foreach ($procId in @(Get-TreeIds -root $RootPid)) {
       $key = [int]$procId
+      # 根身份只由 -RootStarted/首钉决定：被驱逐后绝不由重扫把"现在占用该槽位的陌生进程"重新收养。
+      if ($key -eq $RootPid) { continue }
       if ($tree.ContainsKey($key)) { continue }
       $when = Get-StartUtc -procId $key
       if ($when) { $tree[$key] = $when }

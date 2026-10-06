@@ -1,6 +1,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {probeCli} from './host-probe.mjs';
+// pi formats --help with ANSI bold when FORCE_COLOR/PTY is inherited. Host
+// detection must not change when the caller is attached to a colored terminal.
+const ANSI_ESCAPE=new RegExp(String.fromCharCode(27)+'[[]'+'[0-?]*'+'[ -/]*'+'[@-~]','g');
+const plain=value=>String(value||'').replace(ANSI_ESCAPE,'');
 export function resolvePiHost(env=process.env) {
   const explicit=env.ORCH_CLI||env.PI_EXE;
   const candidates=explicit?[path.resolve(explicit)]:String(env.PATH||env.Path||'').split(path.delimiter).flatMap(dir=>['pi.exe','pi.cmd','pi'].map(n=>path.join(dir,n)));
@@ -16,9 +20,10 @@ export function resolvePiHost(env=process.env) {
     }
     const label=[bin,...prefixArgs].join(' ');
     const help=probeCli(bin,[...prefixArgs,'--help'],{env});
-    if(help.status!==0||!/pi - AI coding assistant/.test(help.stdout)||!['--session','--extension','--approve'].every(flag=>help.stdout.includes(flag))){rejected.push(`${label}: --help ${help.error?'probe error '+help.error:'exit '+help.status+'; banner/flags mismatch'}`);continue;}
+    const helpText=plain(help.out);
+    if(help.status!==0||!helpText.includes('pi - AI coding assistant')||!['--session','--extension','--approve'].every(flag=>helpText.includes(flag))){rejected.push(`${label}: --help ${help.error?'probe error '+help.error:'exit '+help.status+'; banner/flags mismatch'}`);continue;}
     const versionResult=probeCli(bin,[...prefixArgs,'--version'],{env});
-    const version=versionResult.stdout.trim();if(versionResult.status!==0||!/^\d+\.\d+\.\d+$/.test(version)){rejected.push(`${label}: --version ${versionResult.error?'probe error '+versionResult.error:'exit '+versionResult.status+'; unusable output '+JSON.stringify(version.slice(0,120))}`);continue;}
+    const version=plain(versionResult.out).trim();if(versionResult.status!==0||!/^\d+\.\d+\.\d+$/.test(version)){rejected.push(`${label}: --version ${versionResult.error?'probe error '+versionResult.error:'exit '+versionResult.status+'; unusable output '+JSON.stringify(version.slice(0,120))}`);continue;}
     const [major,minor,patch]=version.split('.').map(Number);if(major===0&&(minor<84||(minor===84&&patch<4))){rejected.push(`${label}: version ${version} below floor 0.84.4`);continue;}
     return {agent:'pi',config:{id:'pi',label:'pi agent',version,bin,prefixArgs,available:true,native:prefixArgs.length===0,modelEnv:'ORCH_MODEL',effortEnv:'ORCH_EFFORT'}};
   }

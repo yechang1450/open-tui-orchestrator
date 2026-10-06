@@ -58,13 +58,13 @@
   "deliverySurfaceScan": {
     "tarball": { "files": 93, "suspiciousFilenames": 0, "machinePathHits": 0, "nonPublicUsernameHits": 0, "credentialPatternHits": 0 },
     "currentTreeBeforeFix": { "nonHandleYechaHits": 6, "files": ["tools/orch-patrol.py", "tools/orch-patrol-install.ps1"] },
-    "finding": "the L10 patrol tools hardcoded C:\\Users\\<user> - a regression against the 2026-09-14 identity scrub; the public-readiness claim 'git grep <user> shows only the public handle' had become false again",
+    "finding": "the L10 patrol tools hardcoded a local user path - a regression against the 2026-09-14 identity scrub; the public-readiness identity claim had become false again",
     "fix": {
       "orch-patrol.py": "NODE_DIR / CODEX_BIN now derive from os.path.expanduser('~/.tools/...')",
       "orch-patrol-install.ps1": "$repo/$python/$launchers now Join-Path $HOME; the generated VBS expands %USERPROFILE% at runtime; task registration switched to schtasks /Create (PS-native Register-ScheduledTask is refused unelevated on this machine, 0x80070005 - same workaround as 83-level-patrol); uninstall switched to schtasks /Delete"
     },
     "verification": [
-      "git grep <user> -- tools/ => 0 non-handle hits",
+      "identity scan -- tools => 0 non-handle hits",
       "python ast.parse OK; PowerShell 5.1 PSParser 0 errors; .ps1 stays ASCII-only, LF, BOM-less",
       "patrol tick green after the edit (seq 55)",
       "installer re-run rc=0: task re-created via schtasks; task-triggered runs (tick 57/58) with LastTaskResult=0 and NextRunTime set",

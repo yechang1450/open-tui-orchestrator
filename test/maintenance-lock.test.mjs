@@ -45,13 +45,32 @@ test('maintenance lock acquire/read/release roundtrip', () => {
   } finally { t.cleanup(); }
 });
 
+test('an active maintenance lock cannot be replaced, and a stale owner cannot release it', () => {
+  const t = tempEnv();
+  try {
+    const first = acquireMaintenanceLock({ reason: 'first-owner', ttlMinutes: 30, env: t.env });
+    assert.throws(
+      () => acquireMaintenanceLock({ reason: 'second-owner', ttlMinutes: 30, env: t.env }),
+      /MAINTENANCE_LOCK_HELD/,
+    );
+    const file = maintenanceLockPath(t.env);
+    fs.writeFileSync(file, JSON.stringify({...first, ownerToken: 'other-owner', reason: 'other-owner'}), 'utf8');
+    assert.equal(releaseMaintenanceLock(t.env, first.ownerToken), false);
+    assert.equal(readMaintenanceLock(t.env).reason, 'other-owner');
+    assert.equal(releaseMaintenanceLock(t.env, 'other-owner'), true);
+    assert.equal(readMaintenanceLock(t.env).locked, false);
+  } finally { t.cleanup(); }
+});
+
 test('maintenance lock default TTL is 180min and capped at 24h', () => {
   const t = tempEnv();
   try {
     const d1 = acquireMaintenanceLock({ env: t.env });
     assert.equal(d1.expiresAt - d1.startedAt, DEFAULT_TTL_MINUTES * 60000);
+    releaseMaintenanceLock(t.env);
     const d2 = acquireMaintenanceLock({ ttlMinutes: 999999, env: t.env });
     assert.equal(d2.expiresAt - d2.startedAt, MAX_TTL_MINUTES * 60000);
+    releaseMaintenanceLock(t.env);
     const d3 = acquireMaintenanceLock({ ttlMinutes: Number('not-a-number'), env: t.env });
     assert.equal(d3.expiresAt - d3.startedAt, DEFAULT_TTL_MINUTES * 60000);
   } finally { t.cleanup(); }

@@ -137,14 +137,27 @@ export async function adaptAgent({ id, cli, env = process.env, live = true, comm
   report.profile = profile;
 
   const profileFile = path.join(profilesDir(env), id + '.json');
+  const releaseFile = path.join(REPO, 'release.json');
   fs.mkdirSync(path.dirname(profileFile), { recursive: true });
   const prev = fs.existsSync(profileFile) ? fs.readFileSync(profileFile, 'utf8') : null;
+  const prevRelease = fs.existsSync(releaseFile) ? fs.readFileSync(releaseFile, 'utf8') : null;
   const rollback = () => {
-    try { if (prev === null) fs.rmSync(profileFile, { force: true }); else fs.writeFileSync(profileFile, prev, 'utf8'); } catch { /* ignore */ }
+    const failures = [];
+    try {
+      if (prev === null) fs.rmSync(profileFile, { force: true }); else fs.writeFileSync(profileFile, prev, 'utf8');
+    } catch (error) { failures.push('profile: ' + (error instanceof Error ? error.message : String(error))); }
+    try {
+      if (prevRelease === null) fs.rmSync(releaseFile, { force: true }); else fs.writeFileSync(releaseFile, prevRelease, 'utf8');
+    } catch (error) { failures.push('release: ' + (error instanceof Error ? error.message : String(error))); }
+    if (!failures.length) return true;
+    report.rollbackError = failures.join('; ');
+    report.reason = (report.reason ? report.reason + '; ' : '') + 'rollback failed: ' + report.rollbackError;
+    return false;
   };
-  if (writeProfile) fs.writeFileSync(profileFile, JSON.stringify(profile, null, 2) + '\n', 'utf8');
-
   try {
+    if (writeProfile) fs.writeFileSync(profileFile, JSON.stringify(profile, null, 2) + '\n', 'utf8');
+
+    try {
     const { resolveProfileHost } = await import('./print-profile.mjs');
     const host = resolveProfileHost({ ...env, ORCH_AGENT_PROFILES_DIR: profilesDir(env), ORCH_CLI: located.source || located.bin }, id);
     if (!host || host.config.version !== version) { report.reason = 'resolution self-check failed'; rollback(); return report; }
@@ -197,20 +210,34 @@ export async function adaptAgent({ id, cli, env = process.env, live = true, comm
   }
 
   if (writeProfile && commit) {
-    acquireMaintenanceLock({ reason: 'auto-adapt ' + id, ttlMinutes: 30, env });
+    const maintenanceLock = acquireMaintenanceLock({ reason: 'auto-adapt ' + id, ttlMinutes: 30, env });
     try {
       const seal = run(process.execPath, [path.join(REPO, 'scripts', 'release-integrity.mjs'), '--seal'], { cwd: REPO, env });
-      if (seal.status !== 0) { report.reason = 'reseal failed: ' + String(seal.stderr || '').slice(0, 200); rollback(); run(process.execPath, [path.join(REPO, 'scripts', 'release-integrity.mjs'), '--seal'], { cwd: REPO, env }); return report; }
+      if (seal.status !== 0) {
+        report.reason = 'reseal failed: ' + String(seal.stderr || '').slice(0, 200);
+        rollback();
+        const compensation = run(process.execPath, [path.join(REPO, 'scripts', 'release-integrity.mjs'), '--seal'], { cwd: REPO, env });
+        report.rollbackResealExit = compensation.status;
+        if (compensation.status !== 0) report.reason += '; rollback reseal failed: ' + String(compensation.stderr || '').slice(0, 200);
+        return report;
+      }
       const rel = path.relative(REPO, profileFile).split(path.sep).join('/');
       const add = run('git', ['add', '--', rel, 'release.json'], { cwd: REPO, env });
-      const commitResult = run('git', ['commit', '-m', 'feat(adapt): print-class profile for ' + id + ' (' + version + ') [auto-generated]'], { cwd: REPO, env });
-      report.committed = commitResult.status === 0;
       report.gitAdd = add.status;
-    } finally { releaseMaintenanceLock(env); }
+      if (add.status !== 0) { report.reason = 'git add failed: ' + String(add.stderr || add.stdout || add.error || add.status); rollback(); return report; }
+      const commitResult = run('git', ['commit', '-m', 'feat(adapt): print-class profile for ' + id + ' (' + version + ') [auto-generated]', '--', rel, 'release.json'], { cwd: REPO, env });
+      report.committed = commitResult.status === 0;
+      if (!report.committed) { report.reason = 'git commit failed: ' + String(commitResult.stderr || commitResult.stdout || commitResult.error || commitResult.status); rollback(); return report; }
+    } finally { releaseMaintenanceLock(env, maintenanceLock.ownerToken); }
   }
 
   report.passed = true;
   return report;
+  } catch (error) {
+    report.reason = 'adapt failed: ' + (error instanceof Error ? error.message : String(error));
+    rollback();
+    return report;
+  }
 }
 
 export async function autoAdaptIfNeeded(env = process.env) {

@@ -3,8 +3,7 @@ import path from 'node:path';
 import {spawn} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {atomicJson,processSnapshot,sameProcess} from './leases.mjs';
-import {runDirectory} from './runner.mjs';
-import {resolveRuntimeContext} from './runtime-context.mjs';
+import {runDirectory,resolveRuntimeContext,resolveStateDirectory} from './runtime-context.mjs';
 
 // Run guardian: a tiny detached process that outlives the engine. It watches the
 // engine process plus summary.json; when the engine dies abnormally (process gone
@@ -15,7 +14,7 @@ import {resolveRuntimeContext} from './runtime-context.mjs';
 
 const ENTRY=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..','orchestrate-sdk.mjs');
 
-export function guardianFile(workspace,runId){return path.join(runDirectory(workspace,runId),'guardian.json');}
+export function guardianFile(workspace,runId,stateDir) { return path.join(runDirectory(workspace,runId,stateDir),'guardian.json'); }
 
 export function readGuardianState(file){try{return JSON.parse(fs.readFileSync(file,'utf8'));}catch{return null;}}
 
@@ -28,9 +27,9 @@ function validState(state,runId){
 
 // Spawn (or adopt) the guardian for a fresh run. Called by the engine once the
 // run ledger exists; guardian failure must never break the run itself.
-export function ensureRunGuardian({runId,workspace,timeoutMs,owner,agent,env=process.env,spawnImpl=spawn,snapshotImpl=processSnapshot,log=console.log}={}) {
+export function ensureRunGuardian({runId,workspace,stateDir:providedStateDir,timeoutMs,owner,agent,env=process.env,spawnImpl=spawn,snapshotImpl=processSnapshot,log=console.log}={}) {
   if(env.ORCH_GUARDIAN==='0'||env.NODE_TEST_CONTEXT)return {disabled:true};
-  const dir=runDirectory(workspace,runId),file=guardianFile(workspace,runId);
+  const stateDir=providedStateDir||resolveStateDirectory(workspace,env),dir=runDirectory(workspace,runId,stateDir),file=guardianFile(workspace,runId,stateDir);
   const prev=readGuardianState(file);
   if(prev&&Number.isSafeInteger(Number(prev.guardianPid))&&Number(prev.guardianPid)>0) {
     try {
@@ -50,7 +49,7 @@ export function ensureRunGuardian({runId,workspace,timeoutMs,owner,agent,env=pro
   atomicJson(file,state);
   const out=fs.openSync(path.join(dir,'guardian.log'),'a');
   const child=spawnImpl(process.execPath,[path.join(path.dirname(fileURLToPath(import.meta.url)),'run-guardian.mjs'),'--run-id',runId],
-    {cwd:workspace,env:{...env,ORCH_AGENT:agent,ORCH_RUN_ID:runId,WORKSPACE_DIR:workspace},detached:true,windowsHide:true,stdio:['ignore',out,out]});
+    {cwd:workspace,env:{...env,ORCH_AGENT:agent,ORCH_RUN_ID:runId,WORKSPACE_DIR:workspace,ORCH_STATE_DIR:stateDir},detached:true,windowsHide:true,stdio:['ignore',out,out]});
   fs.closeSync(out);
   child.on?.('error',()=>{});child.unref?.();
   state.guardianPid=Number(child?.pid)||0;state.updatedAt=Date.now();atomicJson(file,state);
@@ -74,8 +73,8 @@ export function parseGuardianOptions(argv) {
 export async function main(argv=process.argv.slice(2),hooks={}) {
   const {runId}=parseGuardianOptions(argv);
   const env=hooks.env||process.env;
-  const {workspace}=resolveRuntimeContext(env);
-  const dir=runDirectory(workspace,runId),stateFile=guardianFile(workspace,runId);
+  const {workspace,state:stateRoot}=resolveRuntimeContext(env);
+  const dir=runDirectory(workspace,runId,stateRoot),stateFile=guardianFile(workspace,runId,stateRoot);
   const now=hooks.now||(()=>Date.now()),sleep=hooks.sleep||(ms=>new Promise(r=>setTimeout(r,ms)));
   const snapshot=hooks.snapshot||processSnapshot,spawnImpl=hooks.spawn||spawn;
   const log=hooks.log||(m=>{console.log(m);try{fs.appendFileSync(path.join(dir,'guardian.log'),m+'\n');}catch{}});
@@ -129,13 +128,21 @@ export async function main(argv=process.argv.slice(2),hooks={}) {
     try{outFd=fs.openSync(path.join(dir,'resumed-engine-'+number+'.log'),'a');}catch{outFd='ignore';}
     const child=spawnImpl(process.execPath,[ENTRY,'--resume-run',runId],{
       cwd:workspace,
-      env:{...env,ORCH_AGENT:String((again.value&&again.value.agent)||'codex'),ORCH_RUN_ID:runId,WORKSPACE_DIR:workspace},
+      env:{...env,ORCH_AGENT:String((again.value&&again.value.agent)||'codex'),ORCH_RUN_ID:runId,WORKSPACE_DIR:workspace,ORCH_STATE_DIR:stateRoot},
       detached:true,windowsHide:true,stdio:['ignore',outFd,outFd],
     });
     if(outFd!=='ignore')try{fs.closeSync(outFd);}catch{}
     child?.on?.('error',()=>{});child?.unref?.();
     let identity=null;
-    if(child&&child.pid){try{identity=snapshot().get(Number(child.pid))||null;}catch{identity=null;}}
+    if(child&&child.pid){
+      // 有界宽限轮询：WMI 对刚创建的进程常滞后（同仓 identityWithGrace 同理）；单次读失手会让
+      // engine 停在旧死 pid 上，下个 interval 再判 'engine gone' → 重复 spawn、双倍消耗 restart 预算。
+      for(let tries=0;tries<25;tries++){
+        try{identity=snapshot().get(Number(child.pid))||null;}catch{identity=null;}
+        if(identity)break;
+        if(tries<24)await sleep(200);
+      }
+    }
     state.restarts++;
     if(identity){state.engines.push({owner:identity,startedAt:Date.now(),by:'guardian'});engine=identity;}
     writeState(state);

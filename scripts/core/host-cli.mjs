@@ -9,6 +9,7 @@ import {resolveKimiHost,kimiArgs} from './kimi-host.mjs';
 import {resolveClaudeHost,claudeArgs} from './claude-host.mjs';
 import {resolveProfileHost,profileArgs,listProfiles,loadProfile} from './print-profile.mjs';
 import {loadUnitProfile,expandUnitArgs} from './unit-command.mjs';
+import {powershellExe} from './contracts.mjs';
 
 // Adapter contract: resolve a real CLI before any planner/window is started.
 // Additional adapters must implement planning, interactive argv and completion
@@ -56,8 +57,7 @@ export function hostProcessChain({ platform = process.platform, startPid = proce
   const script = '$a=@{};Get-CimInstance Win32_Process|ForEach-Object{$a[[string]$_.ProcessId]=$_};$p=$a[[string]' + (Number(startPid) || 0) + '];$g=0;while($p -and $g -lt 16){$c=if($p.CommandLine){$p.CommandLine}else{""};("{0}`t{1}`t{2}" -f $p.ProcessId,$p.Name,$c);$p=$a[[string]$p.ParentProcessId];$g++}';
   let r;
   try {
-    const ps = path.join(env.SystemRoot || env.WINDIR || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
-    r = spawn(fs.existsSync(ps) ? ps : 'powershell.exe', ['-NoProfile', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')], { encoding: 'utf8', windowsHide: true, shell: false, timeout: 8000 });
+    r = spawn(powershellExe(env), ['-NoProfile', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')], { encoding: 'utf8', windowsHide: true, shell: false, timeout: 8000 });
   } catch { return []; }
   if (r?.status !== 0) return [];
   return String(r.stdout || '').split(/\r?\n/).filter(Boolean).map((line) => {
@@ -200,7 +200,13 @@ export function launchArgs(config, options = {}) {
   // authorization and normalizes it to never + danger-full-access. Carry that
   // envelope into Codex so project trust and command confirmations cannot stop
   // an authorized TUI window at startup. Restricted callers keep their policy.
-  if (sandbox === 'danger-full-access') args.push('--dangerously-bypass-approvals-and-sandbox');
-  args.push('-c', `projects.${JSON.stringify(cwd)}.trust_level="trusted"`, ...codexNetworkArgs());
+  if (sandbox === 'danger-full-access') {
+    args.push('--dangerously-bypass-approvals-and-sandbox');
+    // Codex 0.159+ exposes the official automation switch for hook trust. Without
+    // it, a visible/PTY unit can stop at "Hooks need review" before the prompt.
+    args.push('--dangerously-bypass-hook-trust');
+    args.push('-c', `projects.${JSON.stringify(cwd)}.trust_level="trusted"`);
+  }
+  args.push(...codexNetworkArgs());
   return args;
 }

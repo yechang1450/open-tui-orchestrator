@@ -6,11 +6,17 @@ export function resolveOpenClawHost(env=process.env) {
  const paths=explicit?[path.resolve(explicit)]:String(env.PATH||env.Path||'').split(path.delimiter).flatMap(d=>['openclaw.cmd','openclaw'].map(n=>path.join(d,n)));
  const rejected=[];
  for(const file of [...new Set(paths)]){
-  if(!fs.existsSync(file))continue;
+  try{if(!fs.statSync(file).isFile())continue;}catch{continue;}
   let entry=/\.mjs$/.test(file)?file:null;
-  if(!entry&&/node_modules[\\/]openclaw[\\/]openclaw\.mjs/.test(fs.readFileSync(file,'utf8')))entry=path.join(path.dirname(file),'node_modules','openclaw','openclaw.mjs');
-  if(!entry||!fs.existsSync(entry))continue;
-  const packageRoot=path.dirname(entry),pkg=JSON.parse(fs.readFileSync(path.join(packageRoot,'package.json'),'utf8'));
+  if(!entry){
+   let shim='';
+   try{shim=fs.readFileSync(file,'utf8');}catch(error){rejected.push(`${file}: unreadable candidate (${error.message})`);continue;}
+   if(/node_modules[\\/]openclaw[\\/]openclaw\.mjs/.test(shim))entry=path.join(path.dirname(file),'node_modules','openclaw','openclaw.mjs');
+  }
+  try{if(!entry||!fs.statSync(entry).isFile())continue;}catch{continue;}
+  const packageRoot=path.dirname(entry);
+  let pkg;
+  try{pkg=JSON.parse(fs.readFileSync(path.join(packageRoot,'package.json'),'utf8'));}catch(error){rejected.push(`${file}: invalid package metadata (${error.message})`);continue;}
   const bin=fs.existsSync(path.join(path.dirname(file),'node.exe'))?path.join(path.dirname(file),'node.exe'):process.execPath;
   const ptyEntry=path.join(packageRoot,'node_modules','@lydell','node-pty','index.js');
   // 接口自证先于版本门：版本常量只记「最后验证于」，不是准入门槛；未验证版本必须带探针实测结果 fail-closed。
