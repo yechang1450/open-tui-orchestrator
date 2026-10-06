@@ -2,6 +2,8 @@
 
 A local Node.js orchestrator for Agents (tools that receive tasks and act through a CLI, or command-line interface).
 
+> Project docs / 项目规范： [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md) · [Code of Conduct](CODE_OF_CONDUCT.md) · [Issue templates](.github/ISSUE_TEMPLATE) · [Pull request template](.github/pull_request_template.md)
+
 **Windows-only today.** The launchers, the invisible ConPTY carrier and the machine-wide coordinator are Windows-specific; other platforms get a diagnostic instead of a half-working install. Before you run it, read [docs/trust-and-safety.md](docs/trust-and-safety.md) — it states plainly what this tool does on your machine (hidden agents running with your credentials, bypassed approvals for Codex-hosted runs, the exact files it writes). Security reports: [SECURITY.md](SECURITY.md). Contributing: [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Overview
