@@ -50,6 +50,13 @@ public static class OrchestratorInactiveShell {
  static readonly uint SWP_NOMOVE=0x2, SWP_NOSIZE=0x1, SWP_SHOWWINDOW=0x40;
  static void Snapshot(HashSet<IntPtr> set){EnumWindows((h,p)=>{if(IsWindowVisible(h))set.Add(h);return true;},IntPtr.Zero);}
  public static string Title(IntPtr h){var n=GetWindowTextLength(h);if(n<=0)return "";var sb=new StringBuilder(n+1);GetWindowText(h,sb,sb.Capacity);return sb.ToString();}
+ // Window appearance budget (ORCH_WINDOW_APPEAR_MS, default 9000ms): a fresh window can take far
+ // longer than 9s on a loaded machine. Only the budget is configurable; the verdict (did a fresh
+ // visible window of this pid actually appear) is still decided by the scan below.
+ static int AppearMs(){
+  try{var s=Environment.GetEnvironmentVariable("ORCH_WINDOW_APPEAR_MS");if(!string.IsNullOrEmpty(s)){int v=int.Parse(s);if(v>0)return v;}}catch{}
+  return 9000;
+ }
  // z-order rank (0 = frontmost): EnumWindows walks top-level windows in z-order, so this is the
  // hardest measurable evidence that the user can actually see the window. -1 = not found.
  static int ZRank(IntPtr target){int rank=0;int found=-1;EnumWindows((h,p)=>{if(found>=0)return false;if(h==target){found=rank;return false;}rank++;return rank<400;},IntPtr.Zero);return found;}
@@ -63,25 +70,30 @@ public static class OrchestratorInactiveShell {
   CloseHandle(p.thread);CloseHandle(p.process);
   if(!activate)return "{\"ok\":true,\"activated\":false}";
   // Give the app time to create its window, then raise the first fresh, sane top-level window.
-  var deadline=Environment.TickCount64+9000;
+  // Appearance budget is tunable (2026-10-06): on a loaded machine a fresh Windows Terminal can take
+  // far longer than 9s, and a hardcoded value reports "machine busy" as "window never appeared"
+  // (measured in the codex 8-window acceptance: proj-95/96 failed the popup 3 times in a row).
+  // The default stays 9000ms; only the budget is configurable: ORCH_WINDOW_APPEAR_MS.
+  int appearMs=AppearMs();
+  var deadline=Environment.TickCount64+appearMs;
   IntPtr found=IntPtr.Zero; string title="";
   while(Environment.TickCount64<deadline){
-    var now=new HashSet<IntPtr>();Snapshot(now);
-    foreach(var h in now){
-      if(before.Contains(h))continue;
-      uint windowPid=0;if(GetWindowThreadProcessId(h,out windowPid)==0||windowPid!=p.pid)continue;
-      if(!IsWindowVisible(h))continue;
-      Rect r;if(!GetWindowRect(h,out r))continue;
-      var w=r.R-r.L;var hh=r.B-r.T;
-      if(w<260||hh<180)continue;                     // skip IME/tool/tray slivers
-      var t=Title(h);
-      if(t=="MSCTFIME UI"||t=="Default IME"||t=="DDE Server Window")continue;
-      found=h;title=t;break;
-    }
-    if(found!=IntPtr.Zero)break;
-    System.Threading.Thread.Sleep(150);
+   var now=new HashSet<IntPtr>();Snapshot(now);
+   foreach(var h in now){
+    if(before.Contains(h))continue;
+    uint windowPid=0;if(GetWindowThreadProcessId(h,out windowPid)==0||windowPid!=p.pid)continue;
+    if(!IsWindowVisible(h))continue;
+    Rect r;if(!GetWindowRect(h,out r))continue;
+    var w=r.R-r.L;var hh=r.B-r.T;
+    if(w<260||hh<180)continue;                     // skip IME/tool/tray slivers
+    var t=Title(h);
+    if(t=="MSCTFIME UI"||t=="Default IME"||t=="DDE Server Window")continue;
+    found=h;title=t;break;
+   }
+   if(found!=IntPtr.Zero)break;
+   System.Threading.Thread.Sleep(150);
   }
-  if(found==IntPtr.Zero)return "{\"ok\":false,\"reason\":\"no new visible window appeared within 9000ms\"}";
+  if(found==IntPtr.Zero)return "{\"ok\":false,\"reason\":\"no new visible window appeared within "+appearMs+"ms\"}";
   Rect fr;GetWindowRect(found,out fr);
   ShowWindow(found,1);ShowWindowAsync(found,1);      // SW_SHOWNORMAL twice: restore if minimized
   SetWindowPos(found,HWND_TOPMOST,0,0,0,0,SWP_NOMOVE|SWP_NOSIZE|SWP_SHOWWINDOW);

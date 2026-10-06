@@ -92,3 +92,18 @@ test('inactive-window.ps1 stays ANSI-safe (ASCII only, LF) and is PowerShell-par
  const check=spawnSync(PS_EXE,['-NoProfile','-NonInteractive','-Command',script],{encoding:'utf8'});
  assert.equal(check.status,0,'PowerShell 必须能解析该脚本: '+String(check.stdout||check.stderr||''));
 });
+
+// 窗口「出现」预算可调（2026-10-06）：满载机器上新开 Windows Terminal 可远超 9s，硬编码会把
+// 「机器忙」误报成「窗口没出现」（codex 8 窗验收里 proj-95/96 连续 3 次 popup FAILED 即此）。
+// 红例：把 env 读取摘掉（退回硬编码）时，下面第一条断言必红。
+test('the window-appearance budget is tunable while the default stays 9000ms',()=>{
+ const text=fs.readFileSync(HELPER,'utf8');
+ assert.match(text,/ORCH_WINDOW_APPEAR_MS/,'the helper must expose a tunable appearance budget');
+ assert.match(text,/return 9000;/,'the default appearance budget must stay 9000ms');
+ // 失败话术必须报出**实际**预算：调了预算却在话术里写死 9000 等于不可排障。
+ assert.match(text,/no new visible window appeared within "\+appearMs\+"ms/,'the reason must report the resolved budget, not a literal');
+ const injected=text.replace(/Environment\.GetEnvironmentVariable\("ORCH_WINDOW_APPEAR_MS"\)/,'""');
+ assert.notEqual(injected,text,'injection must actually remove the env read');
+ // 注入后必须**不再读**该 env（注释里还会提到这个名字，所以只查读取点）。
+ assert.doesNotMatch(injected,/GetEnvironmentVariable\("ORCH_WINDOW_APPEAR_MS"\)/,'the injected copy must lose the env read (proves the assertion targets it)');
+});
