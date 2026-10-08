@@ -7,7 +7,7 @@ import {fileURLToPath} from 'node:url';
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const drill = path.join(repo, 'tools', 'l5-recovery-drill.mjs');
-const node = 'C:/Program Files/nodejs/node.exe';
+const node = process.execPath;  // 2026-10-08: was a hardcoded C:/Program Files/nodejs path (repo convention is process.execPath)
 const evidence = path.resolve(repo, '..', '..', 'workspace', 'temp', 'review-l5-20261004', 'security-test');
 const marker = 'open-tui-orchestrator l5 root v1\n';
 

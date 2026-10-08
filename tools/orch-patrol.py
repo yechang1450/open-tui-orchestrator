@@ -40,12 +40,30 @@ import datetime
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-NODE_DIR = r'C:\Program Files\nodejs'  # 2026-09-22: node24-fresh tree removed; system node
+def _resolve_node_dir() -> str:
+    """node 所在目录，运行时解析。
+
+    写死 C:\Program Files\nodejs 会让 patrol 在任何 node 来自别处的机器上
+    报 node-missing 并整体转 RED（2026-10-08 重装后实测：新系统无系统 node，node 随 Hermes
+    自带，两条 patrol 判据因此失败）。优先级：ORCH_NODE_BIN -> PATH 上的 node -> 旧常量兜底
+    （真的没有 node 时仍旧报 node-missing，保持 fail-closed）。
+    """
+    override = os.environ.get('ORCH_NODE_BIN', '').strip()
+    if override:
+        return override
+    found = shutil.which('node')
+    if found:
+        return os.path.dirname(found)
+    return r'C:\Program Files\nodejs'
+
+
+NODE_DIR = _resolve_node_dir()  # 2026-10-08: 不再写死；说明见 _resolve_node_dir
 NODE_EXE = os.path.join(NODE_DIR, 'node.exe')
 CODEX_BIN = os.path.join(ROOT, 'scripts', 'node_modules', '@openai', 'codex-win32-x64',
                          'vendor', 'x86_64-pc-windows-msvc', 'bin')  # 2026-09-22: repo-local codex vendor, derived from ROOT (no user path)

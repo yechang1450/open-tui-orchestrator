@@ -57,7 +57,7 @@ test("transaction refuses to retry after an abandoned coordinator mutex", {timeo
   const started = path.join(dir, "transaction-started");
   const resultFile = path.join(dir, "transaction-result.json");
   const worker = path.join(dir, "transaction-worker.mjs");
-  const nodeExe = "C:/Program Files/nodejs/node.exe";
+  const nodeExe = process.execPath;  // 2026-10-08: was a hardcoded C:/Program Files/nodejs path (repo convention is process.execPath)
   const holder = startHolder(dir, ticket);
   let child = null;
   try {

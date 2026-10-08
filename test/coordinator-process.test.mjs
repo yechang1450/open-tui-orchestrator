@@ -201,7 +201,7 @@ test('resolving the coordinator directory reclaims aged tickets',async()=>{
 test("claimRun preserves an owner that appears after the pre-lock snapshot", {skip: process.platform !== "win32", timeout: 120000}, async () => {
   fs.mkdirSync(family, {recursive: true});
   const dir = fs.mkdtempSync(path.join(family, "snapshot-lock-barrier-"));
-  const nodeExe = "C:/Program Files/nodejs/node.exe";
+  const nodeExe = process.execPath;  // 2026-10-08: was a hardcoded C:/Program Files/nodejs path (repo convention is process.execPath)
   const moduleUrl = new URL("../scripts/core/leases.mjs", import.meta.url).href;
   const aWorker = path.join(dir, "claim-a.mjs");
   const bWorker = path.join(dir, "claim-b.mjs");

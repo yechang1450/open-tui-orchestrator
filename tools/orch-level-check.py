@@ -27,16 +27,34 @@ import os
 import re
 import subprocess
 import sys
+import shutil
 import time
 from pathlib import Path
 
 REPO = Path(os.path.expanduser("~/.tools/open-tui-orchestrator"))
-NODE_BIN = Path(r"C:\Program Files\nodejs")  # 2026-09-22: node24-fresh removed; system node
+def _resolve_node_bin() -> Path:
+    """node 所在目录，运行时解析。
+
+    写死 C:\Program Files\nodejs 会让 patrol 在任何 node 来自别处的机器上报 node-missing
+    并整体转 RED（2026-10-08 重装后实测：新系统无系统 node，node 随 Hermes 自带，
+    两条 patrol 判据因此失败）。优先级：ORCH_NODE_BIN -> PATH 上的 node -> 旧常量兜底
+    （真的没有 node 时仍旧报 node-missing，保持 fail-closed）。
+    """
+    override = os.environ.get("ORCH_NODE_BIN", "").strip()
+    if override:
+        return Path(override)
+    found = shutil.which("node")
+    if found:
+        return Path(found).parent
+    return Path(r"C:\Program Files\nodejs")
+
+
+NODE_BIN = _resolve_node_bin()  # 2026-10-08: 不再写死；说明见 _resolve_node_bin
 # vendor 目录随仓归档；从 REPO 推导，避免写死用户名路径（公开前身份清理）
 _CODEX_VENDOR = (REPO / "scripts" / "node_modules" / "@openai" / "codex-win32-x64"
                  / "vendor" / "x86_64-pc-windows-msvc" / "bin")
 CODEX_BIN = str(_CODEX_VENDOR)
-SUITE_CMD = (f"ORCH_AGENT=codex PATH='C:/Program Files/nodejs:{_CODEX_VENDOR.as_posix()}:$PATH "
+SUITE_CMD = (f"ORCH_AGENT=codex PATH='{NODE_BIN.as_posix()}:{_CODEX_VENDOR.as_posix()}:$PATH "
              f"node --test --test-concurrency=3 test/*.test.mjs")
 DEFAULT_LOG = Path("D:/temp/orch-level/L1-suite.log")
 LOG_PATH = DEFAULT_LOG
