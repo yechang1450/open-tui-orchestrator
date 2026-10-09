@@ -29,7 +29,7 @@
  *
  * Usage (from scripts dir):  node open-tui-orchestrator-force.mjs --status | --assert <kind> | --verify <file> | --enable | --disable
  */
-import { readFileSync, writeFileSync, existsSync, mkdirSync, rmSync, lstatSync, renameSync, realpathSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, mkdirSync, rmSync, lstatSync, realpathSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";

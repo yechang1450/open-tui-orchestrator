@@ -1,5 +1,5 @@
 import fs from 'node:fs';
-import { networkArgs, codexNetworkArgs } from './network-policy.mjs';
+import { codexNetworkArgs } from './network-policy.mjs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import {resolvePiHost,piArgs} from './pi-host.mjs';

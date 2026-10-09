@@ -11,7 +11,6 @@ export {runDirectory};
 // --watch 和 --status 共用。
 
 const BLOCK_MARKS = { verified: '✓', running: '▶', launching: '…', waiting: '⏳', pending: '·', failed: '✗', timeout: '✗', 'popup-failed': '✗', 'needs-reconciliation': '⚠', blocked: '⊘', 'awaiting-verification': '◐' };
-const TERMINAL = new Set(['verified', 'failed', 'blocked', 'cancelled', 'awaiting-verification', 'preflight-failed', 'popup-failed', 'timeout', 'needs-reconciliation']);
 
 export function boardSignature(sum, taskStates = {}) {
   return JSON.stringify([

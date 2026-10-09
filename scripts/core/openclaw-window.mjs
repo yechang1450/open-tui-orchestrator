@@ -1,7 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {createRequire} from 'node:module';
-import {fileURLToPath} from 'node:url';
 import {DatabaseSync} from 'node:sqlite';
 import {spawnSync} from 'node:child_process';
 import {completionText} from './openclaw-config.mjs';

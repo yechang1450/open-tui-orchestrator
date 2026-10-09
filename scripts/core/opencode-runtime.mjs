@@ -1,7 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import {fileURLToPath} from 'node:url';
 import {spawn} from 'node:child_process';
 import {opencodeArgs, opencodePlannerArgs} from './opencode-host.mjs';
 import {nativeArgumentLines} from './native-argv.mjs';

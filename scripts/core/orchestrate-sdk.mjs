@@ -60,8 +60,8 @@
  * ============================================================================
  */
 import {nativeArgumentLines} from "./native-argv.mjs";
-import {CORE_VERSION, levelWaves, keysOverlap, summaryComplete,requestTasks,bindClassifiedTasks,ledgerPlan,computeMaxWindows,powershellExe,systemToolExe,isMachineReadableEntry} from "./contracts.mjs";
-import {memConfig, loadUnitMemory, saveUnitMemory, recordUnitPeak, unitEstimateMb, admitCount, fitBlocks, describeFit, unitMemoryStorePath} from "./unit-memory.mjs";
+import {CORE_VERSION, levelWaves, keysOverlap, requestTasks,bindClassifiedTasks,ledgerPlan,computeMaxWindows,powershellExe,systemToolExe,isMachineReadableEntry} from "./contracts.mjs";
+import {memConfig, loadUnitMemory, unitEstimateMb, admitCount, fitBlocks, describeFit, unitMemoryStorePath} from "./unit-memory.mjs";
 import {formatFailureLines} from "./failure-report.mjs";
 import {effectiveUnitCarrier, ptyAvailability} from "./unit-carrier.mjs";
 // 锚定 SystemRoot 的系统工具：裸名会先按进程 cwd（=任意工作区）解析，防二进制投毒。
@@ -78,7 +78,7 @@ import {runUnitPlanner,writeUnitLauncher} from './unit-runtime.mjs';
 import {spawnInactiveWindow} from './inactive-window.mjs';
 import {ensureRunGuardian} from './run-guardian.mjs';
 import {lockedForMaintenance,readMaintenanceLock,MAINTENANCE_MESSAGE} from './maintenance-lock.mjs';
-import { networkConfig, codexNetworkConfig } from "./network-policy.mjs";
+import { codexNetworkConfig } from "./network-policy.mjs";
 import { spawn, spawnSync } from "node:child_process";
 import {watchRun, boardSummaryLine} from "./run-board.mjs";
 import { resolveAgent, launchArgs } from "./agent.mjs";
@@ -158,8 +158,6 @@ function assertUnitCarrierReady() {
 const waitAdapterResult=(rf,timeout,pidf,token)=>AGENT.agent==='openclaw'?waitOpenClawResult(rf,timeout,pidf,token):AGENT.agent==='opencode'?waitOpenCodeResult(rf,timeout,pidf):AGENT.agent==='kimi'?waitKimiResult(rf,timeout,pidf):AGENT.agent==='claude'?waitClaudeResult(rf,timeout,pidf):(AGENT.config.profile||AGENT.config.unit)?waitProfileResult(rf,timeout,pidf):waitPiResult(rf,timeout,pidf);
 const CODEX = String(AGENT.config?.bin || '');
 // PowerShell 单引号字符串内嵌路径：把 ' 转义成 ''，避免路径含引号时破坏脚本/注入。
-const WORKSPACE_Q = WORKSPACE.replace(/'/g, "''");
-const CODEX_Q = CODEX.replace(/'/g, "''");
 // 仅当 PYTHON 是真实存在的绝对路径时，才把它所在目录前置进窗内 PATH；
 // 裸名（如默认的 "python"）会成为按窗 cwd（=任意工作区）解析的相对 PATH 段，构成投毒面。
 const PY_DIR = (() => { try { const p = String(process.env.PYTHON || ""); return path.isAbsolute(p) && existsSync(p) ? path.dirname(p) : null; } catch { return null; } })();
@@ -966,7 +964,6 @@ function ensureCodexCli() { return AGENT.config.bin; }
 // 判定标准：插件缓存目录存在 + 其 using-superpowers SKILL.md 存在 + 该插件在 config.toml 被启用。
 // ---------------------------------------------------------------------------
 // 通用化：superpowers 缓存目录默认在 CODEX_HOME 下；允许外部用 ORCH_SUPERPOWERS_CACHE_DIR 覆盖，适配不同宿主/插件市场。
-const SUPERPOWERS_CACHE_DIR = process.env.ORCH_SUPERPOWERS_CACHE_DIR || path.join(CODEX_HOME, "plugins", "cache", "openai-api-curated", "superpowers");
 function configPluginEnabled(name) {
   try {
     const cfg = readFileSync(path.join(CODEX_HOME, "config.toml"), "utf8");
