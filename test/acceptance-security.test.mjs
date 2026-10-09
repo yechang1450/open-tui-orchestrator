@@ -6,7 +6,9 @@ import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {resolveAcceptanceCommand, verifyChecks} from '../scripts/core/contracts.mjs';
 
-const evidenceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'workspace', 'temp', 'otui-review-acceptance-20261004');
+// 2026-10-09: WORKSPACE_DIR first - the old chain assumed the repo lives INSIDE the workspace
+// (the pre-move layout) and now lands on the deprecated USERPROFILE\workspace shell.
+const evidenceRoot = path.join(process.env.WORKSPACE_DIR || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'workspace'), 'temp', 'otui-review-acceptance-20261004');
 fs.mkdirSync(evidenceRoot, {recursive: true});
 const fixture = prefix => {
   const dir = fs.mkdtempSync(path.join(evidenceRoot, prefix));

@@ -9,7 +9,10 @@ import {powershellExe} from '../scripts/core/contracts.mjs';
 const repo=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const LIVE=path.join(repo,'test','live-inactive-window.ps1');
 const PS_EXE=powershellExe();
-const workspaceRoot=process.env.USERPROFILE?path.join(process.env.USERPROFILE,'workspace'):path.join(process.env.HOME||process.cwd(),'workspace');
+// 2026-10-09: the workspace moved off the user profile (USERPROFILE\workspace is a deprecated,
+// empty shell on this box). WORKSPACE_DIR is the repo's canonical workspace env (cli.mjs,
+// orchestrate-sdk.mjs) — use it first, keep the old derivation as a fallback.
+const workspaceRoot=process.env.WORKSPACE_DIR||(process.env.USERPROFILE?path.join(process.env.USERPROFILE,'workspace'):path.join(process.env.HOME||process.cwd(),'workspace'));
 const fixtureRoot=path.join(workspaceRoot,'temp','otui-live-inactive-window-fixture-');
 const liveSource=fs.readFileSync(LIVE,'utf8');
 fs.mkdirSync(path.dirname(fixtureRoot),{recursive:true});

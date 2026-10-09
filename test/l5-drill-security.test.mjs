@@ -8,7 +8,9 @@ import {fileURLToPath} from 'node:url';
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const drill = path.join(repo, 'tools', 'l5-recovery-drill.mjs');
 const node = process.execPath;  // 2026-10-08: was a hardcoded C:/Program Files/nodejs path (repo convention is process.execPath)
-const evidence = path.resolve(repo, '..', '..', 'workspace', 'temp', 'review-l5-20261004', 'security-test');
+// 2026-10-09: WORKSPACE_DIR first - the old chain assumed the repo lives INSIDE the workspace
+// (the pre-move layout) and now lands on the deprecated USERPROFILE\workspace shell.
+const evidence = path.join(process.env.WORKSPACE_DIR || path.resolve(repo, '..', '..', 'workspace'), 'temp', 'review-l5-20261004', 'security-test');
 const marker = 'open-tui-orchestrator l5 root v1\n';
 
 function reset(dir) {
