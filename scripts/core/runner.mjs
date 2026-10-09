@@ -98,8 +98,11 @@ export async function waitWithStallWatchdog(hooks,la,session,active,timeoutMs){
   // started 检查点；若整个单元从启动起 N 秒内一次检查点都没写过（该尝试的 checkpoints/ 目录从未
   // 越过启动时刻；检查点写在 <attempt dir>/checkpoints/<id>.json，attempt.json 本身不会变），
   // 说明这轮 agent 只顾分析/空转而没有动手——提前收口重跑，不再等满 stall 期限。0 = 关闭。
+  // 默认 20 分钟（2026-10-09，原 300s）：慢启动宿主的仪式期本身就要 4-18 分钟（实测 codex），
+  // 300s 默认把"慢但正常"误判成"空转"（同一契约实跑：3 次无产出重试 ⇒ 改 1200s 后 0 次）；
+  // 真正僵死的单元仍由同函数里的 stall 通道（任一证据文件 mtime 不前进）兜底。
   const rawFirst=process.env.ORCH_UNIT_FIRST_CHECKPOINT_MS;
-  const firstCheckpointMs=rawFirst===undefined?300000:Math.max(0,Number(rawFirst)||0);
+  const firstCheckpointMs=rawFirst===undefined?1200000:Math.max(0,Number(rawFirst)||0);
   const base=path.dirname(String(la.rf||la.pidf||'.'));
   const stem=path.basename(String(la.lp||'')).replace(/\.ps1$/,'');
   const paths=[active.file,la.rf,la.pidf,path.join(base,stem+'.out.log'),path.join(base,stem+'.pty.log')];
@@ -455,12 +458,13 @@ export async function runWindows(request,hooks,options={}) {
               // 2026-09-22（第 3 轮 S2 真机实测）：这条路原来**只有**运行上限（默认 45min），没有首检查点期限。
               // 实测场景：未受信任工作区里 codex 停在"是否信任本目录"的可见提示上 ⇒ 宿主会话文件永远不会出现
               //（session=null 走这里）⇒ 账本 200s+ 停在 ▶ running，既不说真因也不重试，直到 45 分钟上限。
-              // 补上与 stall 看门狗**同源**的首检查点期限（默认 300s，0=关闭）：一个单元连第一项任务都没开工，
+              // 补上与 stall 看门狗**同源**的首检查点期限（默认 1200000ms=20 分钟，0=关闭；2026-10-09 由 300s
+              // 上调，慢启动宿主实测依据见 waitWithStallWatchdog 处的注释）：一个单元连第一项任务都没开工，
               // 就该像会话路径一样收口重跑并在 reason 里说清，而不是把调用方吊在运行上限上。
               const endAt=Date.now()+unitBudget;
               let done=false,exitCode=null;
               const rawFirst=process.env.ORCH_UNIT_FIRST_CHECKPOINT_MS;
-              const firstCheckpointMs=rawFirst===undefined?300000:Math.max(0,Number(rawFirst)||0);
+              const firstCheckpointMs=rawFirst===undefined?1200000:Math.max(0,Number(rawFirst)||0);
               const cpDir=path.join(path.dirname(active.file),'checkpoints');
               const cpDirMtime=()=>{try{return fs.statSync(cpDir).mtimeMs;}catch{return 0;}};
               const waitStarted=Date.now(),waitBaseline=Number(active?.createdAt)||waitStarted;

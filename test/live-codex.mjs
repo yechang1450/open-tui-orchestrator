@@ -81,7 +81,7 @@ const env = { ...process.env, ORCH_AGENT: agent, ORCH_SPAWN_MODE: 'window', ORCH
 // time, and a hermes TUI can take minutes to boot and answer. Measured: 15 'unproductive: no task
 // checkpoint within 300s' events in one run, each one a retry - and the retries are what break the
 // launch count, the ordering and the overlap checks all at once.
-ORCH_UNIT_FIRST_CHECKPOINT_MS: String(Math.max(300000, Number(process.env.ORCH_UNIT_FIRST_CHECKPOINT_MS) || 300000)), ORCH_RUN_ID:runId, ORCH_ACCEPTANCE_FILE:acceptanceFile };
+ORCH_UNIT_FIRST_CHECKPOINT_MS: String(Math.max(1200000, Number(process.env.ORCH_UNIT_FIRST_CHECKPOINT_MS) || 1200000)), ORCH_RUN_ID:runId, ORCH_ACCEPTANCE_FILE:acceptanceFile };
 for (const key of ['WORKSPACE_DIR', 'ORCH_STATE_DIR', 'ORCH_TUI', 'ORCH_SANDBOX', 'ORCH_APPROVAL']) delete env[key];
 const config = { nonce, workspace, ids: Array.from({ length: 9 }, (_, i) => String(91 + i)), capacity };
 fs.writeFileSync(path.join(root, 'config.json'), JSON.stringify(config));

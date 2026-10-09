@@ -54,7 +54,7 @@
 **三条实测发现**：
 
 1. **自改保护生效**：请求一旦包含编排器自身目录，引擎回 `{"mode":"inline","reason":"Modify the orchestrator in the initiating conversation before opening windows"}` 并拒绝开窗；该区由发起会话自行清理。这是设计内行为。
-2. **首检查点默认预算对本机 AI-CLI 单元偏紧**：一块连续两次在 `no task checkpoint within 300s` 上被提前收口，第三次成功——重试能把活救回，但预算本身是同一个旋钮（`ORCH_UNIT_FIRST_CHECKPOINT_MS`，默认 300000）。
+2. **首检查点默认预算对本机 AI-CLI 单元偏紧**：一块连续两次在 `no task checkpoint within 300s` 上被提前收口，第三次成功——重试能把活救回，但预算本身是同一个旋钮（`ORCH_UNIT_FIRST_CHECKPOINT_MS`，默认 300000）。**同日处置**：该默认已按本实测上调为 `1200000`（20 分钟，两处判定点同值；真僵死仍走 `ORCH_UNIT_STALL_MS` 通道），见 `docs/release-policy.md` 同日条目与 `docs/execution-contract.md`。
 3. **任务目标与引擎自用暂存区可重叠**：单元把引擎本轮正在写的 `unit-peak-*` 采样文件一并清掉，引擎未受影响，终局仍 `success=true`。设计清理类任务时应把这部分排除。
 
 ## 证据
