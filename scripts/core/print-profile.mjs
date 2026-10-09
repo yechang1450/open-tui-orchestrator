@@ -14,7 +14,7 @@ import {probeCli} from './host-probe.mjs';
 //            effort:['--effort']|null, prompt:['--message']|null } }
 //   prompt 旗标取值为提示词本身（提示词跟在旗标之后，作为最后一个 argv 元素）。
 
-export const DEFAULT_PROFILE_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), 'agent-profiles');
+const DEFAULT_PROFILE_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), 'agent-profiles');
 
 export function profilesDir(env = process.env) {
   const override = String(env.ORCH_AGENT_PROFILES_DIR || '').trim();

@@ -16,7 +16,7 @@ import {readMaintenanceLock,acquireMaintenanceLock,releaseMaintenanceLock} from 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const BUILTIN = new Set(['pi', 'openclaw', 'opencode', 'kimi', 'claude', 'codex']);
 export const PROMPT_FLAG_CANDIDATES = ['-p', '--print', '-z', '--oneshot', '--prompt', '--message', '--ask', '--run', '--exec', '-m'];
-export const APPROVE_CANDIDATES = ['--yes-always', '--dangerously-skip-permissions', '--yolo', '--auto', '--approve', '--full-auto', '--dangerously-bypass-approvals-and-sandbox'];
+const APPROVE_CANDIDATES = ['--yes-always', '--dangerously-skip-permissions', '--yolo', '--auto', '--approve', '--full-auto', '--dangerously-bypass-approvals-and-sandbox'];
 
 function run(cmd, args, opts = {}) {
   return spawnSync(cmd, args, { encoding: 'utf8', windowsHide: true, shell: false, timeout: 120000, ...opts });
@@ -70,7 +70,7 @@ export function discoverModelDetection(id, { home = process.env.USERPROFILE || p
   return (spec.env || spec.effortEnv || spec.config) ? spec : null;
 }
 
-export function locateCli(id, env = process.env, explicit) {
+function locateCli(id, env = process.env, explicit) {
   const path0 = explicit || env.ORCH_CLI || env[String(id).toUpperCase() + '_EXE'];
   if (path0) {
     const file = path.resolve(path0);

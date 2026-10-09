@@ -44,7 +44,7 @@ export function boardSummaryLine(sum, taskStates = {}) {
   return `[board] run=${sum?.runId || '?'} gen=${sum?.generation ?? '?'} mode=${sum?.spawnMode || 'window'} ${c.verified}/${c.total} verified${c.waiting ? ' ' + c.waiting + ' waiting' : ''}${c.failed ? ' ' + c.failed + ' failed' : ''} [${parts.join(' ')}]${active.length ? ' active=' + active.join(',') : ''}${sum?.finishedAt ? ' finalized success=' + (sum?.success === true) : ''}`;
 }
 
-export function boardFullText(sum, taskStates = {}) {
+function boardFullText(sum, taskStates = {}) {
   const c = boardCounts(sum);
   const lines = [`── run ${sum?.runId || '?'} · mode=${sum?.spawnMode || 'window'} · gen=${sum?.generation ?? '?'} · ${c.verified}/${c.total} verified${sum?.finishedAt ? ' · finalized success=' + (sum?.success === true) : ''} ──`];
   for (const b of sum?.blocks || []) {
@@ -113,7 +113,7 @@ export function taskCheckpointStates(runDir, sum) {
   return states;
 }
 
-export function readBoardSummary(runDir) {
+function readBoardSummary(runDir) {
   try { return JSON.parse(fs.readFileSync(path.join(runDir, 'summary.json'), 'utf8').replace(/^\uFEFF/, '')); } catch { return null; }
 }
 
@@ -124,9 +124,6 @@ export function readBoard(workspace, runId, stateDir) {
   return { dir, sum, taskStates: taskCheckpointStates(dir, sum) };
 }
 
-export function boardFinished(sum) {
-  return !!sum?.finishedAt && !!sum?.blocks?.every(b => TERMINAL.has(sum?.results?.[b.key]?.status || ''));
-}
 
 // --watch：只读流式看板。TTY 原地重绘完整看板；管道/--jsonl 输出机器可读行。
 // 机器可调用契约：未知 run 不许无限挂起。首次读到看板前有一个上界（graceMs /

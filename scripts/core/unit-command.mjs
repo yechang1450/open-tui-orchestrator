@@ -20,9 +20,9 @@ import { normalizeUnitCarrier } from './unit-carrier.mjs';
 // 规则：file=提示词落文件并把路径代入 {promptFile}；arg=提示词作为最后一个 argv 元素；
 //       stdin=提示词写进程 stdin。三者互斥，缺占位符时以 promptDelivery 为准。
 
-export const UNIT_PROMPT_FILE_TOKEN = '{promptFile}';
-export const UNIT_PROMPT_TOKEN = '{prompt}';
-export const UNIT_WORKSPACE_TOKEN = '{workspace}';
+const UNIT_PROMPT_FILE_TOKEN = '{promptFile}';
+const UNIT_PROMPT_TOKEN = '{prompt}';
+const UNIT_WORKSPACE_TOKEN = '{workspace}';
 
 export function normalizeUnitProfile(input) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) {
@@ -92,8 +92,3 @@ export function expandUnitArgs(config, { prompt = '', promptFile = '', workspace
   return out;
 }
 
-// 面向 doctor/status 的一行摘要（不含提示词内容）。
-export function describeUnitProfile(config) {
-  if (!config) return null;
-  return { id: config.id, label: config.label, bin: config.bin, args: config.args, promptDelivery: config.promptDelivery };
-}

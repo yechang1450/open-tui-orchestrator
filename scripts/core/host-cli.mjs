@@ -52,7 +52,7 @@ export function detectHostFromChain(chain) {
 
 // One CIM snapshot walked in memory (a single PowerShell call, ~1s). Only runs
 // when no env marker identified the host; failure degrades to an empty chain.
-export function hostProcessChain({ platform = process.platform, startPid = process.ppid, env = process.env, spawn = spawnSync } = {}) {
+function hostProcessChain({ platform = process.platform, startPid = process.ppid, env = process.env, spawn = spawnSync } = {}) {
   if (platform !== 'win32') return [];
   const script = '$a=@{};Get-CimInstance Win32_Process|ForEach-Object{$a[[string]$_.ProcessId]=$_};$p=$a[[string]' + (Number(startPid) || 0) + '];$g=0;while($p -and $g -lt 16){$c=if($p.CommandLine){$p.CommandLine}else{""};("{0}`t{1}`t{2}" -f $p.ProcessId,$p.Name,$c);$p=$a[[string]$p.ParentProcessId];$g++}';
   let r;

@@ -818,11 +818,6 @@ function trySingleBlock(request) {
   }
   return { blocks: [{ type: "independent", title: "single-task", dependsOn: [], conflictKeys: [], tasks: [{ id: "t1", title: "single-task", prompt: text }] }] };
 }
-function splitSentences(request) {
-  // 分句含全角/半角逗号：逗号常分隔多个并列目标（如 "修复81的空白，优化82的UI" 是两个独立项目）。
-  // 若逗号后是不带项目号的续句，会在 genericProjectSplit 落入 misc -> 整体交 LLM，仍安全（少拆不误拆）。
-  return String(request).split(/[。；;，,\n]+/).map((s) => s.trim()).filter(Boolean);
-}
 async function runThreadPrompt(prompt, opts = {}) {
   if(AGENT.agent==='openclaw')return runOpenClawPlanner(AGENT.config,prompt,WORKSPACE);
   if(AGENT.agent==='pi')return runPiPlanner(AGENT.config,prompt,WORKSPACE);
@@ -951,14 +946,6 @@ function classifyBlockComplexity(prompt) {
   if (t.length > 300) return true;                              // 长指令
   return false;
 }
-// 可行性门禁（L1 空判）：复杂/可行性判断已由拆块 LLM 定性（feasible/already_done）承担，
-// 这里只保留最后一道确定性 sanity 空判，不再为每块单独调一次 LLM（避免重复往返）。
-async function runPrototypeGate(title, prompt) {
-  const text = String(prompt || "").trim();
-  if (!text) { console.log("  preflight FAILED for [" + title + "] (empty/无动作): reject."); return false; }
-  console.log("  preflight PASSED for [" + title + "] (feasibility already resolved at decompose)");
-  return true;
-}
 // Enforcement: once the orchestrator is engaged, mark that real executions are gated. The
 // sanction engine is --run-windows (a real, visible agent TUI window). headless --run/--exec
 // is additionally hard-gated inside this file (needs ORCH_ALLOW_HEADLESS=1). open-tui-orchestrator-force.mjs reads
@@ -985,15 +972,6 @@ function configPluginEnabled(name) {
     const cfg = readFileSync(path.join(CODEX_HOME, "config.toml"), "utf8");
     return cfg.includes('plugins."' + name + '"') && /\[plugins\."[^"]+"\]\s*\r?\nenabled\s*=\s*true/.test(cfg);
   } catch { return false; }
-}
-function detectSuperpowers() {
-  try {
-    if (!existsSync(SUPERPOWERS_CACHE_DIR)) return { available: false, reason: "plugin cache dir absent" };
-    const skillMd = path.join(SUPERPOWERS_CACHE_DIR, "1e285826", "skills", "using-superpowers", "SKILL.md");
-    if (!existsSync(skillMd)) return { available: false, reason: "using-superpowers SKILL.md absent" };
-    if (!configPluginEnabled("superpowers@openai-api-curated")) return { available: false, reason: "superpowers plugin not enabled" };
-    return { available: true, reason: "superpowers usable" };
-  } catch (e) { return { available: false, reason: (e && e.message ? e.message : "unknown") }; }
 }
 // ---------------------------------------------------------------------------
 // 初始环境检测：磁盘空间检查（与技术栈/CLI 同层）。工作区所在盘需容纳 TUI 窗临时文件与窗内产物。
@@ -1114,14 +1092,6 @@ function windowVerdictOk(pidf) {
 // every extra launch as a failure (window-launches must not exceed the window cap).
 // Only the budget is configurable; the verdict (pid file + live launcher + visible window) is not.
 function windowConfirmMs(){const v=Number(process.env.ORCH_WINDOW_CONFIRM_MS);return Number.isFinite(v)&&v>0?Math.min(600000,Math.ceil(v)):35000;}
-async function confirmWindowPopped(pidf, token) {
-  const deadline = Date.now() + windowConfirmMs();
-  while (Date.now() < deadline) {
-    if (windowGenuinelyPopped(pidf, token)) return true;
-    await new Promise((r) => setTimeout(r, 500));
-  }
-  return false;
-}
 // 加固②：检测「launcher 下是否已出现 agent 子进程」。windowGenuinelyPopped 只证明 launcher(WT pane 宿主)活着，
 // 但 codex TUI 冷启动(模型 provider)可能仍很慢——若父进程立刻去等 session rollout，会因 rollout 还没建而误判
 // "no session rollout matched"。此函数在弹窗确认后继续短等 agent 子进程出现，让父进程的会话匹配不会起跑太早。
@@ -1230,55 +1200,6 @@ async function spawnHeadlessWithRetry(lp, title, pidf, maxRetry = 3, token, rese
     }
   } catch { /* diagnostics only */ }
   return false;
-}
-// 失败/未决块自动重试：窗已关但块未完成时，用全新 token 重新弹窗再跑，避免“提前结束轮询/留计划草稿”。
-// 返回 { status, exitCode, result }；只有抓到本块自己的完成标记才算 done。
-async function retryBlock(rec, rid, auth, maxRetry, closeDelayMs) {
-  for (let attempt = 1; attempt <= maxRetry; attempt++) {
-    const tk = rec.key + "-" + rid + "-" + Math.random().toString(36).slice(2, 8);
-    const body = auth + buildBlockPrompt(blockBody(rec.b), tk);
-    const { lp, pidf, pf, rf, sanctionToken } = writeInteractiveLauncher(rec.key, body, rid);
-    // 重试窗同样走原子占位：让其它编排进程能看见/锁定它，也保证本窗满足 enforcement 的“活注册窗”判定。
-    const claim = { id: "claim-" + rid + "-" + rec.key + "-" + Math.random().toString(36).slice(2, 8), title: rec.title, keys: rec.keys, pidFile: pidf, pid: 0, locked: false, pending: true, sanctionToken, reservedAt: Date.now() };
-    const claimBlocker = tryReserveWindow(claim);
-    if (claimBlocker) {
-      console.log("  !! [retry " + rec.key + " att" + attempt + "] atomic claim blocked by [" + claimBlocker + "].");
-      for (const f of [pf, lp]) { try { if (existsSync(f)) rmSync(f, { force: true }); } catch { /* ignore */ } }
-      continue;
-    }
-    const popped = await (SPAWN_MODE==="headless"?spawnHeadlessWithRetry:spawnWindowWithRetry)(lp, rec.title, pidf, 3, tk);
-    if (!popped) {
-      cancelReservation(claim.id);
-      for (const f of [pf, lp, rf, pidf, pidf + ".self-closed", rf + ".self-closed"]) { try { if (existsSync(f)) rmSync(f, { force: true }); } catch { /* ignore */ } }
-      console.log("  !! [retry " + rec.key + " att" + attempt + "] popup failed; reservation cancelled.");
-      continue;
-    }
-    commitReservation(claim.id, readPidFile(pidf) || 0);
-    const matchKey = "【本块唯一标识】" + tk;
-    const sf = await waitForSessionFile(matchKey, 90000, rf);
-    let res = { done: false, text: "" };
-    if (sf) res = await waitTaskComplete(sf, POLL_TIMEOUT_MS, rf, matchKey, pidf);
-    else if (existsSync(rf)) { const c = readExitCode(rf); res = { done: true, text: "(launcher exited code " + (c === null ? "?" : c) + "; no session rollout matched)", exitCode: c }; }
-    // 执行结束判定（用户方案：done=做完了，不等同于成功）：res.done 即收，是否达标由主控核对真实落盘状态。
-    let text = res.text || "";
-    if (!text || /no session rollout matched|no result captured|launcher exited/.test(text)) {
-      try { if (sf) text = extractResult(sf).text || ""; } catch { /* ignore */ }
-    }
-    if (res.done) {
-      console.log("  [retry " + rec.key + " att" + attempt + "] execution ended -> closing");
-      await new Promise((x) => setTimeout(x, closeDelayMs));
-      await closeWindow(pidf);
-      cancelReservation(claim.id);
-      for (const f of [pf, lp, pidf, rf, pidf + ".self-closed", rf + ".self-closed"]) { try { if (existsSync(f)) rmSync(f, { force: true }); } catch { /* ignore */ } }
-      return { status: "done", exitCode: res.exitCode ?? null, result: (text && text.trim() ? text.trim() : "(窗内 codex 已执行结束并自动关闭；请按任务提示词核对真实落盘状态)").slice(0, 2000) };
-    }
-    console.log("  !! [retry " + rec.key + " att" + attempt + "] not own completion (text=" + String(text).slice(0, 50) + ")");
-    // 未捕获到完成汇报也一律收窗并取消占位，杜绝“重试窗留在屏幕上/重复弹同键窗”的泄漏。
-    await closeWindow(pidf);
-    cancelReservation(claim.id);
-    for (const f of [pf, lp, pidf, rf, pidf + ".self-closed", rf + ".self-closed"]) { try { if (existsSync(f)) rmSync(f, { force: true }); } catch { /* ignore */ } }
-  }
-  return { status: "uncaptured", exitCode: null, result: "(重试后仍未捕获本块自己完成汇报)" };
 }
 // Interactive-TUI launcher. The interactive `codex "prompt"` window does not exit on its own; a
 // background watchdog in the launcher scans THIS window session rollout: as soon as the LAST assistant
@@ -1929,28 +1850,6 @@ function extractOwnResult(file, token) {
   }
   return last;
 }
-// Re-scan rollouts for the block's report and return the latest agent message, or "" if none found yet.
-// Used so a window is only auto-closed AFTER its report has been captured ("close anchor = report captured"),
-// instead of blind-grace timing. Bounded by `timeoutMs`.
-async function waitForReportText(matchKey, exitMarkerFile, timeoutMs) {
-  const start = Date.now();
-  const seen = new Set();
-  const keys = rolloutKeys(matchKey);
-  while (Date.now() - start < timeoutMs) {
-    for (const f of listRollouts(sessionDir())) {
-      if (seen.has(f)) continue;
-      seen.add(f);
-      try {
-        if (rolloutHit(readFileSync(f, "utf8"), keys)) {
-          const t = extractOwnResult(f, matchKey);
-          if (t) return t;
-        }
-      } catch { /* ignore */ }
-    }
-    await new Promise((r) => setTimeout(r, 500));
-  }
-  return "";
-}
 // Close a window GRACEFULLY so Windows Terminal auto-closes the pane. Windows Terminal hosts the
 // launcher powershell (the profile process) with closeOnExit:"graceful": exit code 0 -> the pane
 // auto-closes; a NON-zero exit -> it keeps the pane open and shows "[已退出进程，代码为 X]". The launcher
@@ -2170,9 +2069,7 @@ function saveJson(file, data) {
   } catch (e) { try { rmSync(tmp, { force: true }); } catch {} throw e; }
 }
 function loadWindows() { return loadJson(WIN_REG, []); }
-function saveWindows(w) { withRegistryLock(() => saveJson(WIN_REG, w)); }
 function loadLocks() { return loadJson(LOCK_REG, []); }
-function saveLocks(l) { withRegistryLock(() => saveJson(LOCK_REG, l)); }
 // 全事务：load+mutate+save 在同一个锁内完成，杜绝跨进程 lost-update。
 function updateWindows(mutator) { withRegistryLock(() => { const w = loadJson(WIN_REG, []); saveJson(WIN_REG, mutator(w)); }); }
 function updateLocks(mutator) { withRegistryLock(() => { const l = loadJson(LOCK_REG, []); saveJson(LOCK_REG, mutator(l)); }); }
@@ -2226,10 +2123,6 @@ function commitReservation(id, pid) {
 function cancelReservation(id) {
   testUpdateWindows((ws) => ws.filter((w) => w.id !== id));
 }
-// The launcher writes its codex-exit marker to `win-<s>.result.json` (same dir as the pidfile).
-function resultFileOf(pidf) {
-  return pidf ? path.join(path.dirname(pidf), path.basename(pidf).replace(/^window-/, "win-").replace(/\.pid$/, ".result.json")) : "";
-}
 // Read the recorded codex exit code from a launcher result marker (null if absent/unparseable).
 function readExitCode(rf) {
   try {
@@ -2253,29 +2146,12 @@ function blockKeys(block) {
 function runningRecord() {
   return loadWindows().filter((w) => windowAlive(w) || freshPending(w)).map((w) => ({ title: w.title, keys: w.keys }));
 }
-// Check a new block against alive windows; return the blocking window title or null.
-function conflictBlock(block) {
-  const nkeys = blockKeys(block);
-  for (const w of runningRecord()) {
-    if (keysOverlap(nkeys, w.keys)) return w.title;
-  }
-  return null;
-}
 // Check a set of keys against currently-alive windows; return the blocking window title or null.
 function conflictByKeys(keys) {
   for (const w of runningRecord()) {
     if (keysOverlap(keys, w.keys)) return w.title;
   }
   return null;
-}
-// Poll until no alive window conflicts with `keys`, or the timeout elapses. Returns true if clear.
-async function waitClear(keys, timeoutMs) {
-  const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
-    if (!conflictByKeys(keys)) return true;
-    await new Promise((r) => setTimeout(r, 3000));
-  }
-  return false;
 }
 // 兜底：从任务文本推断"具体目标文件"作为额外冲突键。LLM 漏给 conflict_hints / depends_on 时，
 // 共享同一目标文件的独立块仍会被识别为冲突并合并为一个串行块（依赖/同目标任务绝不并行竞态）。
@@ -2367,40 +2243,6 @@ function staleTransientFiles() {
     res.push(p);
   }
   return res;
-}
-async function cleanStaleWindows() {
-  // 兜底：上次若被中断/异常退出，会遗留 orchestrator 窗口(win-launch-*.ps1 launcher + 其 agent 子进程)。
-  // 下次启动时按 orchestrator 自己的命名(win-launch-)识别历史残留，用优雅关窗关闭(杀 codex -> launcher exit0 -> WT pane 自动关)。
-  // 安全边界：只清理「没有活着 pid 文件 / 未被 registry 追踪 / 当前没有 pending 占位」的 launcher——
-  // 绝不误杀同一或另一编排批次仍在运行的窗口（活窗应走冲突锁，而不是被“陈旧清理”干掉）。
-  try {
-    const freshReservations = loadWindows().filter(freshPending);
-    if (freshReservations.length) {
-      console.log("[orchestrator] another process is mid-popup (" + freshReservations.length + " pending reservation(s)); skipping stale-window cleanup.");
-      return;
-    }
-    const protectedPids = new Set();
-    let names = [];
-    try { names = readdirSync(TMP); } catch { names = []; }
-    for (const f of names) {
-      if (!/^window-.*\.pid$/.test(f)) continue;
-      try {
-        const pid = Number(String(readFileSync(path.join(TMP, f), "utf8")).trim());
-        if (pid > 0 && pidAliveCheck(pid)) protectedPids.add(pid);
-      } catch { /* ignore */ }
-    }
-    for (const w of loadWindows()) {
-      if (windowAlive(w) && w.pidFile && existsSync(w.pidFile)) {
-        try { protectedPids.add(Number(String(readFileSync(w.pidFile, "utf8")).trim())); } catch { /* ignore */ }
-      }
-    }
-    const r = spawnSync(PS_EXE, ["-NoProfile","-ExecutionPolicy","Bypass","-Command",
-      "$ErrorActionPreference='SilentlyContinue'; Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'pwsh.exe' -and $_.CommandLine -like '*win-launch-*' } | ForEach-Object { $_.ProcessId }"], { encoding: "utf8", windowsHide: true });
-    const ids = String(r.stdout || "").split(/\r?\n/).map((s) => Number(String(s).trim())).filter((n) => Number.isFinite(n) && n > 0 && !protectedPids.has(n));
-    if (!ids.length) { console.log("[orchestrator] no stale orchestrator windows from previous run."); return; }
-    console.log("[orchestrator] cleaning " + ids.length + " stale orchestrator window(s) from previous run (protected live windows: " + protectedPids.size + ")...");
-    for (const pid of ids) { try { await closeWindowByPid(pid); } catch { /* ignore */ } }
-  } catch { /* ignore */ }
 }
 function cleanStaleTransients() {
   try {

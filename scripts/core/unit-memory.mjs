@@ -7,7 +7,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-export const MEM_STORE_SCHEMA = 1;
+const MEM_STORE_SCHEMA = 1;
 
 export const MEM_DEFAULTS = Object.freeze({
   floorMb: 1000,      // 系统可用内存硬底：全并发执行也不得让可用内存低于它（ORCH_MIN_FREE_MEM_MB）
