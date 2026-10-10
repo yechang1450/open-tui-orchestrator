@@ -166,9 +166,16 @@ const startupDeadline = Date.now() + 60000;
 while (engine.child.exitCode === null && !/spawned visible/.test(engine.output()) && Date.now() < startupDeadline) await new Promise(r => setTimeout(r, 500));
 poll = launch('poll-windows.mjs', ['--require-all-success', '--timeoutMs', String(liveDeadlineMs - 10000), '--intervalMs', '5000'], 'poll');
 let engineEnded = false;
+let engineDied = false;
 engine.done.then(() => {
-  engineEnded = true;
-  if (!fs.existsSync(summaryFile)) void terminateVerified(poll);
+  engineDied = true;
+  // The initiator engine dying is not necessarily the end of the run: the product's
+  // run guardian resumes it with a successor generation that adopts every live window
+  // (observed 2026-10-10: gen1 died ~27 min in, gen2 adopted all eight windows and
+  // finalized). Keep the sampler (and its release-barrier duty) alive until a
+  // successor finalizes; the loop stays bounded by the live deadline either way.
+  // Only when the summary already exists is this a normal, completed exit.
+  engineEnded = fs.existsSync(summaryFile);
 });
 const deadline = liveDeadlineAt;
 // 每窗口的连续"无法核对"计数：注册表写入与进程快照存在已知竞态（含弹窗前 pending 占位、启动重试交接），
@@ -239,6 +246,8 @@ while (!engineEnded && Date.now() < deadline) {
     noteSamplingError('sample', e);
     console.error('[measure] sampling incomplete: ' + String(e));
   }
+  // Guardian-resumed generation: stop as soon as the successor finalizes the summary.
+  if (engineDied && fs.existsSync(summaryFile)) { engineEnded = true; break; }
   await new Promise(r => setTimeout(r, 3000));
 }
 const engineResult = await engine.done;
