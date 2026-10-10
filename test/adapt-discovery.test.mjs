@@ -126,8 +126,6 @@ test('hasModelDetector: native adapters and detection-capable profiles only', ()
   assert.equal(hasModelDetector('kimi'), true);
   assert.equal(hasModelDetector('pi'), true);
   assert.equal(hasModelDetector('opencode'), true);
-  assert.equal(hasModelDetector('claude'), true);
-  assert.equal(hasModelDetector('openclaw'), false);
   assert.equal(hasModelDetector('definitely-not-profiled'), false);
 });
 

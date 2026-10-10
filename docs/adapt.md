@@ -1,6 +1,6 @@
 # 自动适配（print-class 画像管线）
 
-open-tui-orchestrator 对"一次性提示词 → stdout 终文本 → 自行退出"形态的 agent CLI（如 kimi/claude/  aider）
+open-tui-orchestrator 对"一次性提示词 → stdout 终文本 → 自行退出"形态的 agent CLI（如 kimi/aider）
 提供数据驱动的通用适配：**一份 JSON 画像**即可接入，不必手写专用适配器。
 
 ## 命令
@@ -88,7 +88,7 @@ ORCH_AUTO_ADAPT=1 node <cli> --agent <未适配的 id> --run-windows "<请求>"
 ## 边界（明确不支持）
 
 - **纯交互 TUI 且无一次性提示词旗标的 CLI**：探测会明确报告 `not a print-class CLI`，需要手写专用适配器
-  （参考 kimi/claude 适配器的形态）。
+  （参考 kimi 适配器的形态）。
 - 需要**交互式登录/设备码授权**的 CLI：活体验证会因未授权失败（fail-closed），请先在该 CLI 里完成登录。
 - 沙箱/审批语义：画像类 agent 只支持 `danger-full-access`（编排器已归一化授权），要求受限沙箱会被明确拒绝。
 

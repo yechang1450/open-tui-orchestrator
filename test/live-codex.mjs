@@ -174,7 +174,9 @@ const deadline = liveDeadlineAt;
 const unverifiedWindows = new Map();
 while (!engineEnded && Date.now() < deadline) {
   try {
-    const { stdout } = await exec(powershellExe(), ['-NoProfile', '-Command', 'Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,Name,CommandLine,@{n="Started";e={$_.CreationDate.ToUniversalTime().ToString("o")}} | ConvertTo-Json -Compress'], { windowsHide: true, timeout: 15000 });
+    // 单次 pwsh 调用失败是瞬态（高负载下实测 1/≈600）；重试一次再谈失败，持久失败仍然 fail-closed。
+    const snapshot = await (async () => { let last; for (let attempt = 0; attempt < 2; attempt++) { try { return await exec(powershellExe(), ['-NoProfile', '-Command', 'Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,Name,CommandLine,@{n="Started";e={$_.CreationDate.ToUniversalTime().ToString("o")}} | ConvertTo-Json -Compress'], { windowsHide: true, timeout: 15000 }); } catch (e) { last = e; await new Promise(r => setTimeout(r, 1000)); } } throw last; })();
+    const { stdout } = snapshot;
     const decoded = JSON.parse(stdout);
     const processes = Array.isArray(decoded) ? decoded : (decoded && typeof decoded === 'object' ? [decoded] : null);
     if (!processes) throw new Error('process snapshot was neither an object nor an array');
@@ -218,7 +220,7 @@ while (!engineEnded && Date.now() < deadline) {
         }
         return false;
       });
-      const agents = descendants.filter(p => agent==='openclaw'?(/^node(?:\.exe)?$/i.test(p.Name)&&/openclaw\.mjs.*tui/i.test(p.CommandLine||'')):agent==='pi'?(/^pi(?:\.exe)?$/i.test(p.Name)||(/^node(?:\.exe)?$/i.test(p.Name)&&/pi-coding-agent.*cli\.js/i.test(p.CommandLine||''))):agent==='hermes'?/^hermes(?:\.exe)?$/i.test(p.Name):agent==='opencode'?/^opencode(?:\.exe)?$/i.test(p.Name):agent==='kimi'?/^kimi(?:\.exe)?$/i.test(p.Name):/^codex(?:\.exe)?$/i.test(p.Name));
+      const agents = descendants.filter(p => agent==='pi'?(/^pi(?:\.exe)?$/i.test(p.Name)||(/^node(?:\.exe)?$/i.test(p.Name)&&/pi-coding-agent.*cli\.js/i.test(p.CommandLine||''))):agent==='hermes'?/^hermes(?:\.exe)?$/i.test(p.Name):agent==='opencode'?/^opencode(?:\.exe)?$/i.test(p.Name):agent==='kimi'?/^kimi(?:\.exe)?$/i.test(p.Name):/^codex(?:\.exe)?$/i.test(p.Name));
       if (agents.length) live.push({ title: w.title, launcherPid: pid, launcherParentPid: launcher.ParentProcessId, agentPids: agents.map(p => p.ProcessId) });
     }
     const ready = config.ids.filter(id => fs.existsSync(path.join(root, 'project-' + id, 'started.json')));
@@ -259,9 +261,7 @@ const ordered = receiptsValid && results[8].started >= results[7].finished;
 const windowLaunches = (engine.output().match(new RegExp('spawned visible '+agent+' TUI','g')) || []).length;
 const uniqueLaunchers = new Set(samples.flatMap(s => s.live.map(w => w.launcherPid))).size;
 const overlap = receiptsValid && Math.max(...results.slice(0, 8).map(r => r.started)) < Math.min(...results.slice(0, 8).map(r => r.finished));
-const automaticClose = agent !== 'openclaw' || Object.values(summary?.results||{}).every(r=>{
-  try{const proof=JSON.parse(fs.readFileSync(path.join(r.launcherFiles.openclawState,'completion.json'),'utf8'));return proof.automaticClose&&proof.nativeExitCode===0&&proof.__EXIT__===0&&proof.token===r.attempts.at(-1).token;}catch{return false;}
-});
+const automaticClose = true; // OpenClaw（唯一需要原生自动关闭证明的宿主）适配器已移除；其余宿主按启动器契约自动关闭。
 const coreHashAtEnd=coreHash();
 const coreUnchanged=coreHashAtLaunch===coreHashAtEnd;
 const verdict=codexFailureReasons({

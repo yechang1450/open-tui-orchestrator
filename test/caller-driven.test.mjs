@@ -57,7 +57,7 @@ function taskLevelPlan() {
 function callEnv({ws, unitFile, planFile, acceptance, extra = {}}) {
   const env = {...process.env};
   delete env.ORCH_AGENT; delete env.ORCH_UNIT_CMD; delete env.ORCH_UNIT_CMD_FILE; delete env.ORCH_PLAN_FILE;
-  delete env.ORCH_CLI; delete env.CODEX_THREAD_ID; delete env.CODEX_SESSION_ID; delete env.CLAUDECODE;
+  delete env.ORCH_CLI; delete env.CODEX_THREAD_ID; delete env.CODEX_SESSION_ID;
   delete env.NODE_TEST_CONTEXT;
   // 非交互自动化显式钉 headless：本机用户级 ORCH_SPAWN_MODE 不得让套件弹窗或变色。
   env.ORCH_SPAWN_MODE = 'headless';

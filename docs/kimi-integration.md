@@ -53,4 +53,4 @@
 
 - TodoList/后台任务是 **Kimi Code agent 运行时**的原生机制（本套路不依赖任何编排器改动）；
 - 编排器不写、也写不了发起会话的会话状态；run 的终审以 `summary.json` + 验收契约为准；
-- 其它 agent（claude/codex 等）同理：各自用其原生 todo/后台机制镜像同一份流。
+- 其它 agent（codex 等）同理：各自用其原生 todo/后台机制镜像同一份流。

@@ -6,7 +6,7 @@ import {StringDecoder} from 'node:string_decoder';
 import {profileArgs} from './print-profile.mjs';
 import {nativeArgumentLines} from './native-argv.mjs';
 
-// print-class 通用运行时：与 kimi/claude 适配器同构的启动器契约（tee 日志 + token 行抓取 +
+// print-class 通用运行时：与 kimi 适配器同构的启动器契约（tee 日志 + token 行抓取 +
 // result 文件 + self-closed 标记），供任何带画像的 agent 使用。
 
 const quote = (s) => "'" + String(s).replaceAll("'", "''") + "'";

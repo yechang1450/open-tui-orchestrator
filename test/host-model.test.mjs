@@ -95,8 +95,7 @@ test('opencode: 解析带注释/尾逗号的 jsonc 顶层 model；effort 恒 nul
   assert.deepEqual(got, { model: 'opencode-go/glm-5.3-flash', effort: null, source: 'opencode-config' });
 });
 
-test('openclaw 与未知 agent 不检测', () => {
-  assert.equal(detectHostModelEffort('openclaw', { env: {} }), null);
+test('未知 agent 不检测', () => {
   assert.equal(detectHostModelEffort('bogus', { env: {} }), null);
 });
 

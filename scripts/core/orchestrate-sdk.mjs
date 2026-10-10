@@ -29,7 +29,7 @@
  *   ORCH_STATE_DIR (default: $WORKSPACE_DIR/temp/orchestrator) — 本插件的稳定运行/状态目录（registry/锁 等）；覆盖值必须仍在 workspace/temp 下。
  *   ORCH_SESSION_DIR (default: $CODEX_HOME/sessions)   — 会话 rollout 目录。
  *   ORCH_SUPERPOWERS_CACHE_DIR (optional)      — 覆盖 superpowers 插件缓存目录（不同宿主/市场路径适配）。
- *   ORCH_AGENT     — host identity; Codex, pi and version-pinned OpenClaw adapters are implemented. No fallback.
+ *   ORCH_AGENT     — host identity; Codex, pi, opencode, Kimi Code and Hermes Agent adapters are implemented. No fallback.
  *   CODEX_EXE      (default: auto-detect from PATH or a common user install).
  *   PYTHON         (default: `python`; prepended to the spawned window PATH).
  *   ORCH_MODEL     — optional explicit override. Unset: inherit the initiating window's current
@@ -69,10 +69,8 @@ const PS_EXE=powershellExe(),WHERE_EXE=systemToolExe("where.exe");
 import {runWindows,verifyRun} from "./runner.mjs";
 import {launcherIdentity,processSnapshot,sameProcess,coordinatorDir,reserve,release,bind} from "./leases.mjs";
 import {runPiPlanner,writePiLauncher,waitPiResult} from './pi-runtime.mjs';
-import {runOpenClawPlanner,writeOpenClawLauncher,waitOpenClawResult} from './openclaw-runtime.mjs';
 import {runOpenCodePlanner,writeOpenCodeLauncher,waitOpenCodeResult} from './opencode-runtime.mjs';
 import {runKimiPlanner,writeKimiLauncher,waitKimiResult} from './kimi-runtime.mjs';
-import {runClaudePlanner,writeClaudeLauncher,waitClaudeResult} from './claude-runtime.mjs';
 import {runProfilePlanner,writeProfileLauncher,waitProfileResult} from './print-runtime.mjs';
 import {runUnitPlanner,writeUnitLauncher} from './unit-runtime.mjs';
 import {spawnInactiveWindow} from './inactive-window.mjs';
@@ -155,7 +153,7 @@ function assertUnitCarrierReady() {
   return carrier;
 }
 // Non-codex window completion is a launcher-written result file; each adapter owns its wait.
-const waitAdapterResult=(rf,timeout,pidf,token)=>AGENT.agent==='openclaw'?waitOpenClawResult(rf,timeout,pidf,token):AGENT.agent==='opencode'?waitOpenCodeResult(rf,timeout,pidf):AGENT.agent==='kimi'?waitKimiResult(rf,timeout,pidf):AGENT.agent==='claude'?waitClaudeResult(rf,timeout,pidf):(AGENT.config.profile||AGENT.config.unit)?waitProfileResult(rf,timeout,pidf):waitPiResult(rf,timeout,pidf);
+const waitAdapterResult=(rf,timeout,pidf,token)=>AGENT.agent==='opencode'?waitOpenCodeResult(rf,timeout,pidf):AGENT.agent==='kimi'?waitKimiResult(rf,timeout,pidf):(AGENT.config.profile||AGENT.config.unit)?waitProfileResult(rf,timeout,pidf):waitPiResult(rf,timeout,pidf);
 const CODEX = String(AGENT.config?.bin || '');
 // PowerShell 单引号字符串内嵌路径：把 ' 转义成 ''，避免路径含引号时破坏脚本/注入。
 // 仅当 PYTHON 是真实存在的绝对路径时，才把它所在目录前置进窗内 PATH；
@@ -784,7 +782,7 @@ function genericProjectSplit(request) {
   const allOwn = [...dirs].every((d) => (ownByProj[d] && ownByProj[d].length > 0));
   // 保守(权威修复)：一旦存在无法归属到某个具体项目编号的句子（如"给会员管理…做分页"这种跨项目续句），
   // 确定性拆分无法安全归类——若硬把它当成独立 task-* 并行块，会与它真实所属项目竞态/改同一批文件。
-  // 此时整体交给 LLM 拆块：LLM 能读上下文，把它归到正确项目，同时仍会把真正独立的工具任务(openclaw/theme-repo/visualize 等)单独成块。
+  // 此时整体交给 LLM 拆块：LLM 能读上下文，把它归到正确项目，同时仍会把真正独立的工具任务(theme-repo/visualize 等)单独成块。
   if (!allOwn || ambiguous || misc.length > 0) return null;
   const blocks = [...dirs].map((title, i) => ({
     type: "independent", title, dependsOn: [],
@@ -817,11 +815,9 @@ function trySingleBlock(request) {
   return { blocks: [{ type: "independent", title: "single-task", dependsOn: [], conflictKeys: [], tasks: [{ id: "t1", title: "single-task", prompt: text }] }] };
 }
 async function runThreadPrompt(prompt, opts = {}) {
-  if(AGENT.agent==='openclaw')return runOpenClawPlanner(AGENT.config,prompt,WORKSPACE);
   if(AGENT.agent==='pi')return runPiPlanner(AGENT.config,prompt,WORKSPACE);
   if(AGENT.agent==='opencode')return runOpenCodePlanner(AGENT.config,prompt,WORKSPACE);
   if(AGENT.agent==='kimi')return runKimiPlanner(AGENT.config,prompt,WORKSPACE);
-  if(AGENT.agent==='claude')return runClaudePlanner(AGENT.config,prompt,WORKSPACE);
   if(AGENT.config.unit)return runUnitPlanner(AGENT.config,prompt,WORKSPACE);
   if(AGENT.config.profile)return runProfilePlanner(AGENT.config,prompt,WORKSPACE);
   // outputSchema 走 runStreamed 的 turn 选项（强制结构化输出 / 纯 JSON），不能混进 startThread 配置。
@@ -1105,7 +1101,7 @@ function agentDescendantAlive(pidf) {
 }
 async function warmupWindow(pidf, token) {
   // 通用冷启动错峰：已确认 launcher 存活后，再短等 agent 子进程出现（避免父进程过早去等 session rollout 而漏匹配）。
-  // 不特判任何 agent 的子进程形态（对 codex/claude/gemini/opencode 等主流 agent 通用）；失败只继续等，绝不误判未弹出。
+  // 不特判任何 agent 的子进程形态（对 codex/opencode 等主流 agent 通用）；失败只继续等，绝不误判未弹出。
   const agentWarm = Date.now() + 15000;
   while (Date.now() < agentWarm) {
     if (agentDescendantAlive(pidf)) break;
@@ -1334,10 +1330,8 @@ function isOrchestratorSelfMod(text) {
 
 function writeInteractiveLauncher(title, prompt, sfx) {
   if(AGENT.agent==='pi')return writePiLauncher(AGENT.config,{key:title,prompt,suffix:sfx,workspace:WORKSPACE,temp:TMP});
-  if(AGENT.agent==='openclaw')return writeOpenClawLauncher(AGENT.config,{key:title,prompt,suffix:sfx,workspace:WORKSPACE,temp:TMP});
   if(AGENT.agent==='opencode')return writeOpenCodeLauncher(AGENT.config,{key:title,prompt,suffix:sfx,workspace:WORKSPACE,temp:TMP});
   if(AGENT.agent==='kimi')return writeKimiLauncher(AGENT.config,{key:title,prompt,suffix:sfx,workspace:WORKSPACE,temp:TMP});
-  if(AGENT.agent==='claude')return writeClaudeLauncher(AGENT.config,{key:title,prompt,suffix:sfx,workspace:WORKSPACE,temp:TMP});
   if(AGENT.config.unit)return writeUnitLauncher(AGENT.config,{key:title,prompt,suffix:sfx,workspace:WORKSPACE,temp:TMP});
   if(AGENT.config.profile)return writeProfileLauncher(AGENT.config,{key:title,prompt,suffix:sfx,workspace:WORKSPACE,temp:TMP});
   const s = safe(title) + (sfx ? "-" + sfx : "");

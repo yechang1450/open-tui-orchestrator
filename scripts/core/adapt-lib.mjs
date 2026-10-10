@@ -14,7 +14,7 @@ import {readMaintenanceLock,acquireMaintenanceLock,releaseMaintenanceLock} from 
 // 成功 = 表面探测 + 解析自检 + 活体验证；测试套件可用 --suite 追加。
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
-const BUILTIN = new Set(['pi', 'openclaw', 'opencode', 'kimi', 'claude', 'codex']);
+const BUILTIN = new Set(['pi', 'opencode', 'kimi', 'codex']);
 export const PROMPT_FLAG_CANDIDATES = ['-p', '--print', '-z', '--oneshot', '--prompt', '--message', '--ask', '--run', '--exec', '-m'];
 const APPROVE_CANDIDATES = ['--yes-always', '--dangerously-skip-permissions', '--yolo', '--auto', '--approve', '--full-auto', '--dangerously-bypass-approvals-and-sandbox'];
 

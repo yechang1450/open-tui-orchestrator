@@ -18,7 +18,7 @@ const RULES = [
     tier: 'guidance', title: '无法判定宿主 agent',
     cause: '既没有 --agent/ORCH_AGENT，也没有可识别的宿主环境标记。',
     tried: ['环境标记探测', '进程链推断'],
-    fix: '显式指定：--agent <pi|claude|kimi|opencode|codex|hermes|openclaw>；或自带单元命令 --unit-cmd/--unit-cmd-file 绕过宿主识别。',
+    fix: '显式指定：--agent <pi|kimi|opencode|codex|hermes>；或自带单元命令 --unit-cmd/--unit-cmd-file 绕过宿主识别。',
     docs: 'docs/caller-driven.md',
     autoRepairs: ['环境标记与进程链双路推断'],
   }) },

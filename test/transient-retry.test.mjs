@@ -8,7 +8,7 @@ import {runWindows} from '../scripts/core/runner.mjs';
 import {powershellExe} from '../scripts/core/contracts.mjs';
 
 // 2026-09-18 用户令：出现“偶发瞬时故障”必须自动检测 + 自动处理，而不是给调用方返回错误。
-// 现场（claude 窗口单元实跑）：单元写了 started 检查点后秒退（exit 1），无终态检查点 —— 旧行为直接
+// 现场（窗口单元实跑）：单元写了 started 检查点后秒退（exit 1），无终态检查点 —— 旧行为直接
 // needs-reconciliation（把瞬时故障当结论）。新行为：瞬时特征成立时自动重跑一轮，重跑成功后正常记账。
 // 三个判据：①瞬时 → 自动重跑并 success=true ②retrySafe:false → 明确否决，不重跑 ③运行时长超过
 // 瞬时窗口的失败 → 不算瞬时，不重跑（防把“真失败”当瞬时掩盖）。

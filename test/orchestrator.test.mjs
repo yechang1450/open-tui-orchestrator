@@ -235,14 +235,14 @@ test('orchestrate-sdk appendModelEffortArgs injects -m/-c and is space-guarded',
   }
 });
 test('通用化: appendModelEffortArgs 对非 codex 走其 modelEnv/effortEnv、绝不注入 codex -m/-c', () => {
-  const prevM = process.env.ANTHROPIC_MODEL, prevE = process.env.ORCH_CLAUD_EFFORT;
-  process.env.ANTHROPIC_MODEL = 'claude-3-7-sonnet';
-  process.env.ORCH_CLAUD_EFFORT = 'high';
-  const claudeOut = appendModelEffortArgs(['--cwd', 'W'], { id: 'claude', modelEnv: 'ANTHROPIC_MODEL', effortEnv: 'ORCH_CLAUD_EFFORT' });
-  assert.ok(!claudeOut.includes('-m') && !claudeOut.includes('model_reasoning_effort='), '非 codex 不注入 codex 专属 argv');
-  assert.equal(process.env.ANTHROPIC_MODEL, 'claude-3-7-sonnet', '非 codex 模型经 env 就绪');
-  if (prevM === undefined) delete process.env.ANTHROPIC_MODEL; else process.env.ANTHROPIC_MODEL = prevM;
-  if (prevE === undefined) delete process.env.ORCH_CLAUD_EFFORT; else process.env.ORCH_CLAUD_EFFORT = prevE;
+  const prevM = process.env.ACME_MODEL, prevE = process.env.ACME_EFFORT;
+  process.env.ACME_MODEL = 'acme-3-7-sonnet';
+  process.env.ACME_EFFORT = 'high';
+  const acmeOut = appendModelEffortArgs(['--cwd', 'W'], { id: 'acme', modelEnv: 'ACME_MODEL', effortEnv: 'ACME_EFFORT' });
+  assert.ok(!acmeOut.includes('-m') && !acmeOut.includes('model_reasoning_effort='), '非 codex 不注入 codex 专属 argv');
+  assert.equal(process.env.ACME_MODEL, 'acme-3-7-sonnet', '非 codex 模型经 env 就绪');
+  if (prevM === undefined) delete process.env.ACME_MODEL; else process.env.ACME_MODEL = prevM;
+  if (prevE === undefined) delete process.env.ACME_EFFORT; else process.env.ACME_EFFORT = prevE;
 });
 test('orchestrate-sdk classifyExecutionMode: read-only -> inline, real -> execute', async () => {
   // 只读词（分析，无真实动作词）-> inline（命中确定性快判，不触发 LLM）

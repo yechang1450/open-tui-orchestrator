@@ -78,7 +78,7 @@ The original request string is still required — it is the authoritative ledger
 
 ## 4. Any agent, in four lines
 
-Paste into any agent's global instruction file (`AGENTS.md`, `CLAUDE.md`, …):
+Paste into any agent's global instruction file (`AGENTS.md`, …):
 
 ```text
 ## system tool: open-tui-orchestrator (parallel TUI units)

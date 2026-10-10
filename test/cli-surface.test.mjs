@@ -24,7 +24,7 @@ function workDir(tag) {
 // 与套件其余用例同构的环境：钉 headless（绝不弹窗）、协调器随工作区、机器级维护锁不参与。
 function cliEnv(ws, extra = {}) {
   const env = {...process.env};
-  for (const key of ['ORCH_UNIT_CMD', 'ORCH_UNIT_CMD_FILE', 'ORCH_PLAN_FILE', 'ORCH_CLI', 'CODEX_THREAD_ID', 'CODEX_SESSION_ID', 'CLAUDECODE', 'NODE_TEST_CONTEXT']) delete env[key];
+  for (const key of ['ORCH_UNIT_CMD', 'ORCH_UNIT_CMD_FILE', 'ORCH_PLAN_FILE', 'ORCH_CLI', 'CODEX_THREAD_ID', 'CODEX_SESSION_ID', 'NODE_TEST_CONTEXT']) delete env[key];
   env.ORCH_AGENT = 'codex';
   env.ORCH_SPAWN_MODE = 'headless';
   env.WORKSPACE_DIR = ws;

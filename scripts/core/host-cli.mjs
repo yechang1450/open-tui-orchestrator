@@ -3,10 +3,8 @@ import { codexNetworkArgs } from './network-policy.mjs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import {resolvePiHost,piArgs} from './pi-host.mjs';
-import {resolveOpenClawHost} from './openclaw-host.mjs';
 import {resolveOpenCodeHost,opencodeArgs} from './opencode-host.mjs';
 import {resolveKimiHost,kimiArgs} from './kimi-host.mjs';
-import {resolveClaudeHost,claudeArgs} from './claude-host.mjs';
 import {resolveProfileHost,profileArgs,listProfiles,loadProfile} from './print-profile.mjs';
 import {loadUnitProfile,expandUnitArgs} from './unit-command.mjs';
 import {powershellExe} from './contracts.mjs';
@@ -15,11 +13,9 @@ import {powershellExe} from './contracts.mjs';
 // Additional adapters must implement planning, interactive argv and completion
 // capture together; a CLI name alone is not proof of compatibility.
 export const adapters = Object.freeze({
-  openclaw: Object.freeze({id:'openclaw',label:'OpenClaw CLI',native:false}),
   pi: Object.freeze({id:'pi',label:'pi agent',native:false,completionMarker:'__ORCH_DONE__',verified:false}),
   opencode: Object.freeze({id:'opencode',label:'opencode',native:false,completionMarker:'__ORCH_DONE__',verified:false}),
   kimi: Object.freeze({id:'kimi',label:'Kimi Code CLI',native:true,completionMarker:'__ORCH_DONE__',verified:false}),
-  claude: Object.freeze({id:'claude',label:'Claude Code CLI',native:true,completionMarker:'__ORCH_DONE__',verified:false}),
   // carrier: TUI 类宿主需要真实终端——无头模式走 ConPTY 伪终端载体（真实控制台、完全不可见）；
   // 其余宿主为 print 类，无控制台的隐藏进程即可。载体解析与分级见 scripts/core/unit-carrier.mjs。
   codex: Object.freeze({ id: 'codex', label: 'Codex CLI', native: true, carrier: 'pty',
@@ -32,11 +28,9 @@ export const adapters = Object.freeze({
 // its own orchestration therefore binds to its own agent, not the outer one).
 const HOST_CHAIN_MATCHERS = Object.freeze([
   ['kimi', Object.freeze({ name: /^kimi\.exe$/i })],
-  ['claude', Object.freeze({ name: /^claude\.exe$/i, cmd: /[\\/]@anthropic-ai[\\/]claude-code[\\/]/i })],
   ['codex', Object.freeze({ name: /^codex\.exe$/i, cmd: /[\\/]codex\.js([\s"']|$)|[\\/]@openai[\\/]codex[\\/]/i })],
   ['pi', Object.freeze({ cmd: /[\\/]pi-coding-agent[\\/]/i })],
   ['opencode', Object.freeze({ name: /^opencode\.exe$/i, cmd: /[\\/]opencode-ai[\\/]/i })],
-  ['openclaw', Object.freeze({ name: /^openclaw(\.exe)?$/i, cmd: /[\\/]openclaw[\\/]openclaw\.mjs/i })],
 ]);
 
 export function detectHostFromChain(chain) {
@@ -70,7 +64,6 @@ export function detectHostAgent(env = process.env, { chain } = {}) {
   const explicit = String(env.ORCH_AGENT || '').trim().toLowerCase();
   if (explicit) return explicit;
   if (env.CODEX_THREAD_ID || env.CODEX_SESSION_ID) return 'codex';
-  if (env.CLAUDECODE || env.CLAUDE_CODE_ENTRYPOINT) return 'claude';
   // profile-class agents: env markers first, then ancestor process name/cmd patterns.
   for (const pid of listProfiles(env)) {
     const p = loadProfile(pid, env);
@@ -143,10 +136,8 @@ export function resolveHost({ env = process.env, agent, candidates = cliCandidat
   } };
   const id = agent || detectHostAgent(env);
   if(id==='pi')return resolvePiHost(env);
-  if(id==='openclaw')return resolveOpenClawHost(env);
   if(id==='opencode')return resolveOpenCodeHost(env);
   if(id==='kimi')return resolveKimiHost(env);
-  if(id==='claude')return resolveClaudeHost(env);
   // print-class 通用适配：有画像文件（scripts/core/agent-profiles/<id>.json）的 agent
   // 走数据驱动的通用解析；画像存在即权威（CLI 缺失时 fail-closed，不回退）。
   const profileHost = resolveProfileHost(env,id);
@@ -161,10 +152,6 @@ export function resolveHost({ env = process.env, agent, candidates = cliCandidat
 export function launchArgs(config, options = {}) {
   // 调用方自助通道：argv 完全来自单元命令模板（占位符展开），不套用任何宿主专用参数。
   if(config?.unit)return expandUnitArgs(config.unit,{prompt:'',promptFile:'',workspace:options.cwd||process.cwd()});
-  if(config?.id==='openclaw'){
-    if(options.sandbox&&options.sandbox!=='danger-full-access')throw new Error('OPENCLAW_SANDBOX_UNSUPPORTED');
-    return [];
-  }
   if(config?.id==='pi'){
     if(options.sandbox&&options.sandbox!=='danger-full-access')throw new Error('PI_SANDBOX_UNSUPPORTED: pi does not implement the requested sandbox');
     return piArgs(config,{model:process.env.ORCH_MODEL,effort:process.env.ORCH_EFFORT});
@@ -176,10 +163,6 @@ export function launchArgs(config, options = {}) {
   if(config?.id==='kimi'){
     if(options.sandbox&&options.sandbox!=='danger-full-access')throw new Error('KIMI_SANDBOX_UNSUPPORTED: kimi does not implement the requested sandbox');
     return kimiArgs(config,{model:process.env.ORCH_MODEL});
-  }
-  if(config?.id==='claude'){
-    if(options.sandbox&&options.sandbox!=='danger-full-access')throw new Error('CLAUDE_SANDBOX_UNSUPPORTED: claude does not implement the requested sandbox');
-    return claudeArgs(config,{model:process.env.ORCH_MODEL,effort:process.env.ORCH_EFFORT});
   }
   if(config?.profile){
     if(options.sandbox&&options.sandbox!=='danger-full-access')throw new Error('PROFILE_SANDBOX_UNSUPPORTED: '+config.id+' does not implement the requested sandbox');

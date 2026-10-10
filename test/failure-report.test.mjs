@@ -6,9 +6,9 @@ import {classifyFailure, formatFailureLines} from '../scripts/core/failure-repor
 // 这些判据能红：把 formatFailureLines 退回只打一行 FATAL，本文件立刻失败。
 
 test('first line stays the machine contract, guidance follows', () => {
-  const err = new Error('CLI_MISSING: claude; no supported installed Claude Code CLI found.');
+  const err = new Error('CLI_MISSING: acme; no supported installed Acme CLI found.');
   const lines = formatFailureLines(err);
-  assert.equal(lines[0], '[orchestrator] FATAL: CLI_MISSING: claude; no supported installed Claude Code CLI found.');
+  assert.equal(lines[0], '[orchestrator] FATAL: CLI_MISSING: acme; no supported installed Acme CLI found.');
   assert.ok(lines.length > 1, 'guidance lines must follow the FATAL line');
   assert.ok(lines.some(l => l.includes('cause:')), 'cause must be stated');
   assert.ok(lines.some(l => l.includes('tried:')), 'what was already tried must be stated');

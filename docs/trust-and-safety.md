@@ -6,8 +6,8 @@ here is checkable in the source, and behaviour that deviates from this page is a
 ## It launches your own agent CLI — several of them at once
 
 - A run splits your request into blocks and starts one process per block, using the agent CLI
-  you already have installed and authenticated (`codex`, `pi`, `opencode`, `kimi`, `claude`,
-  `openclaw`, or a CLI you adapt). It never installs an agent, never guesses a replacement
+  you already have installed and authenticated (`codex`, `pi`, `opencode`, `kimi`, `hermes`,
+  or a CLI you adapt). It never installs an agent, never guesses a replacement
   path, and never silently falls back to a different agent.
 - By default those processes are **headless and invisible**: no window, no taskbar entry, no
   focus stealing. `--mode window` restores visible Windows Terminal windows when you want to

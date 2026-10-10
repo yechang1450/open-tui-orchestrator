@@ -10,7 +10,6 @@
 //              modelAlias/thinkingEffort；回退 config.toml 的 default_model / [thinking].effort。
 //   pi       — ~/.pi/agent/settings.json 的 defaultModel / defaultThinkingLevel。
 //   opencode — ~/.config/opencode/opencode.json(c) 顶层 model；opencode 无 effort 概念。
-//   openclaw — 配置世界隔离，返回 null（不动它）。
 //
 // 优先级：显式 ORCH_MODEL / ORCH_EFFORT 环境变量 > 本模块检测值 > CLI 自身默认。
 import fs from 'node:fs';
@@ -197,24 +196,6 @@ function detectOpenCode({ configHome }) {
   return null;
 }
 
-// --------------------------------------------------------------- claude ----
-// Claude Code settings: ~/.claude/settings.json 顶层 model（别名或完整 id）；
-// effort 读取 settings 的 "effort"（存在时）。缺失即 null，绝不猜。
-function detectClaude({ claudeHome, env = process.env }) {
-  const home = claudeHome || env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
-  for (const name of ['settings.json', path.join('..', '.claude.json')]) {
-    try {
-      const file = path.join(home, name);
-      if (!fs.existsSync(file)) continue;
-      const cfg = JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, ''));
-      const model = typeof cfg?.model === 'string' && cfg.model.trim() ? cfg.model.trim() : '';
-      const effort = typeof cfg?.effort === 'string' && cfg.effort.trim() ? cfg.effort.trim() : '';
-      if (model || effort) return { model: model || null, effort: effort || null, source: 'claude-settings' };
-    } catch { /* try next */ }
-  }
-  return null;
-}
-
 // --------------------------------------------------------------- profile ----
 // print-class 画像 agent 的 model/effort 探测：由画像的可选 modelDetection 规格描述
 // （adapt 自动做精确候选发现，也可手填）。规格形态：
@@ -261,9 +242,9 @@ export function readSectionKey(file, section, key, jsonc) {
 }
 
 // 该 agent 是否具备「档位继承探测」能力（原生适配器或带 modelDetection 的画像）。
-// 用于「无记录 → 宿主自身配置兜底」时打印明确声明（禁止静默换档）；openclaw/纯自定义单元不适用。
+// 用于「无记录 → 宿主自身配置兜底」时打印明确声明（禁止静默换档）；未知 agent/纯自定义单元不适用。
 export function hasModelDetector(agent, env = process.env) {
-  if (['codex', 'kimi', 'pi', 'opencode', 'claude'].includes(String(agent || ''))) return true;
+  if (['codex', 'kimi', 'pi', 'opencode'].includes(String(agent || ''))) return true;
   try { return !!(loadProfile(agent, env) || {}).modelDetection; } catch { return false; }
 }
 
@@ -299,11 +280,10 @@ export function detectHostModelEffort(agent, { cwd, env = process.env, homes = {
       case 'kimi': return detectKimi({ cwd, kimiHome: homes.kimi, env });
       case 'pi': return detectPi({ piHome: homes.pi });
       case 'opencode': return detectOpenCode({ configHome: homes.opencode });
-      case 'claude': return detectClaude({ claudeHome: homes.claude, env });
       default: {
         const profiled = detectProfile({ id: String(agent || ''), env });
         if (profiled) return profiled;
-        return null; // openclaw 与未知 agent：不检测
+        return null; // 未知 agent：不检测
       }
     }
   } catch { return null; } // 检测绝不让引擎崩
