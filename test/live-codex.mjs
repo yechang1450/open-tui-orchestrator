@@ -87,7 +87,8 @@ const env = { ...process.env, ORCH_AGENT: agent, ORCH_SPAWN_MODE: 'window', ORCH
 // (retiring at 300s produced 9/9 where a 900s watchdog produced 4/9); both datums are kept rather
 // than dropped - the current value is the codex-appropriate one, and the hermes re-run measures
 // the trade-off instead of guessing at it.
-ORCH_UNIT_FIRST_CHECKPOINT_MS: String(Math.max(1200000, Number(process.env.ORCH_UNIT_FIRST_CHECKPOINT_MS) || 1200000)), ORCH_RUN_ID:runId, ORCH_ACCEPTANCE_FILE:acceptanceFile };
+ORCH_UNIT_FIRST_CHECKPOINT_MS: String(Math.max(1200000, Number(process.env.ORCH_UNIT_FIRST_CHECKPOINT_MS) || 1200000)), // Unit stall budget (2026-10-10): the fixture units legitimately park in the "rerun the probe until exit 0" loop while waiting for the release barrier, and the parked window logs stop advancing - the engine's 600s production stall default then reaps units that are merely waiting (measured: two of nine units killed ~635s in, after their barriered peers finished 90-180s earlier). The production default stays; the fixture widens the budget for its own wait pattern, same as the other budget knobs on this line.
+ORCH_UNIT_STALL_MS: String(Math.max(1500000, Number(process.env.ORCH_UNIT_STALL_MS) || 1500000)), ORCH_RUN_ID:runId, ORCH_ACCEPTANCE_FILE:acceptanceFile };
 for (const key of ['WORKSPACE_DIR', 'ORCH_STATE_DIR', 'ORCH_TUI', 'ORCH_SANDBOX', 'ORCH_APPROVAL']) delete env[key];
 const config = { nonce, workspace, ids: Array.from({ length: 9 }, (_, i) => String(91 + i)), capacity, deadlineAt: liveDeadlineAt };
 fs.writeFileSync(path.join(root, 'config.json'), JSON.stringify(config));
