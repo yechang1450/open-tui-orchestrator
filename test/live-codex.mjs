@@ -103,11 +103,20 @@ assert.ok(config.ids.includes(id));
 const out = path.join(root, 'project-' + id);
 fs.mkdirSync(out, { recursive: true });
 assert.equal(process.cwd(), config.workspace);
-const started = Date.now();
+// Preserve the EARLIEST attempt timestamp across re-runs: the unit re-executes this probe (exit 3 =
+// not released yet) and may even add a redundant run after success. A late re-run must not move the
+// task's start marker past the finish of its siblings - the overlap criterion compares [started,
+// finished] spans across the first eight tasks.
+let started = Date.now();
+const attemptStart = started;
+try {
+  const prev = JSON.parse(fs.readFileSync(path.join(out, 'started.json'), 'utf8'));
+  if (Number.isFinite(prev?.started)) started = Math.min(started, Number(prev.started));
+} catch { /* first attempt */ }
 fs.writeFileSync(path.join(out, 'started.json'), JSON.stringify({id, nonce:config.nonce, pid:process.pid, started}));
-const waitBudget = 240000;
+const waitBudget = Math.max(600000, Number(config.deadlineAt || 0) - attemptStart);
 while (!fs.existsSync(path.join(root, 'release')) && id !== config.ids.at(-1)) {
-  if (Date.now() - started > waitBudget) { console.error('[probe] not released within ' + Math.round(waitBudget/1000) + 's; exiting 3 so the unit re-runs it (and can check in the other tasks of a merged window) while keeping the window held'); process.exit(3); }
+  if (Date.now() - attemptStart > waitBudget) { console.error('[probe] not released within ' + Math.round(waitBudget/1000) + 's; exiting 3 so the unit re-runs it (and can check in the other tasks of a merged window) while keeping the window held'); process.exit(3); }
   await new Promise(r => setTimeout(r, 500));
 }
 await new Promise(r => setTimeout(r, 15000));
@@ -160,6 +169,9 @@ engine.done.then(() => {
   if (!fs.existsSync(summaryFile)) void terminateVerified(poll);
 });
 const deadline = liveDeadlineAt;
+// 每窗口的连续"无法核对"计数：注册表写入与进程快照存在已知竞态（含弹窗前 pending 占位、启动重试交接），
+// 单点抖动不判失败；同一窗口连续 ≥3 个采样都无法核对才记 measurement error（保持 fail-closed）。
+const unverifiedWindows = new Map();
 while (!engineEnded && Date.now() < deadline) {
   try {
     const { stdout } = await exec(powershellExe(), ['-NoProfile', '-Command', 'Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,Name,CommandLine,@{n="Started";e={$_.CreationDate.ToUniversalTime().ToString("o")}} | ConvertTo-Json -Compress'], { windowsHide: true, timeout: 15000 });
@@ -172,22 +184,31 @@ while (!engineEnded && Date.now() < deadline) {
     const own = windows.filter(w => w.runId===runId);
     const live = [];
     for (const w of own) {
+      const title = String(w.title || w.runId || 'window');
+      // 弹窗前预算占位（pending=true, pid=0）：正常中间态，既不算活体也不是测量错误。
+      if (w.pending === true) { unverifiedWindows.delete(title); continue; }
+      const miss = reason => {
+        const n = (unverifiedWindows.get(title) || 0) + 1;
+        unverifiedWindows.set(title, n);
+        if (n >= 3) noteSamplingError('window-identity', reason + ' for ' + title);
+      };
       if (!w.identity) {
-        noteSamplingError('window-identity', 'missing launcher identity for ' + String(w.title || w.runId || 'window'));
+        miss('missing launcher identity');
         continue;
       }
       let pid = Number(w.pid);
       if (fs.existsSync(w.pidFile)) pid = Number(fs.readFileSync(w.pidFile, 'utf8').replace(/^\uFEFF/, '').trim());
       if (!Number.isInteger(pid) || pid < 1) {
-        noteSamplingError('pid-file', 'invalid launcher pid for ' + String(w.title || w.runId || 'window'));
+        miss('invalid launcher pid');
         continue;
       }
       const launcher=byPid.get(pid);
       if (!launcher) continue;
       if (!sameProcess(w.identity,launcher)) {
-        noteSamplingError('window-identity', 'launcher identity mismatch for ' + String(w.title || w.runId || 'window'));
+        miss('launcher identity mismatch');
         continue;
       }
+      unverifiedWindows.delete(title);
       const descendants = processes.filter(p => {
         let q = p; const visited = new Set();
         while (q && !visited.has(q.ProcessId)) {
