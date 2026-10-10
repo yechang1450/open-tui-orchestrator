@@ -67,23 +67,29 @@ fs.mkdirSync(root, { recursive: true });
 // deadline and was reported unproven. The engine's own ORCH_MAX_POLL_MS scales with the same knob:
 // raising only the harness window left the engine cutting units off at its own fixed 15 min.
 // Same class as the other budget fixes: only the budget is configurable, the verdict stays fail-closed.
-const liveDeadlineMs = Math.max(300000, Number(process.env.ORCH_LIVE_DEADLINE_MS) || 970000);
+//
+// 2026-10-09: default raised 970s -> 1800s. The release barrier needs eight units CONVENED (all
+// past their first checkpoint, probes parked on the release file). Measured codex startups spread
+// 4-18 minutes, so a 16-minute window closes before the slowest unit can join while every earlier
+// probe's wait expires first, its window dies, and the barrier can never be satisfied (0 of 310
+// samples in the round that measured it). 1800s covers the measured spread with margin; nothing
+// in the verdict below changes - this is the budget that lets the measurement happen at all.
+const liveDeadlineMs = Math.max(300000, Number(process.env.ORCH_LIVE_DEADLINE_MS) || 1800000);
+const liveDeadlineAt = Date.now() + liveDeadlineMs;
 // The harness verifies that the engine holds EXACTLY `capacity` windows in parallel and queues the
 // rest, so the cap has to be handed to the engine: without ORCH_MAX_WINDOWS the engine picks its own
 // capacity from memory-fit (measured: 9 against a hardcoded 8), and then `live.length === capacity`
 // can never hold while `live.length > capacity` throws 'Capacity exceeded' - the release barrier is
 // never written and every probe dies on its own timeout.
-const env = { ...process.env, ORCH_AGENT: agent, ORCH_SPAWN_MODE: 'window', ORCH_MAX_POLL_MS: String(Math.max(60000, liveDeadlineMs - 70000)), ORCH_MAX_WINDOWS: String(capacity), ORCH_WINDOW_CONFIRM_MS: String(Math.max(60000, Number(process.env.ORCH_WINDOW_CONFIRM_MS) || 90000)), // NOTE: do NOT widen the first-checkpoint watchdog here. Raising it to 900s made a run WORSE
-// (4/9 verified against 9/9): units that had not started work by 300s did not finish by the run
-// deadline either, so retiring-and-retrying them is the engine's recovery working as designed.
-// The retries it produces are the honest cost of a slow host, not a budget to paper over.
-// First-checkpoint budget: the engine retires a unit that has not recorded its first checkpoint in
-// time, and a hermes TUI can take minutes to boot and answer. Measured: 15 'unproductive: no task
-// checkpoint within 300s' events in one run, each one a retry - and the retries are what break the
-// launch count, the ordering and the overlap checks all at once.
+const env = { ...process.env, ORCH_AGENT: agent, ORCH_SPAWN_MODE: 'window', ORCH_MAX_POLL_MS: String(Math.max(60000, liveDeadlineMs - 70000)), ORCH_MAX_WINDOWS: String(capacity), ORCH_WINDOW_CONFIRM_MS: String(Math.max(60000, Number(process.env.ORCH_WINDOW_CONFIRM_MS) || 90000)), // First-checkpoint budget (2026-10-09 update): the engine's default is 1200s today, raised from
+// 300s because measured codex startups need 4-18 minutes to their first checkpoint. The harness
+// pins the same value explicitly. An earlier note here recorded the OPPOSITE for a hermes run
+// (retiring at 300s produced 9/9 where a 900s watchdog produced 4/9); both datums are kept rather
+// than dropped - the current value is the codex-appropriate one, and the hermes re-run measures
+// the trade-off instead of guessing at it.
 ORCH_UNIT_FIRST_CHECKPOINT_MS: String(Math.max(1200000, Number(process.env.ORCH_UNIT_FIRST_CHECKPOINT_MS) || 1200000)), ORCH_RUN_ID:runId, ORCH_ACCEPTANCE_FILE:acceptanceFile };
 for (const key of ['WORKSPACE_DIR', 'ORCH_STATE_DIR', 'ORCH_TUI', 'ORCH_SANDBOX', 'ORCH_APPROVAL']) delete env[key];
-const config = { nonce, workspace, ids: Array.from({ length: 9 }, (_, i) => String(91 + i)), capacity };
+const config = { nonce, workspace, ids: Array.from({ length: 9 }, (_, i) => String(91 + i)), capacity, deadlineAt: liveDeadlineAt };
 fs.writeFileSync(path.join(root, 'config.json'), JSON.stringify(config));
 fs.writeFileSync(acceptanceFile,JSON.stringify(Object.fromEntries(config.ids.map((id,i)=>['T'+String(i+1).padStart(3,'0'),[{type:'json',path:path.join(root,'project-'+id,'result'+id+'.json'),equals:{id,nonce,cwd:workspace,sum:50005000}}]])),null,2));
 const probe = `import fs from 'node:fs';
@@ -99,8 +105,9 @@ fs.mkdirSync(out, { recursive: true });
 assert.equal(process.cwd(), config.workspace);
 const started = Date.now();
 fs.writeFileSync(path.join(out, 'started.json'), JSON.stringify({id, nonce:config.nonce, pid:process.pid, started}));
+const waitBudget = 240000;
 while (!fs.existsSync(path.join(root, 'release')) && id !== config.ids.at(-1)) {
-  if (Date.now() - started > 600000) throw new Error('parent did not observe eight overlapping windows');
+  if (Date.now() - started > waitBudget) { console.error('[probe] not released within ' + Math.round(waitBudget/1000) + 's; exiting 3 so the unit re-runs it (and can check in the other tasks of a merged window) while keeping the window held'); process.exit(3); }
   await new Promise(r => setTimeout(r, 500));
 }
 await new Promise(r => setTimeout(r, 15000));
@@ -121,7 +128,7 @@ for (const id of config.ids) {
 // first deadlocks the two: probes wait for the barrier, the barrier waits for eight probes, and the
 // engine keeps retiring the units that never got to checkpoint (measured: 7 of 9 blocks unproductive).
 // The segment count and the ； separators are part of the request-splitting contract - keep both.
-const request = config.ids.map(id => `项目${id}：先按主持提供的命令逐项记录检查点，再执行 node ${root.replaceAll('\\', '/')}/project-${id}/probe${id}.mjs ${id} 创建 ${root.replaceAll('\\', '/')}/project-${id}/result${id}.json 并等待命令完成后读回该结果文件核验成功，禁止另开窗口禁止提交或写记忆`).join('；');
+const request = config.ids.map(id => `项目${id}：先按主持提供的命令逐项记录检查点，再反复执行 node ${root.replaceAll('\\', '/')}/project-${id}/probe${id}.mjs ${id} 直到它退出码 0 才继续（退出码 3 表示尚未放行 立即重跑 不要停止 不要判定失败），随后读回 ${root.replaceAll('\\', '/')}/project-${id}/result${id}.json 核验成功，禁止另开窗口禁止提交或写记忆`).join('；');
 fs.writeFileSync(path.join(root, 'request.txt'), request, 'utf8');
 console.log(JSON.stringify({ root, capacity, tasks: 9, nonce }));
 function launch(script, args, label) {
@@ -152,7 +159,7 @@ engine.done.then(() => {
   engineEnded = true;
   if (!fs.existsSync(summaryFile)) void terminateVerified(poll);
 });
-const deadline = Date.now() + liveDeadlineMs;
+const deadline = liveDeadlineAt;
 while (!engineEnded && Date.now() < deadline) {
   try {
     const { stdout } = await exec(powershellExe(), ['-NoProfile', '-Command', 'Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,Name,CommandLine,@{n="Started";e={$_.CreationDate.ToUniversalTime().ToString("o")}} | ConvertTo-Json -Compress'], { windowsHide: true, timeout: 15000 });
@@ -196,6 +203,7 @@ while (!engineEnded && Date.now() < deadline) {
     const ready = config.ids.filter(id => fs.existsSync(path.join(root, 'project-' + id, 'started.json')));
     const sample = { at: Date.now(), live, ready };
     samples.push(sample);
+    try { fs.appendFileSync(path.join(root, 'samples.jsonl'), JSON.stringify(sample) + '\n'); } catch { /* best-effort post-mortem trail */ }
     if (live.length > peak) { peak = live.length; console.log('[measure] peak=' + peak + ' ready=' + ready.length); }
     if (live.length === capacity && config.ids.slice(0, capacity).every(id => ready.includes(id)) && !fs.existsSync(path.join(root, 'release'))) {
       fs.writeFileSync(path.join(root, 'release'), String(Date.now()));

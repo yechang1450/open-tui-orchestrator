@@ -48,7 +48,7 @@
     "unit-carrier.mjs": "23ec212e23e8bf90f32cb47d0c1b20578ca023ea78332e1507289202d00388f0",
     "unit-command.mjs": "9dadd04761f58479938cfdadb858de126e96c7155c0357467934caab792ef80c",
     "unit-memory-sampler.ps1": "783feed24b777aa62ad0d4d851e2445df525679a6ba238fd59f6e00a2376e219",
-    "unit-memory.mjs": "1c79063b353311511f22422fb02a074b0f1e184d11c3cb9bd74627aec65b2f7a",
+    "unit-memory.mjs": "15a521dd63d038f0d367b6cea1637f02b066bc3c677efc7373ac193d5a9a43aa",
     "unit-runtime.mjs": "6b24f2db12e20796c892150bca5b3d5ae9d97c8b8d240f624ee69a86290bd287"
   },
   "runtimeFiles": {
@@ -105,7 +105,7 @@
     "scripts/core/unit-carrier.mjs": "23ec212e23e8bf90f32cb47d0c1b20578ca023ea78332e1507289202d00388f0",
     "scripts/core/unit-command.mjs": "9dadd04761f58479938cfdadb858de126e96c7155c0357467934caab792ef80c",
     "scripts/core/unit-memory-sampler.ps1": "783feed24b777aa62ad0d4d851e2445df525679a6ba238fd59f6e00a2376e219",
-    "scripts/core/unit-memory.mjs": "1c79063b353311511f22422fb02a074b0f1e184d11c3cb9bd74627aec65b2f7a",
+    "scripts/core/unit-memory.mjs": "15a521dd63d038f0d367b6cea1637f02b066bc3c677efc7373ac193d5a9a43aa",
     "scripts/core/unit-runtime.mjs": "6b24f2db12e20796c892150bca5b3d5ae9d97c8b8d240f624ee69a86290bd287",
     "scripts/gate.mjs": "da4f2ecaea6b554701e348c4ebb072f42b49109c9486473bbea7565c3c0da45f",
     "scripts/host-cli.mjs": "994448626766f53883a29d17a5af547dcb67f6d2b9e7e5b6b6ff60f28582978c",

@@ -133,7 +133,7 @@ function hintSet(block) {
   return out;
 }
 
-// 选合并对：① 依赖对（本就该串行）→ ② 冲突提示有交集的相邻对 → ③ 任务数最多的一对（同数则取靠前者）。
+// 选合并对：① 依赖对（本就该串行）→ ② 冲突提示有交集的相邻对 → ③ 任务数最多的一对（同数则取靠后者，尾部吸收溢出）。
 function pickPair(blocks, maxTasksPerBlock = 0) {
   const sizeOf = (b) => (b.tasks || []).length;
   const overCap = (i, j) => maxTasksPerBlock > 0 && sizeOf(blocks[i]) + sizeOf(blocks[j]) > maxTasksPerBlock;
@@ -159,7 +159,10 @@ function pickPair(blocks, maxTasksPerBlock = 0) {
     for (let j = i + 1; j < blocks.length; j += 1) {
       if (overCap(i, j)) continue;                       // 越过上限的对不参与「最大」选择
       const weight = (blocks[i].tasks || []).length + (blocks[j].tasks || []).length;
-      if (!best || weight > best[2]) best = [i, j, weight];
+      // 同权重取「靠后者」：溢出在尾部吸收（9 题并 8 块 ⇒ 并 [8+9]「第九块并入第八块」），与
+      // capPlanBlocks 的连续区段约定及容量验收契约一致；取靠前者会把合并推到头部（并 [1+2]），
+      // 既违背契约，又让合并窗的第二个前置任务无法在放行前报到（探针互等 = 死锁）。
+      if (!best || weight >= best[2]) best = [i, j, weight];
     }
   }
   if (best) return [best[0], best[1], 'largest'];

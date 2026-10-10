@@ -122,7 +122,8 @@ test('fit: merge order ①dependency -> ②conflict-hint -> ③largest', () => {
   assert.equal(hint.merges[0].why, 'conflict-hint');
   const big = fitBlocks([blk('A', 3), blk('B', 1), blk('C', 1)], 500, 100, cfg);
   assert.equal(big.merges[0].why, 'largest');
-  assert.deepEqual(big.merges[0].merged, ['A', 'B']);
+  // 同权重 4 的对有两个（A+B、A+C）：取靠后者（尾部吸收溢出，与 capPlanBlocks 连续区段约定一致）。
+  assert.deepEqual(big.merges[0].merged, ['A', 'C']);
 });
 
 test('fit: dependsOn rewiring keeps the graph intact after a merge', () => {
