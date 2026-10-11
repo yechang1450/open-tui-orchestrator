@@ -1,6 +1,6 @@
 # Changelog
 
-## 26.10.13-beta.1 — beta 测试版（七宿主）
+## 26.10.13-1 — beta 测试版（七宿主）
 
 - **Claude Code 与 OpenClaw 适配器回归/重建**：claude 按原 print 类设计复活；openclaw 弃用旧 TUI+sqlite 重耦合形态，改驱动官方无头单发面 `agent --local`（接口探针 + 包身份 fail-closed；`OPENCLAW_STATE_DIR`/`OPENCLAW_CONFIG_PATH` 环境隔离；JSON 信封解析；token 化 result 契约）。两适配器共用既有启动器/租约/恢复/验收契约，无宿主专属机制。
 - **七宿主一套契约**：Codex、pi、opencode、Kimi Code、Claude Code、OpenClaw、Hermes Agent；doctor 逐家实读 hostError=null / carrierAvailable=true。
