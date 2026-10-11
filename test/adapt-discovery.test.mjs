@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
-import {adaptAgent, discoverModelDetection} from '../scripts/core/adapt-lib.mjs';
+import {adaptAgent, discoverModelDetection, locateCli} from '../scripts/core/adapt-lib.mjs';
 import {detectHostModelEffort, hasModelDetector, readSectionKey} from '../scripts/core/host-model.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
@@ -197,4 +197,66 @@ test('adapt returns a failure and removes a partially written initial profile', 
     fs.writeFileSync = originalWrite;
     fs.rmSync(dir, {recursive: true, force: true});
   }
+});
+
+// 子命令型 CLI（2026-10-11）：顶层 --help 不提一次性提示旗标、旗标只在子命令帮助里
+// （opencode 型 `run --help`）——旧行为误判「非 print-class」。新行为：二级探测命中子命令，
+// 旗标知识取自该子命令帮助，子命令落画像 args.subcommand（进一次性调用的 argv 最前）。
+const FAKE_SUB = `import fs from 'node:fs';
+const args = process.argv.slice(2);
+if (args.includes('--version')) { console.log('FakeSub 2.5.0'); process.exit(0); }
+if (args.includes('run') && args.includes('--help')) { console.log('  -p PROMPT\\n  --auto'); process.exit(0); }
+if (args.includes('--help')) { console.log('usage: fake subcommands: run'); process.exit(0); }
+const prompt = args[args.length - 1] || '';
+const m = /reply with exactly (ADAPTOK-\\S+) and nothing else/.exec(prompt);
+if (m) { console.log(m[1]); process.exit(0); }
+console.log('done __ORCH_DONE__');
+`;
+test('adapt probes subcommand help when the top-level surface lacks the prompt flag', () => {
+  fs.mkdirSync(family, {recursive: true});
+  const dir = fs.mkdtempSync(path.join(family, 'adapt-sub-'));
+  try {
+    const fake = path.join(dir, 'fakesub.mjs');
+    fs.writeFileSync(fake, FAKE_SUB);
+    const cleanEnv = {...process.env};
+    for (const k of ['ORCH_AGENT', 'ORCH_CLI', 'ORCH_MODEL', 'ORCH_EFFORT']) delete cleanEnv[k];
+    const r = spawnSync(process.execPath, [path.join(root, 'scripts', 'adapt.mjs'), '--agent', 'fakesub', '--cli', fake, '--profiles-dir', path.join(dir, 'profiles'), '--no-commit', '--json'], {env: cleanEnv, encoding: 'utf8', windowsHide: true, timeout: 120000});
+    assert.equal(r.status, 0, r.stderr || r.stdout);
+    const report = JSON.parse(r.stdout);
+    assert.equal(report.passed, true, JSON.stringify(report).slice(0, 400));
+    assert.equal(report.subcommand, 'run');
+    assert.deepEqual(report.profile.args.subcommand, ['run']);
+    assert.deepEqual(report.profile.args.prompt, ['-p']);
+    assert.equal(report.live.answered, true);
+  } finally { fs.rmSync(dir, {recursive: true, force: true}); }
+});
+
+// npm shim 解析（2026-10-11）：.cmd 包装器文本里的 node_modules 真入口被自动解析——通用形态、
+// 不写死任何包名；解析不到仍走旧行为（回报 shim、请用户指 --cli）。红例：旧 locateCli 对 shim
+// 一律回 { shim }，adapt 即报「only a shell shim found」。
+test('locateCli resolves an npm shim to its real node entry (no per-package hardcoding)', () => {
+  fs.mkdirSync(family, {recursive: true});
+  const dir = fs.mkdtempSync(path.join(family, 'adapt-shim-'));
+  try {
+    const entry = path.join(dir, 'node_modules', '@scope', 'fakepkg', 'bin', 'fake.js');
+    fs.mkdirSync(path.dirname(entry), {recursive: true});
+    fs.writeFileSync(entry, 'console.log("ok");\n', 'utf8');
+    const shim = path.join(dir, 'fakeshim.cmd');
+    fs.writeFileSync(shim, '@ECHO off\r\nnode "%~dp0\\node_modules\\@scope\\fakepkg\\bin\\fake.js" %*\r\n', 'utf8');
+    const located = locateCli('fakeshim', {PATH: dir}, undefined);
+    assert.ok(located.bin, 'the shim must resolve to a real entry: ' + JSON.stringify(located));
+    assert.deepEqual(located.prefixArgs, [entry]);
+    assert.equal(located.source, entry);
+  } finally { fs.rmSync(dir, {recursive: true, force: true}); }
+});
+
+test('locateCli keeps the old shim verdict when the wrapper has no resolvable entry', () => {
+  fs.mkdirSync(family, {recursive: true});
+  const dir = fs.mkdtempSync(path.join(family, 'adapt-shim-fallback-'));
+  try {
+    const shim = path.join(dir, 'lonely.cmd');
+    fs.writeFileSync(shim, '@ECHO off\r\nrem nothing here\r\n', 'utf8');
+    const located = locateCli('lonely', {PATH: dir}, undefined);
+    assert.equal(located.shim, shim, 'an unresolvable shim must keep the legacy verdict');
+  } finally { fs.rmSync(dir, {recursive: true, force: true}); }
 });

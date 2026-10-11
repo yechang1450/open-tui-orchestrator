@@ -16,6 +16,9 @@ import {readMaintenanceLock,acquireMaintenanceLock,releaseMaintenanceLock} from 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const BUILTIN = new Set(['pi', 'opencode', 'kimi', 'codex']);
 export const PROMPT_FLAG_CANDIDATES = ['-p', '--print', '-z', '--oneshot', '--prompt', '--message', '--ask', '--run', '--exec', '-m'];
+// 子命令帮助二级探测的候选（2026-10-11）：通用形态、非厂商特判——顶层 --help 不含一次性提示旗标时，
+// 依次探测这些子命令的 --help（如 opencode 型 `run --help`）。
+const SUBCOMMAND_CANDIDATES = ['run', 'exec', 'chat', 'ask', 'prompt'];
 const APPROVE_CANDIDATES = ['--yes-always', '--dangerously-skip-permissions', '--yolo', '--auto', '--approve', '--full-auto', '--dangerously-bypass-approvals-and-sandbox'];
 
 function run(cmd, args, opts = {}) {
@@ -70,19 +73,69 @@ export function discoverModelDetection(id, { home = process.env.USERPROFILE || p
   return (spec.env || spec.effortEnv || spec.config) ? spec : null;
 }
 
-function locateCli(id, env = process.env, explicit) {
+// npm shim 自动解析（2026-10-11）：全局/本地 npm 包装器（.cmd 或 POSIX 无扩展名脚本）文本里
+// 内嵌 node_modules/<pkg>/…/entry.(m)js 的真实入口；通用形态匹配，不写死任何包名。找不到真身
+// 时保持旧行为（回报 shim，请用户指 --cli）。返回形态与 --cli 指到 .mjs 时一致（node + 脚本）。
+export function resolveShimEntry(shim) {
+  let text = '';
+  try { text = fs.readFileSync(shim, 'utf8'); } catch { return null; }
+  const m = text.match(/node_modules[\\/](?:@[^\\/\s"']+[\\/])?[^\\/\s"']+[\\/][^"'\r\n]*?\.(?:mjs|cjs|js)\b/i);
+  if (!m) return null;
+  const rest = m[0].replace(/\\/g, '/').replace(/^.*?(node_modules\/)/i, '$1');
+  let dir = path.dirname(shim);
+  for (let hops = 0; hops < 5; hops++) {
+    const candidate = path.join(dir, ...rest.split('/'));
+    try {
+      if (fs.statSync(candidate).isFile()) {
+        const sibling = path.join(path.dirname(candidate), 'node.exe');
+        return { bin: fs.existsSync(sibling) ? sibling : process.execPath, prefixArgs: [candidate], source: candidate };
+      }
+    } catch { /* keep walking up */ }
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return null;
+}
+
+// 候选顺序（钉死，2026-10-11）：显式 > ORCH_CLI/<ID>_EXE > PATH > 通用安装位模板 > where.exe 兜底。
+// 安装位模板只用通用约定（<ID>_HOME、~/.<id>、%LOCALAPPDATA%/<id>）推导，不建任何厂商别名表；
+// where.exe 是 Windows 官方解析器（带超时），仅在前述全部落空后询问。
+export function locateCli(id, env = process.env, explicit) {
   const path0 = explicit || env.ORCH_CLI || env[String(id).toUpperCase() + '_EXE'];
   if (path0) {
     const file = path.resolve(path0);
     if (!fs.existsSync(file)) return { missing: file };
     if (/\.m?js$/i.test(file)) { const sibling = path.join(path.dirname(file), 'node.exe'); return { bin: fs.existsSync(sibling) ? sibling : process.execPath, prefixArgs: [file], source: file }; }
+    if (/\.(cmd|bat)$/i.test(file)) { const resolved = resolveShimEntry(file); if (resolved) return resolved; }
     return { bin: file };
   }
-  const dirs = String(env.PATH || env.Path || '').split(path.delimiter).filter(Boolean);
+  const up = String(id).toUpperCase().replace(/[^A-Z0-9]/g, '_');
+  const home = env.USERPROFILE || env.HOME || '';
+  const templateDirs = [
+    env[up + '_HOME'] ? path.join(env[up + '_HOME'], 'bin') : null,
+    env[up + '_HOME'] || null,
+    home ? path.join(home, '.' + id, 'bin') : null,
+    home ? path.join(home, '.' + id) : null,
+    env.LOCALAPPDATA ? path.join(env.LOCALAPPDATA, id, 'bin') : null,
+    env.LOCALAPPDATA ? path.join(env.LOCALAPPDATA, id) : null,
+    env.APPDATA ? path.join(env.APPDATA, id, 'bin') : null,
+  ].filter(Boolean);
+  const dirs = [...new Set([...String(env.PATH || env.Path || '').split(path.delimiter).filter(Boolean), ...templateDirs])];
   const exe = dirs.map((d) => path.join(d, id + '.exe')).find((f) => { try { return fs.statSync(f).isFile(); } catch { return false; } });
   if (exe) return { bin: exe };
   const shim = [...dirs.map((d) => path.join(d, id + '.cmd')), ...dirs.map((d) => path.join(d, id))].find((f) => { try { return fs.statSync(f).isFile(); } catch { return false; } });
-  if (shim) return { shim };
+  if (shim) { const resolved = resolveShimEntry(shim); if (resolved) return resolved; return { shim }; }
+  if (process.platform === 'win32') {
+    const w = spawnSync('where.exe', [id], { encoding: 'utf8', windowsHide: true, timeout: 10000, env });
+    if (w.status === 0) {
+      const hits = String(w.stdout || '').split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+      const exeHit = hits.find((f) => /\.exe$/i.test(f));
+      if (exeHit) return { bin: exeHit, source: exeHit };
+      const cmdHit = hits.find((f) => /\.(cmd|bat)$/i.test(f));
+      if (cmdHit) { const resolved = resolveShimEntry(cmdHit); if (resolved) return resolved; return { shim: cmdHit }; }
+    }
+  }
   return { missing: id };
 }
 
@@ -105,13 +158,25 @@ export async function adaptAgent({ id, cli, env = process.env, live = true, comm
 
   const help = probeCli(located.bin, [...prefixArgs, '--help'], { env });
   if (help.status !== 0) { report.reason = '--help probe failed: ' + (help.error || 'exit ' + help.status); return report; }
-  const helpText = help.out;
+  let helpText = help.out;
   const flagBoundary = (f) => new RegExp('(^|[\\s,|\\[\\]()])' + f.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&') + '([\\s,|\\[\\]()]|$)', 'm');
   // 模型旗标的短别名（形如 "-m MODEL, --model MODEL"）：短别名绝不能被当作 prompt 旗标
   // 误取——否则提示词会被喂给 model 参数、CLI 掉进交互模式（无终端即崩），探活与单元双失败。
   const modelAlias = /(^|\n)\s*(-[A-Za-z])\s+[A-Z_.]+(?:\s*,\s*|\s{2,})--model\b/.exec(helpText)?.[2] || null;
-  const promptFlag = PROMPT_FLAG_CANDIDATES.find((f) => f !== modelAlias && flagBoundary(f).test(helpText));
-  if (!promptFlag) { report.reason = 'no one-shot prompt flag found (candidates: ' + PROMPT_FLAG_CANDIDATES.join(' ') + '); not a print-class CLI — needs a manual adapter'; return report; }
+  let promptFlag = PROMPT_FLAG_CANDIDATES.find((f) => f !== modelAlias && flagBoundary(f).test(helpText));
+  // 子命令帮助二级探测（2026-10-11）：顶层 --help 不含一次性提示旗标时，依次探测常见子命令的
+  // --help（opencode 型 `run --help`）；命中即把子命令记进画像 args.subcommand，旗标知识从该
+  // 子命令帮助文本取（候选表为通用形态，不针对任何单一 CLI）。
+  let subcommand = null;
+  if (!promptFlag) {
+    for (const sub of SUBCOMMAND_CANDIDATES) {
+      const subHelp = probeCli(located.bin, [...prefixArgs, sub, '--help'], { env });
+      if (subHelp.status !== 0) continue;
+      const hit = PROMPT_FLAG_CANDIDATES.find((f) => f !== modelAlias && flagBoundary(f).test(subHelp.out));
+      if (hit) { subcommand = sub; helpText = subHelp.out; promptFlag = hit; break; }
+    }
+  }
+  if (!promptFlag) { report.reason = 'no one-shot prompt flag found (candidates: ' + PROMPT_FLAG_CANDIDATES.join(' ') + '; subcommands probed: ' + SUBCOMMAND_CANDIDATES.join(' ') + '); not a print-class CLI — needs a manual adapter'; return report; }
   const approve = APPROVE_CANDIDATES.filter((f) => flagBoundary(f).test(helpText));
   const model = flagBoundary('--model').test(helpText) ? ['--model'] : null;
   const effortFlag = ['--effort', '--reasoning', '--thinking'].find((f) => flagBoundary(f).test(helpText));
@@ -127,13 +192,14 @@ export async function adaptAgent({ id, cli, env = process.env, live = true, comm
     probePrompt: 'reply with exactly ' + probeToken + ' and nothing else',
     envMarkers: [],
     processNames: ['^' + id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(\\.exe)?$'],
-    args: { approve, extra: [], model, effort, prompt: [promptFlag] },
+    args: { approve, extra: [], model, effort, prompt: [promptFlag], ...(subcommand ? { subcommand: [subcommand] } : {}) },
     adaptedAt: new Date().toISOString(),
     adaptedFrom: { cli: path.basename(located.source || located.bin), version, prefixArgs: prefixArgs.length ? prefixArgs : undefined },
   };
   const detection = discoverModelDetection(id, { env });
   if (detection) profile.modelDetection = detection;
   report.modelDetection = detection || null;
+  if (subcommand) report.subcommand = subcommand;
   report.profile = profile;
 
   const profileFile = path.join(profilesDir(env), id + '.json');

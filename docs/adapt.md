@@ -12,13 +12,22 @@ node scripts/adapt.mjs [--agent <id>] [--cli <path>] [--profiles-dir <dir>]
 
 流程（任何一步失败都**回滚画像**，仓库保持原状）：
 
-1. **定位**：`--agent`（缺省用调用方探测结果）→ `--cli`/`ORCH_CLI` → PATH 上的 `<id>.exe`。
-   `.cmd`/shell shim 无法被直接 spawn（Windows 限制），会自动拒绝并提示指向真实可执行文件；
+1. **定位**（候选顺序钉死）：`--cli`/`ORCH_CLI`/`<ID>_EXE` → PATH → 通用安装位模板
+   （`<ID>_HOME`、`~/.<id>`、`%LOCALAPPDATA%/<id>` 的 `bin/` 与根；只按通用约定推导，不建厂商别名表）
+   → `where.exe` 兜底（Windows 官方解析器，带超时）。**npm shim 自动解析**：`.cmd`/无扩展名
+   包装器文本里的 `node_modules/<pkg>/…/entry.(m)js` 真入口会被自动解析并以 node + 脚本运行
+   （通用形态匹配、不写死包名）；解析不到才报 `only a shell shim found` 并提示指 `--cli`。
    `.mjs`/`.cjs` 形态自动以 node + 脚本运行。
 2. **表面探测**：`--version` 取语义化版本；`--help` 里找一次性提示词旗标（候选
    `-p/--print/--message/-m`）、自动批准旗标（候选 `--yes-always/--dangerously-skip-permissions/
    --yolo/--auto/--approve/--full-auto/--dangerously-bypass-approvals-and-sandbox`）、`--model`、`--effort`。
-3. **生成画像**：`scripts/core/agent-profiles/<id>.json`（schema 见文件头注释；含 adaptedFrom 审计字段）。
+   探测原语统一做两件事：**剥 ANSI**（带色帮助不碍匹配，颜色把旗标切两段也能还原）与
+   **注入 `COLUMNS=200`**（窄终端下列宽敏感的 CLI 会省略旗标；调用者显式设置优先）。
+   **子命令二级探测**：顶层 `--help` 不含一次性提示旗标时，依次探测常见子命令的 `--help`
+   （`run/exec/chat/ask/prompt`，opencode 型）——命中则旗标知识取自该子命令帮助，并把子命令写入
+   画像 `args.subcommand`（一次性调用时置于 argv 最前）。
+3. **生成画像**：`scripts/core/agent-profiles/<id>.json`（schema 见文件头注释；含 adaptedFrom 审计字段；
+   子命令型 CLI 额外带可选 `args.subcommand`，与 `windowPrefix` 并用时应避免词项重复）。
 4. **解析自检**：用画像走一遍 `resolveProfileHost`，版本必须与探测一致。
 5. **活体验证（默认开）**：真实调用一次该 CLI，要求它只回一个随机探活令牌
    （`ADAPTOK-xxxxxxxx`）；未回、超时或非零退出即失败回滚。`--no-live` 关闭（不推荐）。

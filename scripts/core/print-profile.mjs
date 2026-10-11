@@ -11,7 +11,8 @@ import {probeCli} from './host-probe.mjs';
 //   { schema:1, id, label, bin:[候选名...], helpFlags:[必须出现在 --help 的旗标...],
 //     versionPattern:'正则(含捕获组)', probePrompt:'探活提示词',
 //     args:{ approve:[自动批准旗标...], extra:[附加旗标...], model:['--model']|null,
-//            effort:['--effort']|null, prompt:['--message']|null } }
+//            effort:['--effort']|null, prompt:['--message']|null,
+//            subcommand:['run'] 可选——子命令型 CLI（如 opencode）的一次性调用子命令词，置于 argv 最前 } }
 //   prompt 旗标取值为提示词本身（提示词跟在旗标之后，作为最后一个 argv 元素）。
 
 const DEFAULT_PROFILE_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), 'agent-profiles');
@@ -47,6 +48,9 @@ export function profileArgs(config, {model, effort, mode} = {}) {
   const windowMode = String(mode || '') === 'window';
   const useWindow = windowMode && Array.isArray(a.windowPrefix) && a.windowPrefix.length && Array.isArray(a.windowPrompt) && a.windowPrompt.length;
   return [
+    // 子命令型画像（2026-10-11）：一次性提示调用所需的子命令词放在最前（如 `run`）；
+    // 若同时提供 windowPrefix，由画像作者自行避免词项重复（docs/adapt.md 已注明）。
+    ...(a.subcommand || []),
     ...(useWindow ? a.windowPrefix : []),
     ...(config.prefixArgs || []),
     ...(a.approve || []),
@@ -75,7 +79,14 @@ export function resolveProfileHost(env = process.env, id) {
       bin = fs.existsSync(sibling) ? sibling : process.execPath; prefixArgs = [file];
     }
     const help = probeCli(bin, [...prefixArgs, '--help'], {env});
-    const missing = (profile.helpFlags || []).filter((f) => !help.out.includes(f));
+    // 子命令型画像（2026-10-11）：旗标可能在子命令帮助里（如 `run --help`）；有 args.subcommand
+    // 时把其帮助文本并入校验面（顶层 --help 仍必须可用）。
+    let helpOut = help.out;
+    if (Array.isArray(profile.args?.subcommand) && profile.args.subcommand.length) {
+      const subHelp = probeCli(bin, [...prefixArgs, ...profile.args.subcommand, '--help'], {env});
+      if (subHelp.status === 0) helpOut = helpOut + '\n' + subHelp.out;
+    }
+    const missing = (profile.helpFlags || []).filter((f) => !helpOut.includes(f));
     if (help.status !== 0 || missing.length) { rejected.push(`${file}: --help ${help.error ? 'probe error ' + help.error : 'exit ' + help.status}${missing.length ? '; missing ' + missing.join(' ') : ''}`); continue; }
     const versionResult = probeCli(bin, [...prefixArgs, '--version'], {env});
     const version = new RegExp(profile.versionPattern || '(\\d+\\.\\d+\\.\\d+)').exec(String(versionResult.stdout || ''))?.[1];

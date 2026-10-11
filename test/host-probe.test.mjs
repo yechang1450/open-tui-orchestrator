@@ -114,3 +114,35 @@ test('probeCli can actually run a .cmd shim instead of reporting EINVAL',{skip:p
   assert.match(r.out,/7\.7\.7/,'the shim output must be captured');
  }finally{fs.rmSync(dir,{recursive:true,force:true});}
 });
+
+// ANSI 剥离（2026-10-11）：--help 在 FORCE_COLOR/PTY 继承下可能带色（pi 实测）；probeCli 的
+// 合并校验面 out 必须先剥 CSI 序列，stdout/stderr 保留原文供需要原字节的调用者。
+// 红例：out 退回原文时，下面这种「颜色把旗标切成两段」的形态会让 includes('--prompt') 失配。
+test('probeCli strips ANSI from the merged verdict surface but keeps raw streams',()=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'orch-probe-ansi-'));
+ const esc=String.fromCharCode(27);
+ const fake=path.join(dir,'fake-ansi.mjs');
+ fs.writeFileSync(fake,`const e=String.fromCharCode(27);console.log('--pro'+e+'[1m'+'mpt --auto');process.exit(0);\n`);
+ try{
+  const r=probeCli(process.execPath,[fake,'--help'],{timeoutMs:15000,attempts:1});
+  assert.equal(r.status,0);
+  assert.ok(r.out.includes('--prompt'),'the verdict surface must be plain text, got: '+JSON.stringify(r.out));
+  assert.ok(!r.out.includes(esc),'ANSI sequences must be stripped from out');
+  assert.ok(r.stdout.includes(esc),'raw stdout keeps the original bytes');
+ }finally{fs.rmSync(dir,{recursive:true,force:true});}
+});
+
+// 宽列注入（2026-10-11）：窄终端下列宽敏感的 CLI 会省略旗标（kimi 实测 80 列丢 --auto、
+// COLUMNS=200 全量）；probeCli 默认注入 COLUMNS=200，调用者显式设置优先。
+test('probeCli injects COLUMNS=200 by default and respects an explicit override',()=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'orch-probe-cols-'));
+ const fake=path.join(dir,'fake-cols.mjs');
+ fs.writeFileSync(fake,`console.log('COLUMNS='+(process.env.COLUMNS===undefined?'<unset>':process.env.COLUMNS));process.exit(0);\n`);
+ try{
+  const baseEnv={...process.env};delete baseEnv.COLUMNS;
+  const base=probeCli(process.execPath,[fake,'--help'],{env:baseEnv,timeoutMs:15000,attempts:1});
+  assert.ok(base.out.includes('COLUMNS=200'),'a wide-column default must be injected, got: '+base.out.trim());
+  const over=probeCli(process.execPath,[fake,'--help'],{env:{...baseEnv,COLUMNS:'300'},timeoutMs:15000,attempts:1});
+  assert.ok(over.out.includes('COLUMNS=300'),'an explicit COLUMNS must win, got: '+over.out.trim());
+ }finally{fs.rmSync(dir,{recursive:true,force:true});}
+});
