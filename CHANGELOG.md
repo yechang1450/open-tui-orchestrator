@@ -1,10 +1,11 @@
 # Changelog
 
-## 26.10.13-1 — beta 测试版（七宿主）
+## 26.10.13-2 — beta 测试版（七宿主）
 
+- **修复（GitHub 源安装循环实逮）**：`scripts/package.json` / `scripts/package-lock.json` 的工作区字节曾是 CRLF（提交 blob 为 LF）——封印把 CRLF 字节烘进 runtime 哈希：npm 包自洽，但全新 clone 的 `release-integrity` 必红（`runtime differs`）。已把两文件归一化为 LF 并重封。
 - **Claude Code 与 OpenClaw 适配器回归/重建**：claude 按原 print 类设计复活；openclaw 弃用旧 TUI+sqlite 重耦合形态，改驱动官方无头单发面 `agent --local`（接口探针 + 包身份 fail-closed；`OPENCLAW_STATE_DIR`/`OPENCLAW_CONFIG_PATH` 环境隔离；JSON 信封解析；token 化 result 契约）。两适配器共用既有启动器/租约/恢复/验收契约，无宿主专属机制。
-- **七宿主一套契约**：Codex、pi、opencode、Kimi Code、Claude Code、OpenClaw、Hermes Agent；doctor 逐家实读 hostError=null / carrierAvailable=true。
-- **发布前实测**：离线套件 533/533（0 跳过）；封印重算 `schema 2 / 45 核心 + 69 运行时`；七宿主 doctor 全绿。
+- **七宿主一套契约**：Codex、pi、opencode、Kimi Code、Claude Code、OpenClaw、Hermes Agent；doctor 逐家实读 hostError=null / carrierAvailable=true；七宿主真机轮（安装副本）全部 success=true、2/2 verified。
+- **发布前实测**：离线套件 533/533（0 跳过）；封印重算 `schema 2 / 45 核心 + 69 运行时`。
 - 本版在 `beta` 分支开发，npm 通道 `beta`；master 不受影响，验收后一次性合回。
 
 ## 26.10.12 — 外来 pi result 防护 + 公开面清理
