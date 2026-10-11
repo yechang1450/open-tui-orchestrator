@@ -6,7 +6,7 @@
 
 **当前仅支持 Windows。** 启动器、隐形 ConPTY 载体与全机协调器都是 Windows 专属；其他平台会得到明确的诊断而不是一个"半能用"的安装。运行前请先读 **[docs/trust-and-safety.md](docs/trust-and-safety.md)**——它如实说明这个工具会在你的机器上做什么（用你的凭据运行的隐藏 Agent、Codex 宿主运行的免审批模式、具体写入哪些文件）。安全报告渠道：[SECURITY.md](SECURITY.md)。
 
-## 它做什么
+## 它可以做什么
 
 - **无损失账本优先。** 任何请求在分析之前先被完整盘点为稳定 ID（`T001…`）；不会因为模型说"已完成/不可行"就丢掉任务，摘要永远不能替代原始描述。
 - **语义分类 + 确定性规划。** 模型负责分类：任务归属、资源与依赖；确定性代码负责校验覆盖面、拒绝不安全的依赖边、排出依赖波。模型输出缺失或畸形时，回退为仍然覆盖全表的串行安全计划。
@@ -56,13 +56,7 @@ node cli.mjs --plan-file plan.json --unit-cmd-file unit.json --run-windows '修�
 
 ## 为什么做这个
 
-两个源头。其一：让有能力的模型用满它的宽度——某次大型代码评审中，Kimi K3 指挥 KimiCode 一次性派出 10 个 coder 子代理，并行执行在大任务上的吞吐收益一目了然。
-
-![KimiCode 一次派出 10 个 coder 子代理](docs/assets/kimicode-agent-swarm-10-subagents.png)
-
-*图：KimiCode 由 Kimi K3 驱动，一次派出 10 个子代理——这是"并行窗口"动机的参考图，不是 open-tui-orchestrator 的截图。*
-
-其二：观察到 Agent 开始复杂工作时先写 TODO LIST。对容易漏步骤的长任务，执行前记录目标、依赖、动作、验证与清理，会让过程可靠得多。不是每个 Agent 都能自由派子代理；一个通用替代法就是驱动它已装好的 CLI，并行开几个 TUI 窗口——每窗一个独立块，账本由执行契约兜底。
+我习惯一次性给AI Agent很多活，而且有很多活都还不是同一个项目的，所以完全可以并发执行以提升工作效率。一开始是在codex做codex-tui-orchestrator，后来用了pi、opencode、hermes等Agent，就觉得，不如做一个这几个Agents完全可以通用的open-tui-orchestrator，就有这个open-tui-orchestrator。
 
 ## 支持的宿主
 
@@ -79,14 +73,3 @@ node cli.mjs --agent hermes --doctor
 ## 验证状态
 
 当前通用核心为 0.9.24-1，离线回归为 511/511 通过。本机发布的判定器是 `node scripts/gate.mjs --all`——L1 离线套件、L2 宿主解析 + 反例能红（判据本身没坏）、L3 未知 run 干净失败、L4 版本/封印/文档/套件总数对账。任何核心或运行时文件变更都必须重新 `release-integrity --seal`。细节与证据：[docs/release-policy.md](docs/release-policy.md)。
-
-## 相关文档
-
-- [执行与验收契约](docs/execution-contract.md)
-- [发布政策](docs/release-policy.md)
-- [信任与安全](docs/trust-and-safety.md)
-- [pi 适配器](docs/pi-adapter.md) · [Kimi Code 适配器](docs/kimi-adapter.md) · [opencode 适配器](docs/opencode-adapter.md)
-- [新 Agent CLI 的自动适配（print 类画像）](docs/adapt.md)
-- [调用方驱动执行：plan 文件 + 单元命令（任意 Agent）](docs/caller-driven.md)
-- [Kimi Code 集成：看板流 → 原生 TodoList](docs/kimi-integration.md)
-- [无焦点窗口验证](docs/inactive-windows.md) · [异常中断后的自动恢复](docs/auto-recovery.md) · [维护锁](docs/maintenance-lock.md)

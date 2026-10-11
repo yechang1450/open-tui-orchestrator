@@ -6,7 +6,7 @@ A local Node.js orchestrator for agent CLIs: split a complex request into a loss
 
 **Windows-only today.** The launchers, the invisible ConPTY carrier and the machine-wide coordinator are Windows-specific; other platforms get a diagnostic instead of a half-working install. Before you run it, read **[docs/trust-and-safety.md](docs/trust-and-safety.md)** — it states plainly what this tool does on your machine (hidden agents running with your credentials, bypassed approvals for Codex-hosted runs, the exact files it writes). Security reports: [SECURITY.md](SECURITY.md).
 
-## What it does
+## What it can do
 
 - **Lossless ledger first.** Every request is inventoried into stable IDs (`T001…`) before any analysis; a task is never dropped because a model called it done or infeasible, and a summary never replaces the original wording.
 - **Deterministic planning around semantic classification.** A model classifies ownership, resources and dependencies; deterministic code validates coverage, rejects unsafe edges and schedules dependency waves. Missing or malformed model output falls back to a safe serial plan that still covers the full list.
@@ -57,13 +57,7 @@ node cli.mjs --plan-file plan.json --unit-cmd-file unit.json --run-windows 'Fix 
 
 ## Why this exists
 
-Two roots. The first: letting a capable model use its full width. Watching Kimi K3 direct KimiCode to dispatch 10 coder subagents during a large review made the throughput benefit of parallel execution obvious.
-
-![KimiCode launching 10 coder subagents](docs/assets/kimicode-agent-swarm-10-subagents.png)
-
-*Figure: KimiCode, driven by Kimi K3, dispatching 10 coder subagents at once — a reference image for the motivation, not a screenshot of open-tui-orchestrator.*
-
-The second: watching an agent begin complex work by writing a TODO LIST. For long tasks that easily miss a step, recording goals, dependencies, actions, verification and cleanup before execution makes the process more reliable. Not every agent can freely launch subagents; a general substitute is to drive the CLI already installed for that agent and open several TUI windows in parallel — one independent block per window, with the ledger enforced by the execution contract.
+I'm used to giving an AI agent a lot of work at once — and much of it isn't even in the same project, so it can absolutely run concurrently to get through it faster. It started as `codex-tui-orchestrator`, built on codex. Later, after using pi, opencode, hermes and other agents, the thought was: rather than that, why not one `open-tui-orchestrator` that all of these agents can share. And so there is open-tui-orchestrator.
 
 ## Supported hosts
 
@@ -80,14 +74,3 @@ An unknown host, missing CLI or invalid explicit path fails with a diagnostic.
 ## Validation status
 
 The current generic core is 0.9.24-1, with 511/511 offline tests passing. The local release judge is `node scripts/gate.mjs --all` — L1 offline suite, L2 host resolution plus a must-fail canary (the criteria themselves can still go red), L3 clean unknown-run failure, L4 version / seal / docs / suite-total cross-check. Every core or runtime change requires a fresh `release-integrity --seal`. Details and evidence: [docs/release-policy.md](docs/release-policy.md).
-
-## Related documentation
-
-- [Execution and acceptance contract](docs/execution-contract.md)
-- [Release policy](docs/release-policy.md)
-- [Trust and safety](docs/trust-and-safety.md)
-- [Pi adapter](docs/pi-adapter.md) · [Kimi Code adapter](docs/kimi-adapter.md) · [opencode adapter](docs/opencode-adapter.md)
-- [Automatic adaptation of new agent CLIs (print-class profiles)](docs/adapt.md)
-- [Caller-driven execution: plan file + unit command (any agent)](docs/caller-driven.md)
-- [Kimi Code integration: board stream → native TodoList](docs/kimi-integration.md)
-- [Unfocused window validation](docs/inactive-windows.md) · [Automatic recovery after an abnormal interruption](docs/auto-recovery.md) · [Maintenance lock](docs/maintenance-lock.md)
