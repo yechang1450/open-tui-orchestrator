@@ -22,6 +22,10 @@ export function resolveKimiHost(env=process.env) {
     if(!/\.exe$/i.test(file)) {
       if(/\.[cm]?js$/i.test(file)) {
         const sibling=path.join(path.dirname(file),'node.exe');bin=fs.existsSync(sibling)?sibling:process.execPath;prefixArgs=[file];
+      } else if(/\.(cmd|bat)$/i.test(file)) {
+        // npm 全局安装形态（2026-10-11 实测 kimi 2.1.1：只有 .cmd/.ps1/无扩展名 shim，无 kimi.exe）：
+        // probeCli 已能直接运行 .cmd（cmd /d /s /c 包装，见 host-probe.mjs），直接采用即可。
+        bin=file;
       } else {
         // The extensionless native launcher sits next to kimi.exe; prefer the explicit exe.
         const sibling=path.join(path.dirname(file),'kimi.exe');if(!fs.existsSync(sibling))continue;bin=sibling;
