@@ -286,7 +286,7 @@ const ordered = receiptsValid && results[8].started >= results[7].finished;
 const windowLaunches = (engine.output().match(new RegExp('spawned visible '+agent+' TUI','g')) || []).length;
 const uniqueLaunchers = new Set(samples.flatMap(s => s.live.map(w => w.launcherPid))).size;
 const overlap = receiptsValid && Math.max(...results.slice(0, 8).map(r => r.started)) < Math.min(...results.slice(0, 8).map(r => r.finished));
-const automaticClose = true; // OpenClaw（唯一需要原生自动关闭证明的宿主）适配器已移除；其余宿主按启动器契约自动关闭。
+const automaticClose = true; // OpenClaw 现为 print 类适配器（无 TUI 窗）；全部宿主按启动器契约自动关闭。
 const coreHashAtEnd=coreHash();
 const coreUnchanged=coreHashAtLaunch===coreHashAtEnd;
 const verdict=codexFailureReasons({

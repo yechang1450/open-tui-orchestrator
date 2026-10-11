@@ -1,6 +1,6 @@
 # Shared execution contract (core 1.3.1, run protocol 2)
 
-Generic development uses scripts/core. The dedicated Codex plugin now owns a separately verified physical release snapshot; changes are promoted explicitly, not through directory junctions. The generic entry implements the Codex, pi, opencode, Kimi Code and Hermes Agent adapters; the dedicated plugin accepts Codex only. See pi-adapter.md for Pi-specific CLI, planning, session and shutdown behavior.
+Generic development uses scripts/core. The dedicated Codex plugin now owns a separately verified physical release snapshot; changes are promoted explicitly, not through directory junctions. The generic entry implements the Codex, pi, opencode, Kimi Code, Claude Code, OpenClaw and Hermes Agent adapters; the dedicated plugin accepts Codex only. See pi-adapter.md for Pi-specific CLI, planning, session and shutdown behavior.
 
 ## Planning and capacity
 

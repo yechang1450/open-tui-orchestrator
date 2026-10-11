@@ -196,6 +196,38 @@ function detectOpenCode({ configHome }) {
   return null;
 }
 
+// --------------------------------------------------------------- claude ----
+// Claude Code settings: ~/.claude/settings.json 顶层 model（别名或完整 id）；effort 读取
+// settings 的 "effort"（存在时）。本机以 env 块接网关时模型在 settings.env.ANTHROPIC_MODEL，
+// 一并读取。缺失即 null，绝不猜。
+function detectClaude({ claudeHome, env = process.env }) {
+  const home = claudeHome || env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
+  for (const name of ['settings.json', path.join('..', '.claude.json')]) {
+    try {
+      const file = path.join(home, name);
+      if (!fs.existsSync(file)) continue;
+      const cfg = JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, ''));
+      const model = clean(cfg && cfg.model) || clean(cfg && cfg.env && cfg.env.ANTHROPIC_MODEL);
+      const effort = clean(cfg && cfg.effort);
+      if (model || effort) return { model: model || null, effort: effort || null, source: 'claude-settings' };
+    } catch { /* try next */ }
+  }
+  return null;
+}
+
+// ------------------------------------------------------------- openclaw ----
+// OpenClaw config: ~/.openclaw/openclaw.json 的 agents.defaults.model.primary
+// （provider/model 引用）。配置为 JSON5 形态——按 jsonc 预处理后精确读键，缺失即 null。
+function detectOpenClaw({ env = process.env } = {}) {
+  try {
+    const file = env.OPENCLAW_CONFIG_PATH || path.join(os.homedir(), '.openclaw', 'openclaw.json');
+    if (!fs.existsSync(file)) return null;
+    const cfg = parseJsonc(fs.readFileSync(file, 'utf8'));
+    const model = clean(cfg && cfg.agents && cfg.agents.defaults && cfg.agents.defaults.model && cfg.agents.defaults.model.primary);
+    return model ? { model, effort: null, source: 'openclaw-config' } : null;
+  } catch { return null; }
+}
+
 // --------------------------------------------------------------- profile ----
 // print-class 画像 agent 的 model/effort 探测：由画像的可选 modelDetection 规格描述
 // （adapt 自动做精确候选发现，也可手填）。规格形态：
@@ -244,7 +276,7 @@ export function readSectionKey(file, section, key, jsonc) {
 // 该 agent 是否具备「档位继承探测」能力（原生适配器或带 modelDetection 的画像）。
 // 用于「无记录 → 宿主自身配置兜底」时打印明确声明（禁止静默换档）；未知 agent/纯自定义单元不适用。
 export function hasModelDetector(agent, env = process.env) {
-  if (['codex', 'kimi', 'pi', 'opencode'].includes(String(agent || ''))) return true;
+  if (['codex', 'kimi', 'pi', 'opencode', 'claude', 'openclaw'].includes(String(agent || ''))) return true;
   try { return !!(loadProfile(agent, env) || {}).modelDetection; } catch { return false; }
 }
 
@@ -280,6 +312,8 @@ export function detectHostModelEffort(agent, { cwd, env = process.env, homes = {
       case 'kimi': return detectKimi({ cwd, kimiHome: homes.kimi, env });
       case 'pi': return detectPi({ piHome: homes.pi });
       case 'opencode': return detectOpenCode({ configHome: homes.opencode });
+      case 'claude': return detectClaude({ claudeHome: homes.claude, env });
+      case 'openclaw': return detectOpenClaw({ env });
       default: {
         const profiled = detectProfile({ id: String(agent || ''), env });
         if (profiled) return profiled;

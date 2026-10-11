@@ -18,8 +18,10 @@ test('initiating agent is detected from the nearest matching ancestor process', 
   assert.equal(detectHostFromChain([{ pid: 3, name: 'codex.exe', cmdline: 'codex.exe' }]), 'codex');
   assert.equal(detectHostFromChain([{ pid: 3, name: 'node.exe', cmdline: 'node C:\\tools\\node_modules\\@openai\\codex\\bin\\codex.js' }]), 'codex');
   assert.equal(detectHostFromChain([{ pid: 3, name: 'opencode.exe', cmdline: '' }]), 'opencode');
-  // openclaw 适配器已移除：其进程形态不再绑定宿主（未知即 null，绝不冒名顶替）。
-  assert.equal(detectHostFromChain([{ pid: 3, name: 'node.exe', cmdline: 'node C:\\tools\\node_modules\\openclaw\\openclaw.mjs tui' }]), null);
+  // openclaw/claude 适配器已复活（beta）：进程形态重新绑定宿主；未知形态仍是 null（绝不冒名顶替）。
+  assert.equal(detectHostFromChain([{ pid: 3, name: 'node.exe', cmdline: 'node C:\\tools\\node_modules\\openclaw\\openclaw.mjs tui' }]), 'openclaw');
+  assert.equal(detectHostFromChain([{ pid: 3, name: 'claude.exe', cmdline: 'claude.exe' }]), 'claude');
+  assert.equal(detectHostFromChain([{ pid: 3, name: 'node.exe', cmdline: 'node C:\\tools\\node_modules\\@anthropic-ai\\claude-code\\cli.js' }]), 'claude');
   // A nested orchestration window binds to its own agent, not the outer initiator.
   assert.equal(detectHostFromChain([
     { pid: 3, name: 'node.exe', cmdline: 'node C:\\tools\\node_modules\\@earendil-works\\pi-coding-agent\\dist\\bundle\\cli.js' },

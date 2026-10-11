@@ -5,7 +5,7 @@
 - **Windows 10/11 (x64)** — Windows-only today: every entry except `--version`, `--help` and `--install-deps` refuses on another platform with one diagnostic line (no half-working install, no silent degradation).
 - **Node.js 22 or newer** (`node --version`).
 - **Windows Terminal** — recommended; `--doctor` reports `terminal: "wt"` or falls back to `conhost`.
-- **One supported agent CLI, already installed and logged in**: Codex, pi, opencode, Kimi Code, or Hermes Agent. The orchestrator drives the CLI you already use; it never installs, upgrades or substitutes one.
+- **One supported agent CLI, already installed and logged in**: Codex, pi, opencode, Kimi Code, Claude Code, OpenClaw, or Hermes Agent. The orchestrator drives the CLI you already use; it never installs, upgrades or substitutes one.
 
 ### Other platforms (Linux / macOS)
 

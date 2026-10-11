@@ -41,6 +41,8 @@
     "cli",
     "windows",
     "codex",
+    "claude",
+    "openclaw",
     "automation"
   ],
   "author": "Yang Wenchàng (yechang1450)",

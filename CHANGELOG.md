@@ -1,5 +1,12 @@
 # Changelog
 
+## 26.10.13-beta.1 — beta 测试版（七宿主）
+
+- **Claude Code 与 OpenClaw 适配器回归/重建**：claude 按原 print 类设计复活；openclaw 弃用旧 TUI+sqlite 重耦合形态，改驱动官方无头单发面 `agent --local`（接口探针 + 包身份 fail-closed；`OPENCLAW_STATE_DIR`/`OPENCLAW_CONFIG_PATH` 环境隔离；JSON 信封解析；token 化 result 契约）。两适配器共用既有启动器/租约/恢复/验收契约，无宿主专属机制。
+- **七宿主一套契约**：Codex、pi、opencode、Kimi Code、Claude Code、OpenClaw、Hermes Agent；doctor 逐家实读 hostError=null / carrierAvailable=true。
+- **发布前实测**：离线套件 533/533（0 跳过）；封印重算 `schema 2 / 45 核心 + 69 运行时`；七宿主 doctor 全绿。
+- 本版在 `beta` 分支开发，npm 通道 `beta`；master 不受影响，验收后一次性合回。
+
 ## 26.10.12 — 外来 pi result 防护 + 公开面清理
 
 - **pi 外来 result 不再可能冒充完成（审计 ID37）**：`writePiLauncher` 的启动前清场是唯一防线——一旦清场失败、或同 stem 的历史 attempt 残留了别的 result，等待端会把它的 `__EXIT__` 当成本单元的完成。现在等待端核对 result 携带的完成 token 与本单元 token 一致才认，不一致一律 fail-closed（`Pi foreign result rejected (token mismatch)`）；不带 token 的 result 保持旧行为。可红判据：`test/pi-runtime.test.mjs`。
