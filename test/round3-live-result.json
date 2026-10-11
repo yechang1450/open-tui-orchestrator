@@ -16,7 +16,7 @@
       "unit": "adapter (real codex CLI, ConPTY carrier)",
       "spawnMode": "headless",
       "workspace": "%TEMP%\\orch-t4-ws (a path pre-trusted in the user's config.toml)",
-      "request": "在 proj-81 目录创建 hello.txt…；在 proj-84 目录创建 world.txt…",
+      "request": "在 proj-07 目录创建 hello.txt…；在 proj-08 目录创建 world.txt…",
       "passed": true,
       "blocks": 2,
       "capacity": 2,
@@ -24,7 +24,7 @@
       "bothBlocksRunningTogether": true,
       "board": "0/2 verified [B1▶ B2▶] → 2/2 verified [B1✓ B2✓] finalized success=true",
       "taskResults": {"T001": "verified", "T002": "verified"},
-      "receipts": ["proj-81/hello.txt => hello", "proj-84/world.txt => world"],
+      "receipts": ["proj-07/hello.txt => hello", "proj-08/world.txt => world"],
       "visibleWindows": 0,
       "elapsedSec": 92.5
     },
@@ -36,7 +36,7 @@
       "workspace": "%TEMP%\\o2o-exec3\\untrusted-ws (deliberately NOT in config.toml trust list)",
       "passed": true,
       "observations": [
-        "two visible Windows Terminal popups really appeared: proj-81 [VISIBLE hwnd=0xF408C8 rect=165,172,1574,925 foreground=true], proj-84 [VISIBLE hwnd=0xDD07CE rect=166,196,1599,949 foreground=true]",
+        "two visible Windows Terminal popups really appeared: proj-07 [VISIBLE hwnd=0xF408C8 rect=165,172,1574,925 foreground=true], proj-08 [VISIBLE hwnd=0xDD07CE rect=166,196,1599,949 foreground=true]",
         "both blocks went to ▶ running and produced ZERO task checkpoints for 200s: the in-window codex was sitting on the 'do you trust this directory' prompt",
         "the engine never faked success (no verified tasks)",
         "found and fixed while observing: the session-less wait branch had only the run ceiling (ORCH_UNIT_TIMEOUT_MS, 45 min default) and no first-checkpoint deadline, so the ledger sat at ▶ running without naming the cause"

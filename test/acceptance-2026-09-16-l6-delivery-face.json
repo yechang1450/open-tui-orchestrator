@@ -43,8 +43,8 @@
   "installedCopyRun": {
     "channel": "caller-driven (--plan-file + --unit-cmd-file + --acceptance-file) - zero model calls",
     "entry": "D:/temp/orch-coldinstall-099/node_modules/open-tui-orchestrator/cli.mjs",
-    "request": "在项目81创建文件 alpha.txt 内容 ALPHA_OK；在项目84创建文件 beta.txt 内容 BETA_OK",
-    "board": ["0/2 verified 2 waiting [B1· B2·]", "spawned headless caller-script unit: proj-81", "spawned headless caller-script unit: proj-84", "1/2 verified [B1✓ B2…]", "1/2 verified [B1✓ B2▶]", "2/2 verified [B1✓ B2✓] finalized success=true"],
+    "request": "在项目A创建文件 alpha.txt 内容 ALPHA_OK；在项目B创建文件 beta.txt 内容 BETA_OK",
+    "board": ["0/2 verified 2 waiting [B1· B2·]", "spawned headless caller-script unit: proj-07", "spawned headless caller-script unit: proj-08", "1/2 verified [B1✓ B2…]", "1/2 verified [B1✓ B2▶]", "2/2 verified [B1✓ B2✓] finalized success=true"],
     "products": { "alpha.txt": "ALPHA_OK", "beta.txt": "BETA_OK" },
     "productHashes": {
       "alpha.txt": "5b59da964685d6c01cad12c216a305f5cddd95dfb66f3bbebd19111d0f7abe10",
@@ -61,7 +61,7 @@
     "finding": "the L10 patrol tools hardcoded a local user path - a regression against the 2026-09-14 identity scrub; the public-readiness identity claim had become false again",
     "fix": {
       "orch-patrol.py": "NODE_DIR / CODEX_BIN now derive from os.path.expanduser('~/.tools/...')",
-      "orch-patrol-install.ps1": "$repo/$python/$launchers now Join-Path $HOME; the generated VBS expands %USERPROFILE% at runtime; task registration switched to schtasks /Create (PS-native Register-ScheduledTask is refused unelevated on this machine, 0x80070005 - same workaround as 83-level-patrol); uninstall switched to schtasks /Delete"
+      "orch-patrol-install.ps1": "$repo/$python/$launchers now Join-Path $HOME; the generated VBS expands %USERPROFILE% at runtime; task registration switched to schtasks /Create (PS-native Register-ScheduledTask is refused unelevated on this machine, 0x80070005 - same workaround as an earlier local patrol); uninstall switched to schtasks /Delete"
     },
     "verification": [
       "identity scan -- tools => 0 non-handle hits",

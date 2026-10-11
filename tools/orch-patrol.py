@@ -6,7 +6,7 @@
 `node scripts/gate.mjs --all`（仓内，5 条判据）。但「机器化」还差一步：判定要由机器按时跑、
 结论要绑在每个提交上，而不是等人自觉。本脚本就是这一步，挂进 Windows 计划任务
 `orch-level-patrol`（每 15 分钟、隐藏窗口、执行结果进任务历史；安装件
-`tools/orch-patrol-install.ps1`，抄 83 patrol.py + VBS 隐藏窗形态）。
+`tools/orch-patrol-install.ps1`，参照既有 patrol 形态 + VBS 隐藏窗）。
 
 - 定时巡逻（每个 tick，非侵入）：
   ① 仓库：HEAD / 分支 / 脏树计数；② node24 运行时就位（判不了=红，不静默）；

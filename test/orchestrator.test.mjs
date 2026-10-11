@@ -209,15 +209,15 @@ test('scanTaskComplete: 只接受当前 turn 的结构化 task_complete', () => 
 });
 test('orchestrate-sdk classifyBlockComplexity', () => {
   // "修复" 命中分析/决策正则 -> 复杂（可能走 LLM 原型）
-  assert.equal(classifyBlockComplexity('修复A'), true);
-  assert.equal(classifyBlockComplexity('修复A并重启B且安装C并测试D'), true);
+  assert.equal(classifyBlockComplexity('修复07'), true);
+  assert.equal(classifyBlockComplexity('修复07并重启B且安装C并测试D'), true);
   // 无动作词的简短指令 -> 简单
   assert.equal(classifyBlockComplexity('新建文件 readme.txt'), false);
   assert.equal(classifyBlockComplexity(''), false);
 });
 test('orchestrate-sdk conflictByKeys', () => {
   // 无活窗 -> 返回 null（无冲突）
-  assert.equal(conflictByKeys(['file:D:/workspace/build/81', 'port:8081']), null);
+  assert.equal(conflictByKeys(['file:D:/your-project/build/07', 'port:7007']), null);
 });
 test('orchestrate-sdk appendModelEffortArgs injects -m/-c and is space-guarded', () => {
   // 显式设 env 保证确定性（默认已改为自动取 config.toml 主对话 model、effort 默认 xhigh，避免依赖宿主 config）。
@@ -248,7 +248,7 @@ test('orchestrate-sdk classifyExecutionMode: read-only -> inline, real -> execut
   // 只读词（分析，无真实动作词）-> inline（命中确定性快判，不触发 LLM）
   assert.equal(await classifyExecutionMode('分析一下布局是否有问题'), 'inline');
   // 真实动作词（修复）-> execute（命中确定性快判，不触发 LLM）
-  assert.equal(await classifyExecutionMode('修复 80 的空白区域'), 'execute');
+  assert.equal(await classifyExecutionMode('修复 07 的空白区域'), 'execute');
   assert.deepEqual(windowExecutionPolicy([{ title: 'single', type: 'independent', dependsOn: [], tasks: [] }]), {
     mode: 'inline', reason: 'single-block', windowCount: 0,
   });
@@ -273,42 +273,42 @@ test('orchestrate-sdk sessionDir honors ORCH_SESSION_DIR override (agent-generic
   assert.ok(sessionDir().endsWith(path.join('.codex', 'sessions')));
 });
 test('orchestrate-sdk trySingleBlock returns null for multi-project request', () => {
-  const r = trySingleBlock('修复 D:\\workspace\\build\\81 登录页、优化 D:\\workspace\\build\\82 UI');
+  const r = trySingleBlock('修复 D:\\your-project\\build\\07 登录页、优化 D:\\your-project\\build\\08 UI');
   assert.equal(r, null);
 });
 test('orchestrate-sdk trySingleBlock single project + single action -> block', () => {
-  const r = trySingleBlock('修复 D:\\workspace\\build\\81 登录页');
+  const r = trySingleBlock('修复 D:\\your-project\\build\\07 登录页');
   assert.ok(r && r.blocks.length === 1);
-  assert.equal(r.blocks[0].title, 'proj-81');
-  assert.deepEqual(r.blocks[0].conflictKeys, ['dir:proj-81']);
+  assert.equal(r.blocks[0].title, 'proj-07');
+  assert.deepEqual(r.blocks[0].conflictKeys, ['dir:proj-07']);
 });
 test('orchestrate-sdk trySingleBlock no action -> null', () => {
   assert.equal(trySingleBlock('看看目录结构'), null);
   assert.equal(trySingleBlock(''), null);
 });
 test('orchestrate-sdk genericProjectSplit splits multi-project sentences', () => {
-  const r = genericProjectSplit('修复 D:\\workspace\\build\\81 登录页；优化 D:\\workspace\\build\\82 UI');
+  const r = genericProjectSplit('修复 D:\\your-project\\build\\07 登录页；优化 D:\\your-project\\build\\08 UI');
   assert.ok(r && r.blocks.length >= 2);
   const titles = r.blocks.map((b) => b.title);
-  assert.ok(titles.includes('proj-81'));
-  assert.ok(titles.includes('proj-82'));
+  assert.ok(titles.includes('proj-07'));
+  assert.ok(titles.includes('proj-08'));
 });
 test('orchestrate-sdk genericProjectSplit returns null for single project', () => {
-  assert.equal(genericProjectSplit('修复 D:\\workspace\\build\\81 登录页'), null);
+  assert.equal(genericProjectSplit('修复 D:\\your-project\\build\\07 登录页'), null);
 });
 test('orchestrate-sdk genericProjectSplit splits comma-separated bare projects -> parallel blocks', () => {
-  const r = genericProjectSplit('修复81的空白，优化82的UI');
+  const r = genericProjectSplit('修复07的空白，优化08的UI');
   assert.ok(r && r.blocks && r.blocks.length === 2, 'two comma-separated projects must split into 2 blocks');
-  assert.deepEqual(new Set(r.blocks.map((b) => b.title)), new Set(['proj-81', 'proj-82']));
+  assert.deepEqual(new Set(r.blocks.map((b) => b.title)), new Set(['proj-07', 'proj-08']));
   // 单项目 + 逗号续句（不带项目号）-> 保守返回 null（交 LLM，不误拆）
-  assert.equal(genericProjectSplit('优化81的UI，让它更美观'), null);
+  assert.equal(genericProjectSplit('优化07的UI，让它更美观'), null);
 });
 test('orchestrate-sdk loadCachedDecompose returns null for empty cache', () => {
-  assert.equal(loadCachedDecompose('修复 81 登录页'), null);
+  assert.equal(loadCachedDecompose('修复登录页'), null);
 });
 test('orchestrate-sdk blockPrompt: run-windows block prompt embeds a real ASCII token, no bare 完成', () => {
   // 复刻 --run-windows 生成块 prompt 的精确拼接：buildBlockPrompt(blockBody, tk) + "\n" + auth
-  const body = '仅处理项目 proj-81。任务：修复登录页；优化 UI。不要处理其它项目编号。\n上面任务之间互相独立、互不依赖：并行执行，互不等待。全部完成后汇总结果。';
+  const body = '仅处理项目 proj-07。任务：修复登录页；优化 UI。不要处理其它项目编号。\n上面任务之间互相独立、互不依赖：并行执行，互不等待。全部完成后汇总结果。';
   const token = 'B1-abc123-4f2g9z'; // 真实非空 ASCII（r.key-rid-随机 base36）
   const auth = '\n\n（用户已明确、反复授权「同意推进，允许执行」……）\n执行完即可结束本窗、汇报。';
   const prompt = buildBlockPrompt(body, token) + '\n' + auth;
@@ -342,8 +342,8 @@ test('orchestrate-sdk levelWaves rejects malformed dependencies and enforces val
 });
 
 test('orchestrate-sdk decomposeHash: cache key is hints-aware (no cross-project collision)', () => {
-  const a = { moduleToProj: { 会员管理: '82' }, foldRules: {}, tailKeywords: [] };
-  const b = { moduleToProj: { 会员管理: '81' }, foldRules: {}, tailKeywords: [] };
+  const a = { moduleToProj: { 会员管理: '07' }, foldRules: {}, tailKeywords: [] };
+  const b = { moduleToProj: { 会员管理: '08' }, foldRules: {}, tailKeywords: [] };
   const h1 = decomposeHash('修复会员管理', a);
   const h2 = decomposeHash('修复会员管理', b);
   const h3 = decomposeHash('修复会员管理', a);
@@ -653,7 +653,7 @@ test('orchestrate-sdk: 窗内不使用子代理（shared-file/sub-agent 不再�
   assert.doesNotMatch(srcTpl, /子代理任务正文走共享文件|等子代理返回|必须先 spawn|TUI 窗管好自己的子代理/, 'prompt must NOT instruct sub-agent usage');
   // SDK 逻辑不硬编码绝对路径
   const src = fs.readFileSync(path.join(scripts, 'core', 'orchestrate-sdk.mjs'), 'utf8');
-  assert.doesNotMatch(src, /D:\\build\\82/, 'must not hardcode absolute build path inside SDK logic');
+  assert.doesNotMatch(src, /[A-Za-z]:\\build\\\d+/, 'must not hardcode absolute build path inside SDK logic');
 });
 
 test('runtime: launcher survives a vanished result dir (plugin upgrade wipe) -> recreates it, writes .self-closed, exits 0', async () => {
@@ -1020,8 +1020,8 @@ test('orchestrate-sdk extractTasks: 解析裸 JSON 对象/数组/带围栏代码
 });
 
 test('orchestrate-sdk classifyPrompt: 含请求 + 模块映射提示 + 关键约束', () => {
-  const p = classifyPrompt('修82登录页', { moduleToProj: { 登录: '82' } });
-  assert.ok(p.includes('修82登录页'), 'must embed the request');
+  const p = classifyPrompt('修07登录页', { moduleToProj: { 登录: '07' } });
+  assert.ok(p.includes('修07登录页'), 'must embed the request');
   assert.ok(p.includes('已知模块→项目映射'), 'must mention module->project mapping when hints given');
   assert.ok(p.includes('不要分块、不要合并、不要执行'), 'must forbid chunking/merging/executing');
   assert.match(p, /TODO LIST/);
@@ -1039,9 +1039,9 @@ test('orchestrate-sdk resolveHints: 无 env 时默认 tail 关键词 + 命中 en
     let h = resolveHints();
     assert.ok(Array.isArray(h.tailKeywords) && h.tailKeywords.includes('清爽'), 'default tail keywords must include 清爽');
     assert.deepEqual(h.moduleToProj, {}, 'no module-to-proj without env hints');
-    process.env.ORCH_TASK_HINTS = JSON.stringify({ 会员管理: '82' });
+    process.env.ORCH_TASK_HINTS = JSON.stringify({ 会员管理: '07' });
     h = resolveHints();
-    assert.equal(h.moduleToProj['会员管理'], '82', 'must parse ORCH_TASK_HINTS JSON');
+    assert.equal(h.moduleToProj['会员管理'], '07', 'must parse ORCH_TASK_HINTS JSON');
     process.env.ORCH_TASK_TAIL = JSON.stringify(['foo','bar']);
     h = resolveHints();
     assert.deepEqual(h.tailKeywords, ['foo','bar'], 'must parse ORCH_TASK_TAIL JSON');
@@ -1054,21 +1054,21 @@ test('orchestrate-sdk resolveHints: 无 env 时默认 tail 关键词 + 命中 en
 
 test('orchestrate-sdk buildBlocksFromTasks: 按项目分组并保留模型标记已完成或不可行的任务', () => {
   const b = buildBlocksFromTasks([
-    { id: 'a', summary: '修81登录页', project: '81', kind: 'project' },
-    { id: 'b', summary: '修82购物车', project: '82', kind: 'project' },
+    { id: 'a', summary: '修07登录页', project: '07', kind: 'project' },
+    { id: 'b', summary: '修08购物车', project: '08', kind: 'project' },
     { id: 't', summary: '跑一个脚本', kind: 'tool' },
     { id: 'x', summary: '已完成的活', already_done: true },
     { id: 'y', summary: '不可行的活', feasible: false },
-    { id: 'z', summary: '', project: '81' },
+    { id: 'z', summary: '', project: '07' },
   ]);
   // 模型状态不能删任务；空摘要由原始任务清单兜底。
   assert.ok(Array.isArray(b), 'must return an array of blocks');
   assert.ok(b.length >= 1, 'must produce task blocks');
   assert.match(JSON.stringify(b),/已完成的活/);assert.match(JSON.stringify(b),/不可行的活/);
   // 含模块映射：摘要提到模块但没写项目号 -> 归位
-  const b2 = buildBlocksFromTasks([{ id: 'm', summary: '整理会员管理', kind: 'project' }], { moduleToProj: { 会员管理: '82' } });
+  const b2 = buildBlocksFromTasks([{ id: 'm', summary: '整理会员管理', kind: 'project' }], { moduleToProj: { 会员管理: '07' } });
   const flat = JSON.stringify(b2);
-  assert.ok(flat.includes('82'), 'must map module to project when project not stated');
+  assert.ok(flat.includes('proj-07'), 'must map module to project when project not stated');
   // 无归属 tool -> 走串行(linked), 绝不并行孤儿
   const b3 = buildBlocksFromTasks([{ id: 's', summary: 'node --version', kind: 'tool' }], {});
   const flat3 = JSON.stringify(b3);
@@ -1093,8 +1093,8 @@ test('buildPsArrayLit: 不含空格时与旧式 split 拼接等价（不回归�
 });
 
 test('blockKeys: 无 conflictKeys 时回退到 __<title>, 不返回空数组', () => {
-  assert.deepEqual(blockKeys({ title: '修复81', conflictKeys: [] }), ['__修复81']);
-  assert.deepEqual(blockKeys({ title: '修复81' }), ['__修复81']);
+  assert.deepEqual(blockKeys({ title: '修复07', conflictKeys: [] }), ['__修复07']);
+  assert.deepEqual(blockKeys({ title: '修复07' }), ['__修复07']);
   assert.deepEqual(blockKeys({ title: 'x', conflictKeys: ['dir:A'] }), ['dir:A']);
   assert.deepEqual(blockKeys({ title: 'x', conflictKeys: null }), ['__x']);
 });
@@ -1178,8 +1178,8 @@ test('levelWaves: 循环依赖/无依赖/空输入', () => {
 });
 
 test('decomposeHash: 相同请求+相同 hints 稳定, 不同 hints 不同', () => {
-  const a = { moduleToProj: { 会员: '82' }, foldRules: {}, tailKeywords: [] };
-  const b = { moduleToProj: { 会员: '82' }, foldRules: { 清理: ['82'] }, tailKeywords: [] };
+  const a = { moduleToProj: { 会员: '07' }, foldRules: {}, tailKeywords: [] };
+  const b = { moduleToProj: { 会员: '07' }, foldRules: { 清理: ['07'] }, tailKeywords: [] };
   assert.equal(decomposeHash('修会员', a), decomposeHash('修会员', a), '相同->相同');
   assert.notEqual(decomposeHash('修会员', a), decomposeHash('修会员', b), '不同 hints->不同');
   assert.equal(decomposeHash('', {}), decomposeHash('', {}), '空请求稳定');
@@ -1188,7 +1188,7 @@ test('decomposeHash: 相同请求+相同 hints 稳定, 不同 hints 不同', () 
 test('applyAuthPromptPolicy + SDK 路径: 输出契约无 SUBAGENTS_DONE 后缀 + SDK 逻辑不硬编码绝对路径', () => {
   const src = fs.readFileSync(path.join(scripts, 'core', 'orchestrate-sdk.mjs'), 'utf8');
   assert.doesNotMatch(src, /ORCH_SUBTASK_DIR/, 'subtask dir must be removed (no shared-file carrier)');
-  assert.doesNotMatch(src, /D:\\build\\82/, 'no hardcoded build/82 path in SDK logic');
+  assert.doesNotMatch(src, /[A-Za-z]:\\build\\\d+/, 'no hardcoded absolute build path in SDK logic');
   assert.equal(applyAuthPromptPolicy('无子句'), '无子句', '无匹配原样');
 });
 ﻿

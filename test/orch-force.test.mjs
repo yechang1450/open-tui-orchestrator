@@ -43,7 +43,7 @@ function setup() {
 }
 
 const run = (env, extra = []) => {
-  const result = spawnSync(process.execPath, [path.join(root, 'cli.mjs'), ...extra, '--run-windows', '修复项目81登录页'], { cwd: env.__ws, env: (() => { const e = { ...env, WORKSPACE_DIR: env.__ws, ORCH_STATE_DIR: path.join(env.__ws, 'temp', 'orchestrator') }; delete e.__ws; return e; })(), encoding: 'utf8', windowsHide: true, timeout: RUN_TIMEOUT_MS });
+  const result = spawnSync(process.execPath, [path.join(root, 'cli.mjs'), ...extra, '--run-windows', '修复登录页'], { cwd: env.__ws, env: (() => { const e = { ...env, WORKSPACE_DIR: env.__ws, ORCH_STATE_DIR: path.join(env.__ws, 'temp', 'orchestrator') }; delete e.__ws; return e; })(), encoding: 'utf8', windowsHide: true, timeout: RUN_TIMEOUT_MS });
   if (result.error?.code === 'ETIMEDOUT' || result.signal || result.status === null) {
     if (Number.isInteger(result.pid) && result.pid > 0) {
       try { spawnSync('taskkill', ['/PID', String(result.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' }); } catch { /* best-effort cleanup */ }

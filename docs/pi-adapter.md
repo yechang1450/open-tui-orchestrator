@@ -8,7 +8,7 @@ open-tui-orchestrator 支持已安装的 Codex CLI 和 pi CLI。专用 codex-TUI
 
 ```powershell
 open-tui-orchestrator --agent pi --doctor
-open-tui-orchestrator --agent pi --run-id my-run --acceptance-file D:/work/temp/acceptance.json --run-windows '项目91：修改页面，运行测试；项目92：修改接口，检查结果'
+open-tui-orchestrator --agent pi --run-id my-run --acceptance-file D:/work/temp/acceptance.json --run-windows '项目A：修改页面，运行测试；项目B：修改接口，检查结果'
 open-tui-orchestrator --agent pi --resume-run my-run
 ```
 

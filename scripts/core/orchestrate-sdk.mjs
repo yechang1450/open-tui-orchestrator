@@ -153,7 +153,7 @@ function assertUnitCarrierReady() {
   return carrier;
 }
 // Non-codex window completion is a launcher-written result file; each adapter owns its wait.
-const waitAdapterResult=(rf,timeout,pidf,token)=>AGENT.agent==='opencode'?waitOpenCodeResult(rf,timeout,pidf):AGENT.agent==='kimi'?waitKimiResult(rf,timeout,pidf):(AGENT.config.profile||AGENT.config.unit)?waitProfileResult(rf,timeout,pidf):waitPiResult(rf,timeout,pidf);
+const waitAdapterResult=(rf,timeout,pidf,token)=>AGENT.agent==='opencode'?waitOpenCodeResult(rf,timeout,pidf):AGENT.agent==='kimi'?waitKimiResult(rf,timeout,pidf):(AGENT.config.profile||AGENT.config.unit)?waitProfileResult(rf,timeout,pidf):waitPiResult(rf,timeout,pidf,token);
 const CODEX = String(AGENT.config?.bin || '');
 // PowerShell 单引号字符串内嵌路径：把 ' 转义成 ''，避免路径含引号时破坏脚本/注入。
 // 仅当 PYTHON 是真实存在的绝对路径时，才把它所在目录前置进窗内 PATH；
@@ -300,7 +300,7 @@ function threadBase() {
 // 既利用 LLM 的语义判断，又不依赖它稳定产出复杂嵌套 blocks JSON（此前 DeepSeek 常 agentic/空输出）。
 // ============================================================================
 // 模块→项目 归属提示（通用、非硬编码）：调用方经 ORCH_TASK_HINTS 传 JSON 映射，
-// 例 {"会员管理":"82","商品与分类":"82","订单管理":"82"}。用于把「没写项目号但属于某项目」的任务归位。
+// 例 {"会员管理":"P1","商品与分类":"P1","订单管理":"P1"}。用于把「没写项目号但属于某项目」的任务归位。
 function resolveHints() {
   const hints = { moduleToProj: {}, foldRules: {}, tailKeywords: ['清爽','清理','保持干净','收尾','整理'] };
   try {
@@ -326,7 +326,7 @@ function classifyPrompt(request, hints = {}) {
   return (
     "你是任务定性分析器，只做一件事：先建立完整 TODO LIST，再把下面请求拆成「扁平任务清单」，不要分块、不要合并、不要执行。" +
     "每个自然任务一条，字段如下：id(字符串编号)、summary(保留原意的一句话)、kind(project|tool|system)、" +
-    "project(80|81|82|83，只在请求里明确写了才填，否则填 null)、" +
+    "project(请求里明确写出的项目编号（原样保留）；未写明则填 null)、" +
     "hint(该任务涉及模块/资源关键词，如 会员管理、商品、订单)、" +
     "conflict_hints(该任务会改动的具体文件/模块/资源关键词数组，越具体越好，如 [\"file:src/order.js\",\"db:订单\",\"dir:管理端\"]；同项目内资源不重叠的任务会被拆成并行窗口，所以每个 project 任务都必须尽量给出，实在不确定才 [])、" +
     "depends_on(依赖的其它任务 id 数组，无则 [])、" +
@@ -626,7 +626,7 @@ function extractTasks(raw) {
 }
 /**
  * 【确定性拆块 · 面向 open-code-review 方向】不依赖 LLM，按请求里显式提及的项目目录
- * （build/80、build/81、build/82、build/83，或任意 build/<N>）把任务拆成独立块，秒级返回。
+ * （形如 build/<N> 的项目目录）把任务拆成独立块，秒级返回。
  * 用于「按项目/目录并行」这类高确定性的场景，避免 LLM 分类慢/不稳。
  * 若请求未明确提及多个项目目录，返回 null（交给 LLM 拆块）。
  */
@@ -642,7 +642,7 @@ function extractTasks(raw) {
 // deleting the cache file) resets it, so ANY user who installs this
 // orchestrator gets "the more you use it, the faster it gets" without any
 // hardcoded project paths. Deterministic safety heuristic below is generic
-// (any mention of multiple distinct project-like dirs), not specific to build/80|81|82|83.
+// (any mention of multiple distinct project-like dirs), not tied to any fixed project numbering.
 // ---------------------------------------------------------------------------
 const DECOMPOSE_CACHE = path.join(STATE_DIR, "orchestrator-decompose-cache.json");
 // ---------------------------------------------------------------------------
@@ -754,7 +754,7 @@ function saveDecompose(request, plan, hints) {
   saveDecomposeCache(j);
   });
 }
-// Generic deterministic aid (NOT hardcoded to build/80|81|82|83): if the request
+// Generic deterministic aid (not tied to any fixed project numbering): if the request
 // names several distinct existing project-like dirs, split them into independent
 // windows. Returns null when ambiguous, so the LLM handles the rest.
 function genericProjectSplit(request) {
@@ -764,7 +764,7 @@ function genericProjectSplit(request) {
   const re = /(?:^|[\s,/\\])(?:build|proj|project|app|src|workspace|web|site|game)[\s/\\]+(\d{1,3})(?=\D|$)/gi;
   let m;
   while ((m = re.exec(request))) { const n = m[1]; if (n) dirs.add("proj-" + n); }
-  // fallback: bare standalone 2-digit project numbers (e.g. "给80的前端", "81登录页")
+  // fallback: bare standalone 2-digit project numbers (e.g. "给07的前端", "08登录页")
   const bareRe = /(?<![0-9])(\d{2})(?![0-9])/g;
   while ((m = bareRe.exec(request))) { const n = m[1]; if (n) dirs.add("proj-" + n); }
   if (dirs.size < 2) return null;

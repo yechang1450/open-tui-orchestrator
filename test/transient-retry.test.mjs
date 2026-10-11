@@ -47,8 +47,8 @@ function harness({workspace, runId, checksValue, shortLive = true, attempt1Ms = 
         if (!attempt1NoCheckpoint) spawnSync(process.execPath, [checkpointHelper, attemptFile(attempt), 'T001', 'started'], {windowsHide: true, timeout: 15000});
         return {done: false, exitCode: 1};                 // 启动即死：无终态检查点
       }
-      fs.mkdirSync(path.join(workspace, 'proj-81'), {recursive: true});
-      fs.writeFileSync(path.join(workspace, 'proj-81', 'alpha.txt'), 'ALPHA_OK', 'utf8');
+      fs.mkdirSync(path.join(workspace, 'proj-07'), {recursive: true});
+      fs.writeFileSync(path.join(workspace, 'proj-07', 'alpha.txt'), 'ALPHA_OK', 'utf8');
       // 契约要求 started → completed 顺序（缺 started 时 completed 会被检查点工具拒绝）。
       spawnSync(process.execPath, [checkpointHelper, attemptFile(attempt), 'T001', 'started'], {windowsHide: true, timeout: 15000});
       spawnSync(process.execPath, [checkpointHelper, attemptFile(attempt), 'T001', 'completed'], {windowsHide: true, timeout: 15000});
@@ -67,7 +67,7 @@ function harness({workspace, runId, checksValue, shortLive = true, attempt1Ms = 
   const sessionFile = path.join(workspace, 'fake-session.jsonl');
   fs.writeFileSync(sessionFile, 'start\n', 'utf8');
   fs.writeFileSync(acceptanceFile, JSON.stringify({
-    T001: {checks: [{type: 'file', path: 'proj-81/alpha.txt'}], ...(checksValue === undefined ? {} : {retrySafe: checksValue})},
+    T001: {checks: [{type: 'file', path: 'proj-07/alpha.txt'}], ...(checksValue === undefined ? {} : {retrySafe: checksValue})},
   }), 'utf8');
   return {hooks, acceptanceFile, kids, spawned: () => spawned, attempts: () => attempt};
 }

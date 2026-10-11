@@ -9,7 +9,7 @@
 #
 # Decision (2026-09-15): judging runs on the equivalent LOCAL gate instead —
 #   node scripts/gate.mjs --all    # one command, five criteria, red-capable, command/expected/actual
-#   plus a scheduled patrol (the schtasks pattern the 83 line uses) when a project wants it.
+#   plus a scheduled patrol (the schtasks-based pattern) when a project wants it.
 # See docs/public-readiness.md item 3.
 name: CI
 

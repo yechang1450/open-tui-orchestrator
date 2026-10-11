@@ -121,3 +121,22 @@ test('pi result wait survives a malformed or unreadable pid file without a false
   assert.equal(r3.done,true);assert.equal(r3.exitCode,1);
  }finally{fs.rmSync(dir,{recursive:true,force:true});}
 });
+test('pi wait rejects a foreign result whose token does not belong to this unit (audit ID37)',async()=>{
+ const dir=fs.mkdtempSync(path.join(family,'pi-foreign-'));
+ try{
+  const rf=path.join(dir,'win-B1-x.result.json');
+  // 写者清理失败或残留的 foreign result：自带另一个单元的完成 token。它不得被当作本单元的完成。
+  fs.writeFileSync(rf,JSON.stringify({__EXIT__:0,__REPORT__:'foreign said done',token:'OTHER-UNIT-TOKEN'}));
+  const r=await waitPiResult(rf,600,null,'EXPECTED-TOKEN');
+  assert.equal(r.done,true);
+  assert.equal(r.exitCode,1,'a foreign result must not be trusted as completion');
+  assert.match(r.text,/foreign result rejected/i);
+  // 本单元自己的 token：正常放行。
+  fs.writeFileSync(rf,JSON.stringify({__EXIT__:0,__REPORT__:'ok',token:'EXPECTED-TOKEN'}));
+  const r2=await waitPiResult(rf,600,null,'EXPECTED-TOKEN');
+  assert.equal(r2.exitCode,0);assert.equal(r2.text,'ok');
+  // 未传 expectToken：保持旧行为（不破坏既有调用）。
+  const r3=await waitPiResult(rf,600,null);
+  assert.equal(r3.exitCode,0);
+ }finally{fs.rmSync(dir,{recursive:true,force:true});}
+});

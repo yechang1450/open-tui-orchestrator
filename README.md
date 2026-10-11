@@ -47,10 +47,10 @@ Run commands from the workspace that should own the run; do not change into the 
 
 ```powershell
 node cli.mjs --agent codex --doctor
-node cli.mjs --agent codex --workspace 'D:\your-project' --plan 'Fix project 81 login page and optimize project 82 cart'
-node cli.mjs --agent codex --workspace 'D:\your-project' --run-windows 'Fix project 81 login page and optimize project 82 cart'
-node cli.mjs --tasks 'Fix project 81 login page; optimize project 82 cart'
-node cli.mjs --plan-file plan.json --unit-cmd-file unit.json --run-windows 'Fix project 81 login page; optimize project 82 cart'
+node cli.mjs --agent codex --workspace 'D:\your-project' --plan 'Fix the login page and optimize the cart'
+node cli.mjs --agent codex --workspace 'D:\your-project' --run-windows 'Fix the login page and optimize the cart'
+node cli.mjs --tasks 'Fix the login page; optimize the cart'
+node cli.mjs --plan-file plan.json --unit-cmd-file unit.json --run-windows 'Fix the login page; optimize the cart'
 ```
 
 `--plan` only plans; a fresh `--run-windows` opens windows only when a parallel wave exists; `--resume-run <id>` adopts a saved run after an interruption; `--verify-run <id>` rechecks a run without executing tasks; `--status --readonly` reports windows, leases and active-run board rows; `--watch <id> [--jsonl]` streams the run board read-only; and `orch` is the force-execute entry — it runs `--run-windows` with every inline fallback bypassed (except the maintenance lock). Any agent can call the orchestrator with no adapter at all: `--plan-file` takes the caller's own ledger/blocks (zero model calls in the whole run) and `--unit-cmd`/`--unit-cmd-file` supplies the unit command — see [docs/caller-driven.md](docs/caller-driven.md). Onboarding a new print-class CLI: `node scripts/adapt.mjs` — see [docs/adapt.md](docs/adapt.md). While maintaining the orchestrator itself, `node scripts/maintenance-lock.mjs lock --reason "why"` pauses every action entry point until unlocked — see [docs/maintenance-lock.md](docs/maintenance-lock.md).
@@ -73,4 +73,4 @@ An unknown host, missing CLI or invalid explicit path fails with a diagnostic.
 
 ## Validation status
 
-The current generic core is 0.9.24-1, with 511/511 offline tests passing. The local release judge is `node scripts/gate.mjs --all` — L1 offline suite, L2 host resolution plus a must-fail canary (the criteria themselves can still go red), L3 clean unknown-run failure, L4 version / seal / docs / suite-total cross-check. Every core or runtime change requires a fresh `release-integrity --seal`. Details and evidence: [docs/release-policy.md](docs/release-policy.md).
+The current generic core is 0.9.24-1, with 513/513 offline tests passing. The local release judge is `node scripts/gate.mjs --all` — L1 offline suite, L2 host resolution plus a must-fail canary (the criteria themselves can still go red), L3 clean unknown-run failure, L4 version / seal / docs / suite-total cross-check. Every core or runtime change requires a fresh `release-integrity --seal`. Details and evidence: [docs/release-policy.md](docs/release-policy.md).

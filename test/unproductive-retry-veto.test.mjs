@@ -41,8 +41,8 @@ function makeHarness({workspace, runId}) {
     wait: async () => {
       attempt += 1;
       if (attempt === 1) return {done: false, exitCode: 1};
-      fs.mkdirSync(path.join(workspace, 'proj-81'), {recursive: true});
-      fs.writeFileSync(path.join(workspace, 'proj-81', 'alpha.txt'), 'ALPHA_OK', 'utf8');
+      fs.mkdirSync(path.join(workspace, 'proj-07'), {recursive: true});
+      fs.writeFileSync(path.join(workspace, 'proj-07', 'alpha.txt'), 'ALPHA_OK', 'utf8');
       spawnSync(process.execPath, [checkpointHelper, attemptFile(attempt), 'T001', 'started'], {windowsHide: true, timeout: 15000});
       spawnSync(process.execPath, [checkpointHelper, attemptFile(attempt), 'T001', 'completed'], {windowsHide: true, timeout: 15000});
       return {done: true, exitCode: 0};
@@ -60,7 +60,7 @@ function makeHarness({workspace, runId}) {
     },
   };
   const acceptanceFile = path.join(workspace, 'acceptance.json');
-  fs.writeFileSync(acceptanceFile, JSON.stringify({T001: {retrySafe: false, checks: [{type: 'file', path: 'proj-81/alpha.txt'}]}}), 'utf8');
+  fs.writeFileSync(acceptanceFile, JSON.stringify({T001: {retrySafe: false, checks: [{type: 'file', path: 'proj-07/alpha.txt'}]}}), 'utf8');
   return {hooks, acceptanceFile, kids, attempts: () => attempt};
 }
 

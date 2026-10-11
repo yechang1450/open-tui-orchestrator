@@ -2,8 +2,8 @@
 # Generates the hidden-window VBS launcher, then registers the Windows Scheduled Task
 # 'orch-level-patrol' (every 15 minutes, hidden, exit code lands in task history).
 # Registration uses schtasks /Create (single-slash flags): the PS-native Register-ScheduledTask
-# gets refused unelevated on this machine (0x80070005) - same workaround as 83-level-patrol.
-# Pattern copied from 83-level-patrol (same machine, proven 2026-09-15):
+# gets refused unelevated on this machine (0x80070005) - same workaround as an earlier local patrol.
+# Pattern proven on this machine (2026-09-15):
 #   -WindowStyle Hidden is NOT enough; SW_HIDE at CreateProcess time is (window delta = 0).
 # ASCII-only on purpose (PS 5.1 reads BOM-less files as ANSI; keep this file pure ASCII).
 #
@@ -31,7 +31,7 @@ if (-not (Test-Path (Join-Path $repo 'tools\orch-patrol.py'))) { throw 'patrol s
 New-Item -ItemType Directory -Force -Path $launchers | Out-Null
 $vbs = @'
 ' Hidden launcher for Scheduled Task "orch-level-patrol" (runs every 15 minutes).
-' Same pattern as 83-level-patrol.vbs: SW_HIDE at CreateProcess time keeps the task
+' Same pattern as an earlier local patrol VBS: SW_HIDE at CreateProcess time keeps the task
 ' windowless (plain -WindowStyle Hidden leaves a blank Terminal behind).
 ' Exit code is propagated so the task history carries the verdict:
 '   0 = tick green/skip, 1 = tick red, 2 = internal error.

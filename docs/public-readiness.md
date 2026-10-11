@@ -1,6 +1,6 @@
 # 公开可用性差距清单（2026-09-14）
 
-> **当前状态（2026-10-11）**：仓库包版本为 `2026.10.11`，封印核心版本为 `0.9.24-1`（以 `package.json` 与 `release.json` 为准）。GitHub Actions workflow 已按仓库决策保留为 RETIRED（不上膛）；dependabot 配置已随公开前清理移除（不再自动开 PR）。当前发布判断以本机 `node scripts/gate.mjs --all` 为准。本文其余带日期、版本号和测试数量的条目是推进记录；除非明确标注当前状态，不应当作今天的运行结果。
+> **当前状态（2026-10-12）**：仓库包版本为 `26.10.12`，封印核心版本为 `0.9.24-1`（以 `package.json` 与 `release.json` 为准）。GitHub Actions workflow 已按仓库决策保留为 RETIRED（不上膛）；dependabot 配置已随公开前清理移除（不再自动开 PR）。当前发布判断以本机 `node scripts/gate.mjs --all` 为准。本文其余带日期、版本号和测试数量的条目是推进记录；除非明确标注当前状态，不应当作今天的运行结果。
 
 
 目标：让**外人**装得上、跑得起来、看得懂。每条都有验证方式；状态只有三种：**已具备** / **待补** / **需你决策**。
@@ -28,13 +28,14 @@
 
 1. ~~公开前的个人路径清理~~ **完成 2026-09-14**：18 个 tracked 文件、77 处用户名归一化为 `<user>`；根因一并修掉（证据采集器、画像适配器、hermes 画像 provenance）。验证：身份扫描结果只剩公开的 GitHub 句柄 `yechang1450`。
 2. ~~**npm 发布**~~ **已发布（最新＝0.9.9 · `latest` · 2026-09-17 00:27 +08）**：`open-tui-orchestrator@0.9.9` 已在 registry 上（93 文件 / 315.8 kB、shasum `4dc01c89…`、integrity `sha512-ceuO3vJb…`）。发布前对当轮 HEAD `f1ce647` 复绿：`node scripts/gate.mjs --all` = `ORCH_GATE: PASS — 5 criteria`（295/295）＋ `npm publish --dry-run` 面检同值。账号＝个人账号 unscoped（`npm whoami` = `yechang1450`；正名未被占）。**端到端烟测（0.9.9 · 冷前缀 `D:/temp/orch-coldinstall-099`）**：① `npm install open-tui-orchestrator` → `--version` = `0.9.9 (core 1.14.9)` → `--install-deps` = `{"ok":true,"action":"installed"}`（幂等复跑 `already-present`）→ `--agent codex --doctor` = `hostError=null / carrierAvailable=true`；② `npx --yes open-tui-orchestrator@latest --version` = `0.9.9 (core 1.14.9)`（任何 agent 从 PATH 即装的路径成立）。**历史**：0.9.6 = 2026-09-15 首发（93 文件 / 310.5 kB、shasum `4b16de76…`）。
-3. ~~CI~~ **弃用（用户令 2026-09-15）**：GitHub Actions 一律不用——私有仓被账户计费拦死（2026-09-15 实测：作业零步骤、3 秒失败），转公开也不再启用。**判定全部走本机等价门禁**：`node scripts/gate.mjs --all`（一条命令五判据 + 反例能红）＋ 定时巡逻（83 的 schtasks 法，需要时并入）。`.github/workflows/ci.yml` 仅作历史记录保留、不带任何触发。
+3. ~~CI~~ **弃用（用户令 2026-09-15）**：GitHub Actions 一律不用——私有仓被账户计费拦死（2026-09-15 实测：作业零步骤、3 秒失败），转公开也不再启用。**判定全部走本机等价门禁**：`node scripts/gate.mjs --all`（一条命令五判据 + 反例能红）＋ 定时巡逻（schtasks 法，需要时并入）。`.github/workflows/ci.yml` 仅作历史记录保留、不带任何触发。
 4. ~~公开文档面~~ **完成 2026-09-14**：`CHANGELOG.md`、`.github/ISSUE_TEMPLATE/bug_report.yml`、`SECURITY.md`（私密漏洞报告渠道 + 披露政策）、`CONTRIBUTING.md`（屋规：判据必须能红、封印纪律、数字对账）。
 5. ~~信任与安全声明~~ **完成 2026-09-14**：`docs/trust-and-safety.md`（隐藏 agent 以你的凭据运行、Codex 的 `--dangerously-bypass-approvals-and-sandbox`、`--unit-cmd` 属调用方自授权、写哪些文件、无遥测无后台服务、如何卸载），README/README-zh 首屏与 INSTALL 均给出一行摘要 + 链接。
 6. ~~平台声明~~ **完成 2026-09-14**：README/README-zh 首屏与 INSTALL「Requirements」均明写 **Windows-only**，其它平台直接给诊断。
 7. **外部首次验收——你的部分**：在一台干净的 Windows 机器/用户上走一遍（装 Node → 装包 → `--install-deps` → doctor → 双块真跑）。`docs/release-policy.md` 已把「不同 Windows 用户安装」列为发行门槛。
    **注意（2026-09-15 环境事实）**：本机 codex 账号额度耗尽（Sep 19 恢复）——模型驱动的真跑今天做不了；编排器在该条件下退化正确（inline 明说、无假成功），调用方自助通道（零模型调用）的真机双块验收已于 2026-09-15 通过。
 8. ~~验收证据去本地化~~ **完成 2026-09-14**。
+9. ~~公开面示例复查~~ **完成 2026-10-12**：README（中英）快速开始、适配器文档、CHANGELOG 历史条目、工具注释与全部测试夹具清除作者私有项目编号引用，统一改为中性占位（文本用 项目A/项目B，需为数字的项目编号用 07/08）；classify 提示词去掉编号示例；两条验收记录同步清理。（26.10.12 轮，详见 release-policy。）
 
 ### 公开前一毫米（done 一件、剩一件可选）
 ```powershell

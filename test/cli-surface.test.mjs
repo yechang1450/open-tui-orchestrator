@@ -14,7 +14,7 @@ import {fileURLToPath} from 'node:url';
 const root = fileURLToPath(new URL('..', import.meta.url));
 const family = path.join(root, 'temp');
 const cli = path.join(root, 'cli.mjs');
-const REQUEST = '修复项目81登录页；优化项目84购物车';
+const REQUEST = '修复登录页；优化购物车';
 
 function workDir(tag) {
   fs.mkdirSync(family, {recursive: true});
@@ -198,15 +198,15 @@ test('a caller-supplied plan file makes --plan fully deterministic — no host, 
   withWorkspace('plan-file', (ws) => {
     const plan = path.join(ws, 'plan.json');
     fs.writeFileSync(plan, JSON.stringify({schema: 1, kind: 'tasks', tasks: [
-      {id: 'T001', summary: '修复项目81登录页', kind: 'project', project: '81', conflict_hints: ['file:src/login.js'], depends_on: []},
-      {id: 'T002', summary: '优化项目84购物车', kind: 'project', project: '84', conflict_hints: ['file:src/cart.js'], depends_on: []},
+      {id: 'T001', summary: '修复登录页', kind: 'project', project: '07', conflict_hints: ['file:src/login.js'], depends_on: []},
+      {id: 'T002', summary: '优化购物车', kind: 'project', project: '08', conflict_hints: ['file:src/cart.js'], depends_on: []},
     ]}));
     // 刻意给一个不存在的宿主 CLI：带计划文件的 --plan 必须在解析宿主之前就做完（零模型调用的硬证据）。
     const r = run(ws, ['--cli', path.join(ws, 'nope', 'nope.exe'), '--plan', '--plan-file', plan, REQUEST]);
     assert.equal(r.status, 0, r.all);
     assert.doesNotMatch(r.stdout, /^\[orchestrator\]/m, 'stdout must stay pure data: ' + r.stdout.slice(0, 300));
     const {blocks} = JSON.parse(r.stdout);
-    assert.deepEqual(blocks.map((b) => b.title), ['proj-81', 'proj-84'], r.stdout);
+    assert.deepEqual(blocks.map((b) => b.title), ['proj-07', 'proj-08'], r.stdout);
     assert.equal(r.frames.length, 0, r.all);
   });
 });

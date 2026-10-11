@@ -41,13 +41,13 @@ test('run-windows reports its spawn mode and rejects unknown modes', { skip: COD
     delete env.ORCH_SPAWN_MODE;
     return spawnSync(process.execPath, [cli, ...args], { cwd: root, env, encoding: 'utf8', windowsHide: true, timeout: 90000 });
   };
-  const def = run(['--run-windows', '修复项目81登录页']);
+  const def = run(['--run-windows', '修复登录页']);
   assert.equal(def.status, 0, def.stderr);
   assert.match(def.stdout, /\[orchestrator\] spawn mode: headless/);
-  const win = run(['--mode', 'window', '--run-windows', '修复项目81登录页']);
+  const win = run(['--mode', 'window', '--run-windows', '修复登录页']);
   assert.equal(win.status, 0, win.stderr);
   assert.match(win.stdout, /\[orchestrator\] spawn mode: window/);
-  const bad = run(['--mode', 'popup', '--run-windows', '修复项目81登录页']);
+  const bad = run(['--mode', 'popup', '--run-windows', '修复登录页']);
   assert.notEqual(bad.status, 0);
   assert.match(String(bad.stderr || bad.stdout), /UNSUPPORTED_SPAWN_MODE/);
 });

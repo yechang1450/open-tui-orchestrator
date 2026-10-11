@@ -8,7 +8,7 @@ import {waitBackoffMs} from '../scripts/core/leases.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const family = path.join(root, 'temp');
-const REQUEST = '修复项目81登录页；优化项目84购物车';
+const REQUEST = '修复登录页；优化购物车';
 
 // 伪调用方单元：执行 checkpoint 协议 + 写回执 + 完成标记（同 caller-driven 夹具）。
 const FAKE_UNIT = `import fs from 'node:fs';
@@ -36,8 +36,8 @@ function setup() {
 
 function taskLevelPlan() {
   return {schema: 1, kind: 'tasks', tasks: [
-    {id: 'T001', summary: '修复项目81登录页', kind: 'project', project: '81', conflict_hints: ['file:src/login.js'], depends_on: []},
-    {id: 'T002', summary: '优化项目84购物车', kind: 'project', project: '84', conflict_hints: ['file:src/cart.js'], depends_on: []},
+    {id: 'T001', summary: '修复登录页', kind: 'project', project: '07', conflict_hints: ['file:src/login.js'], depends_on: []},
+    {id: 'T002', summary: '优化购物车', kind: 'project', project: '08', conflict_hints: ['file:src/cart.js'], depends_on: []},
   ]};
 }
 

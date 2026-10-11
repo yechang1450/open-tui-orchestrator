@@ -165,10 +165,10 @@ for (const line of prompt.split(String.fromCharCode(10))) if (line.startsWith('�
 console.log('__ORCH_DONE__ ' + token);
 `);
 
-const request = '在项目81创建文件 alpha.txt 内容 ALPHA_OK；在项目84创建文件 beta.txt 内容 BETA_OK';
+const request = '在项目A创建文件 alpha.txt 内容 ALPHA_OK；在项目B创建文件 beta.txt 内容 BETA_OK';
 fs.writeFileSync(path.join(ROOT, 'plan.json'), JSON.stringify({schema: 1, kind: 'tasks', tasks: [
-  {id: 'T001', prompt: '在项目81创建文件 alpha.txt 内容 ALPHA_OK', summary: '在项目81创建文件 alpha.txt 内容 ALPHA_OK', kind: 'project', project: '81', conflict_hints: ['file:alpha.txt'], depends_on: []},
-  {id: 'T002', prompt: '在项目84创建文件 beta.txt 内容 BETA_OK', summary: '在项目84创建文件 beta.txt 内容 BETA_OK', kind: 'project', project: '84', conflict_hints: ['file:beta.txt'], depends_on: []},
+  {id: 'T001', prompt: '在项目A创建文件 alpha.txt 内容 ALPHA_OK', summary: '在项目A创建文件 alpha.txt 内容 ALPHA_OK', kind: 'project', project: '07', conflict_hints: ['file:alpha.txt'], depends_on: []},
+  {id: 'T002', prompt: '在项目B创建文件 beta.txt 内容 BETA_OK', summary: '在项目B创建文件 beta.txt 内容 BETA_OK', kind: 'project', project: '08', conflict_hints: ['file:beta.txt'], depends_on: []},
 ]}, null, 2), 'utf-8');
 fs.writeFileSync(path.join(ROOT, 'unit.json'), JSON.stringify({schema: 1, id: 'l5-probe', label: 'L5 probe unit', bin: process.execPath.replaceAll('\\', '/'), args: [unitMjs.replaceAll('\\', '/'), '--prompt-file', '{promptFile}'], promptDelivery: 'file'}));
 fs.writeFileSync(path.join(ROOT, 'acceptance.json'), JSON.stringify({

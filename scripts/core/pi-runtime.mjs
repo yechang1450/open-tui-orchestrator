@@ -51,10 +51,19 @@ export function writePiLauncher(config,{key,prompt,suffix,workspace,temp}) {
     `if (-not (Test-Path -LiteralPath ${quote(rf)})) { @{__EXIT__=$code;__DONE__=$true;token=${quote(token)}} | ConvertTo-Json -Compress | Set-Content -LiteralPath ${quote(rf)} -Encoding UTF8 }`,'exit 0'].join('\r\n');
   fs.writeFileSync(lp,'\ufeff'+body,'utf8');return {lp,pidf,pf,rf,piSession,sanctionToken};
 }
-export async function waitPiResult(rf,timeoutMs,pidf) {
+export async function waitPiResult(rf,timeoutMs,pidf,expectToken) {
   const end=Date.now()+timeoutMs;
   while(Date.now()<end) {
-    if(fs.existsSync(rf)){try{const r=JSON.parse(fs.readFileSync(rf,'utf8').replace(/^\uFEFF/,''));return {done:true,exitCode:r.__EXIT__,text:r.__REPORT__||''};}catch{}}
+    if(fs.existsSync(rf)){try{
+      const r=JSON.parse(fs.readFileSync(rf,'utf8').replace(/^\uFEFF/,''));
+      // 第二道关联检查（审计 ID37）：writePiLauncher 的清理是第一条防线；若它删除失败、或残留了
+      // 外来 result（同 stem 的历史 attempt 等），不得把这份 foreign result 当成本单元的完成。
+      // launcher 兜底写入与 pi-shutdown 扩展写入的 result 都携带本单元的 completion token——
+      // 声明了 token 且与本单元不符时一律拒绝（fail-closed），而不是相信它的 __EXIT__。
+      if(expectToken&&r&&typeof r==='object'&&r.token&&r.token!==expectToken)
+        return {done:true,exitCode:1,text:'Pi foreign result rejected (token mismatch): '+path.basename(rf)};
+      return {done:true,exitCode:r.__EXIT__,text:r.__REPORT__||''};
+    }catch{}}
     if(fs.existsSync(pidf)){
       // 读取可能撞上删除/占用（ENOENT/EBUSY/EISDIR），解析可能得到非数字——两者都不能抛出，
       // 也不能把 NaN 喂给 process.kill（ERR_INVALID_ARG_TYPE 会被误报成“启动器已退出”）。

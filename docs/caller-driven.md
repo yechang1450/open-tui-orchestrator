@@ -27,7 +27,7 @@ Tasks-level (a flat classification; the deterministic engine still does all the 
 
 ```json
 {"schema":1,"tasks":[
-  {"id":"T001","project":"81","kind":"project",
+  {"id":"T001","project":"07","kind":"project",
    "conflict_hints":["file:src/login.js"],"depends_on":[],"feasible":true,"already_done":false}]}
 ```
 
@@ -35,9 +35,9 @@ Block-level (same shape as `--plan` output):
 
 ```json
 {"schema":1,"blocks":[
-  {"type":"independent","title":"proj-81","dependsOn":[],
+  {"type":"independent","title":"proj-07","dependsOn":[],
    "conflictKeys":["file:src/login.js"],
-   "tasks":[{"id":"t1","prompt":"仅处理项目 proj-81。任务：<original task text, verbatim>；"}]}]}
+   "tasks":[{"id":"t1","prompt":"仅处理项目 proj-07。任务：<original task text, verbatim>；"}]}]}
 ```
 
 Hard rules (the existing core, unchanged):

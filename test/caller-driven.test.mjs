@@ -12,7 +12,7 @@ import {CODEX_CLI_SKIP} from './helpers/external.mjs';
 const root = fileURLToPath(new URL('..', import.meta.url));
 const family = path.join(root, 'temp');
 const CLI = path.join(root, 'cli.mjs');
-const REQUEST = '修复项目81登录页；优化项目84购物车';
+const REQUEST = '修复登录页；优化购物车';
 
 // 伪"调用方单元"CLI：① 若收到分类提示词（说明走了 LLM 规划，应永不发生）→ 写 planner-invoked.marker；
 // ② FAKE_UNIT_FAIL=1 → 直接非零退出（fail-closed 反例）；③ 否则执行 checkpoint 协议 + 写回执 + 完成标记。
@@ -49,8 +49,8 @@ function unitProfile(unitFile, extra = {}) {
 
 function taskLevelPlan() {
   return {schema: 1, kind: 'tasks', tasks: [
-    {id: 'T001', summary: '修复项目81登录页', kind: 'project', project: '81', conflict_hints: ['file:src/login.js'], depends_on: []},
-    {id: 'T002', summary: '优化项目84购物车', kind: 'project', project: '84', conflict_hints: ['file:src/cart.js'], depends_on: []},
+    {id: 'T001', summary: '修复登录页', kind: 'project', project: '07', conflict_hints: ['file:src/login.js'], depends_on: []},
+    {id: 'T002', summary: '优化购物车', kind: 'project', project: '08', conflict_hints: ['file:src/cart.js'], depends_on: []},
   ]};
 }
 
@@ -100,7 +100,7 @@ test('--tasks prints the authoritative ledger and needs no host identity', () =>
   const doc = jsonFrom(r.stdout);
   assert.equal(doc.kind, 'tasks');
   assert.deepEqual(doc.tasks.map((t) => t.id), ['T001', 'T002']);
-  assert.equal(doc.tasks[0].prompt, '修复项目81登录页');
+  assert.equal(doc.tasks[0].prompt, '修复登录页');
 });
 
 test('a task-level plan file feeds the same deterministic engine (dry run, no model)', () => {
@@ -111,7 +111,7 @@ test('a task-level plan file feeds the same deterministic engine (dry run, no mo
     const r = spawnSync(process.execPath, [CLI, '--plan', '--plan-file', plan, REQUEST], {env: callEnv({ws: s.dir}), encoding: 'utf8', windowsHide: true, timeout: 60000});
     assert.equal(r.status, 0, r.stderr || r.stdout);
     const {blocks} = jsonFrom(r.stdout);
-    assert.deepEqual(blocks.map((b) => b.title), ['proj-81', 'proj-84']);
+    assert.deepEqual(blocks.map((b) => b.title), ['proj-07', 'proj-08']);
     assert.deepEqual(blocks.map((b) => b.tasks.flatMap((t) => t.sourceIds)), [['T001'], ['T002']]);
     // 与内置确定性引擎对同一分类输入的产出逐字一致
     const expected = buildBlocksFromTasks(bindClassifiedTasks(REQUEST, taskLevelPlan().tasks), {});

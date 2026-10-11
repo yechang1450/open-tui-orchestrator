@@ -86,7 +86,7 @@ public static class OrchestratorInactiveShell {
   // Give the app time to create its window, then raise the first fresh, sane top-level window.
   // Appearance budget is tunable (2026-10-06): on a loaded machine a fresh Windows Terminal can take
   // far longer than 9s, and a hardcoded value reports "machine busy" as "window never appeared"
-  // (measured in the codex 8-window acceptance: proj-95/96 failed the popup 3 times in a row).
+  // (measured in the codex 8-window acceptance: two of the eight blocks failed the popup 3 times in a row).
   // The default stays 9000ms; only the budget is configurable: ORCH_WINDOW_APPEAR_MS.
   int appearMs=AppearMs();
   var deadline=Environment.TickCount64+appearMs;

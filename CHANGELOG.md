@@ -1,5 +1,11 @@
 # Changelog
 
+## 26.10.12 — 外来 pi result 防护 + 公开面清理
+
+- **pi 外来 result 不再可能冒充完成（审计 ID37）**：`writePiLauncher` 的启动前清场是唯一防线——一旦清场失败、或同 stem 的历史 attempt 残留了别的 result，等待端会把它的 `__EXIT__` 当成本单元的完成。现在等待端核对 result 携带的完成 token 与本单元 token 一致才认，不一致一律 fail-closed（`Pi foreign result rejected (token mismatch)`）；不带 token 的 result 保持旧行为。可红判据：`test/pi-runtime.test.mjs`。
+- **公开面无私有项目引用**：README（中英）快速开始、适配器文档、CHANGELOG 历史条目、工具与测试夹具不再出现作者私有项目编号；示例统一改中性占位（文本用 项目A/项目B，需要数字编号的位置用 07/08）；classify 提示词去掉固定编号示例；相关验收记录同步清理。
+- 发布前实测：离线套件 513/513（3 条按平台跳过——本机未安装的 kimi/opencode/pi CLI）；`gate --all` 五判据全绿；封印 `schema 2 / 41 核心 + 65 运行时`（本轮重封）。
+
 ## 26.10.11 — 五 CLI 真机轮 + 恢复/画像增强
 
 - **恢复第三档（unproven）**：跑过、无成果、未声明可重跑的单元自动补跑一次（`ORCH_UNPROVEN_RETRIES` 默认 1、0=关），仍无果时以 needs-reconciliation 诚实上报（恰一次）；`retrySafe:false` 保留否决权。
@@ -110,7 +116,7 @@
 
 ### Fixed
 
-- **Meta-only sentences are dropped deterministically (0.9.15's prompt rule was not enough).** The 0.9.15 live acceptance re-ran the exact dependency request and the real model *still* minted T003 from "必须按上述顺序执行：项目82的产物依赖项目81的产物。" — a prompt rule alone cannot guarantee this. `requestTasks` (the one splitter every downstream consumer derives from: classify prompt, `bindClassifiedTasks`, `ledgerPlan`) now filters meta-only sentences outright: first segment must match a meta prefix (按上述/以上…顺序|先后|要求|依赖, or 以上任务请依次…) **and** carry no concrete payload (no path/file token, no action or business verb). The inventory is never emptied (an all-meta request keeps its single task). Red-capable criterion: `test/meta-task-filter.test.mjs`.
+- **Meta-only sentences are dropped deterministically (0.9.15's prompt rule was not enough).** The 0.9.15 live acceptance re-ran the exact dependency request and the real model *still* minted T003 from "必须按上述顺序执行：项目B的产物依赖项目A的产物。" — a prompt rule alone cannot guarantee this. `requestTasks` (the one splitter every downstream consumer derives from: classify prompt, `bindClassifiedTasks`, `ledgerPlan`) now filters meta-only sentences outright: first segment must match a meta prefix (按上述/以上…顺序|先后|要求|依赖, or 以上任务请依次…) **and** carry no concrete payload (no path/file token, no action or business verb). The inventory is never emptied (an all-meta request keeps its single task). Red-capable criterion: `test/meta-task-filter.test.mjs`.
 - **The gate is robust on a busy machine (2026-09-18, user directive: never wait for free RAM).** Two knobs and one honest fallback: `ORCH_GATE_TEST_CONCURRENCY` (default 3; lower ⇒ less memory pressure ⇒ fewer capacity-sensitive reds) and `ORCH_GATE_SUITE_TIMEOUT_MS` (default 900000). When the suite reports reds *with a complete summary*, the gate re-runs each red title's file **in isolation**: all green ⇒ recorded as an environment flake (`[gate] L1 environment flake recorded: …`, observed pass/fail logged; L4's measured total = pass+fail) and L1 passes; any file still red ⇒ real regression, the gate fails. A truncated suite (missing summary, e.g. timeout) can never be flaked green.
 
 ## 0.9.15 — core 1.16.2
@@ -118,7 +124,7 @@
 ### Fixed
 
 - **Finished windows are now closed at finalize (measured on the pi battery 2026-09-18).** A successful `--mode window` pi run left its panels on screen: the unit processes and the launcher had exited, but the Windows Terminal window stayed — the only sweep (`sweepLeftoverRunWindows`) ran *before* a run, and its corpse criterion ("the Windows Terminal host has no children at all") never fires while the user keeps any other WT window open (the shared host always has children). The sweep now runs both before the runner **and after it returns**, with a per-unit criterion: a recorded window is closed only when no live process references that unit's unique stem (`win-launch-<stem>.ps1` launcher path or the unit's pi session path) — i.e. the unit is really gone — plus the existing "visible window owned by Windows Terminal" checks. Red-capable criteria: `test/leftover-windows.test.mjs` (stem pairing; the post-run sweep wiring).
-- **Pure meta/process sentences no longer become tasks.** Measured in the dependency drill: the sentence "必须按上述顺序执行：项目82的产物依赖项目81的产物" became its own task (and its own block), wasting a unit. The classify prompt now states that meta sentences (constraints without a concrete action or artifact) must be merged into the task they constrain or dropped, never given their own task id.
+- **Pure meta/process sentences no longer become tasks.** Measured in the dependency drill: the sentence "必须按上述顺序执行：项目B的产物依赖项目A的产物" became its own task (and its own block), wasting a unit. The classify prompt now states that meta sentences (constraints without a concrete action or artifact) must be merged into the task they constrain or dropped, never given their own task id.
 
 ### Added
 

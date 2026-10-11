@@ -18,7 +18,7 @@ test('public SDK status dispatch returns an actual read-only status, not usage',
  const root=fileURLToPath(new URL('../',import.meta.url));
  const workspace=fs.mkdtempSync(path.join(root,'temp','inline-gate-'));
  try {
-  const inline=spawnSync(process.execPath,[file,'--run-windows','修复项目81登录页'],{cwd:workspace,env:{...process.env,ORCH_AGENT:'codex',WORKSPACE_DIR:workspace,ORCH_STATE_DIR:path.join(workspace,'temp','orchestrator')},encoding:'utf8',windowsHide:true,timeout:30000});
+  const inline=spawnSync(process.execPath,[file,'--run-windows','修复登录页'],{cwd:workspace,env:{...process.env,ORCH_AGENT:'codex',WORKSPACE_DIR:workspace,ORCH_STATE_DIR:path.join(workspace,'temp','orchestrator')},encoding:'utf8',windowsHide:true,timeout:30000});
   assert.equal(inline.status,0,inline.stderr);
   assert.match(inline.stdout,/"mode":"inline"/);
   assert.match(inline.stdout,/"reason":"single-block"/);

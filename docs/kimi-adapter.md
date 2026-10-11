@@ -6,7 +6,7 @@ open-tui-orchestrator 支持已安装的 Kimi Code CLI（kimi.exe）。发起方
 
 ```powershell
 open-tui-orchestrator --agent kimi --doctor
-open-tui-orchestrator --run-id my-run --acceptance-file D:/work/temp/acceptance.json --run-windows '项目91：修改页面，运行测试；项目92：修改接口，检查结果'
+open-tui-orchestrator --run-id my-run --acceptance-file D:/work/temp/acceptance.json --run-windows '项目A：修改页面，运行测试；项目B：修改接口，检查结果'
 ```
 
 ## CLI 与运行协议

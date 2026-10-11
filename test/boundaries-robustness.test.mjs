@@ -15,7 +15,7 @@ import {fileURLToPath} from 'node:url';
 const root = fileURLToPath(new URL('..', import.meta.url));
 const family = path.join(root, 'temp');
 const cli = path.join(root, 'cli.mjs');
-const REQUEST = '修复项目81登录页；优化项目84购物车';
+const REQUEST = '修复登录页；优化购物车';
 
 function workDir(tag) {
   fs.mkdirSync(family, {recursive: true});
@@ -68,8 +68,8 @@ function scene(tag) {
   fs.writeFileSync(unitCmd, JSON.stringify({schema: 1, id: 'probeunit', bin: process.execPath, args: [unit, '--prompt-file', '{promptFile}'], promptDelivery: 'file'}));
   const plan = path.join(ws, 'plan.json');
   fs.writeFileSync(plan, JSON.stringify({schema: 1, tasks: [
-    {id: 'T001', summary: '修复项目81登录页', kind: 'project', project: '81', conflict_hints: ['file:src/login.js'], depends_on: []},
-    {id: 'T002', summary: '优化项目84购物车', kind: 'project', project: '84', conflict_hints: ['file:src/cart.js'], depends_on: []},
+    {id: 'T001', summary: '修复登录页', kind: 'project', project: '07', conflict_hints: ['file:src/login.js'], depends_on: []},
+    {id: 'T002', summary: '优化购物车', kind: 'project', project: '08', conflict_hints: ['file:src/cart.js'], depends_on: []},
   ]}));
   const acceptance = path.join(ws, 'acceptance.json');
   fs.writeFileSync(acceptance, JSON.stringify({T001: [{type: 'file', path: 'receipt-T001.json'}], T002: [{type: 'file', path: 'receipt-T002.json'}]}));
@@ -185,7 +185,7 @@ test('a malformed acceptance file names its file instead of a bare JSON error', 
 test('structural plan-file defects are refused by name (file + item), never silently accepted', () => {
   const ws = workDir('plan-structure');
   try {
-    const covered = '修复项目81登录页；优化项目84购物车';
+    const covered = '修复登录页；优化购物车';
     const cases = [
       ['blocks 里出现 null', {blocks: [null]}, /blocks\[0\]/],
       ['block.tasks 里出现 null', {blocks: [{type: 'independent', title: 'A', tasks: [null]}]}, /blocks\[0\]\.tasks\[0\]/],
