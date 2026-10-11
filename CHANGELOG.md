@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026.10.11 — 五 CLI 真机轮 + 恢复/画像增强
+
+- **恢复第三档（unproven）**：跑过、无成果、未声明可重跑的单元自动补跑一次（`ORCH_UNPROVEN_RETRIES` 默认 1、0=关），仍无果时以 needs-reconciliation 诚实上报（恰一次）；`retrySafe:false` 保留否决权。
+- **窗口生命周期收口**：正常/异常一律关窗（温柔关三层：杀单元后代 → 等 launcher 自退 → WM_CLOSE → 强杀记账）；异常退出码只记录不判断。
+- **画像探测增强**：ANSI 剥离 + 宽列注入；npm shim 自动解析与通用安装位探测；子命令二级探测（`args.subcommand`）。
+- **kimi 适配修复**：接受 npm 全局安装的 `.cmd` shim（无 `kimi.exe` 伴生时直接采用；此前误报 CLI_MISSING）。
+- **发布前实测**：五家 CLI（codex / hermes / pi / opencode / kimi）同一真实任务端到端全绿（三文件 + `node --test` 通过）；离线套件 511/511；`gate --all` 分层全绿（L1/L2a/L2b/L3 + L4）；封印 `0.9.24-1` / files=41 / runtime=65。
+
 ## 0.9.24-1 — 公开入口 fail-closed 收口（正式版号推进）
 
 - 版本号推进至 `0.9.24-1`（带预发布段，npm 需 `--tag latest` 显式刷新）。
