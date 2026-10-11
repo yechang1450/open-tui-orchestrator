@@ -31,11 +31,11 @@ import shutil
 import time
 from pathlib import Path
 
-REPO = Path(os.path.expanduser("~/.tools/open-tui-orchestrator"))
+REPO = Path(__file__).resolve().parents[1]  # 2026-10-11: 自定位——本工具随仓归档（<repo>/tools/），检查的就是它所在的仓；旧写死 ~/.tools 布局已撤
 def _resolve_node_bin() -> Path:
     """node 所在目录，运行时解析。
 
-    写死 C:\Program Files\nodejs 会让 patrol 在任何 node 来自别处的机器上报 node-missing
+    写死 C:\\Program Files\\nodejs 会让 patrol 在任何 node 来自别处的机器上报 node-missing
     并整体转 RED（2026-10-08 重装后实测：新系统无系统 node，node 随 Hermes 自带，
     两条 patrol 判据因此失败）。优先级：ORCH_NODE_BIN -> PATH 上的 node -> 旧常量兜底
     （真的没有 node 时仍旧报 node-missing，保持 fail-closed）。

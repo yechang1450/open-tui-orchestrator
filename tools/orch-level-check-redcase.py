@@ -16,7 +16,7 @@ import tempfile
 from pathlib import Path
 
 GATE = Path(__file__).resolve().parent / "orch-level-check.py"
-SOURCE = Path(os.path.expanduser("~")) / ".tools" / "open-tui-orchestrator"
+SOURCE = Path(__file__).resolve().parents[1]  # 2026-10-11: 自定位（旧写死 ~/.tools 布局已撤）
 FILES = ["scripts/core/contracts.mjs", "release.json", "package.json", "README.md", "README-zh.md", "docs/release-policy.md"]
 
 
