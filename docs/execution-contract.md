@@ -43,11 +43,11 @@ At the budget gate, a block whose remaining tasks all still have no checkpoint i
 
 The launcher invokes the CLI once. It preserves failure evidence instead of blindly replaying a whole block. The controller independently rechecks every checkpoint and retries only remaining work, with a bounded attempt count (default two per block per controller) and backoff. Replacement windows use the same planned block and cannot exceed global concurrent capacity; verified tasks are omitted from their prompts.
 
-If a task started but its output cannot be proven, automatic retry requires an explicit parent-defined policy:
+If a task started but its output cannot be proven, the block is auto-retried once by default (the *unproven* tier: `ORCH_UNPROVEN_RETRIES`, default 1 — set `0` to disable). If the retry still leaves the result unproven, the block surfaces as needs-reconciliation; an explicit parent-defined policy marks idempotent work:
 
     {"T002":{"retrySafe":true,"checks":[{"type":"json","path":"temp/result.json","equals":{"done":true}}]}}
 
-retrySafe means repeating the operation cannot create an unintended duplicate effect; it is not a user approval switch. It defaults to false. Tasks with uncertain effects stay in the ledger as needs-reconciliation, and their dependants do not run. The parent investigates actual state and supplies meaningful verification; it must not mark arbitrary commands retry-safe to force progress. Exactly-once execution of arbitrary external effects cannot be guaranteed without an external idempotency mechanism.
+retrySafe means repeating the operation cannot create an unintended duplicate effect; it is not a user approval switch. It defaults to false, but an unproven result is still retried once unless the task vetoes it with `retrySafe: false`. Tasks that stay uncertain after the retry remain in the ledger as needs-reconciliation, and their dependants do not run. The parent investigates actual state and supplies meaningful verification; it must not mark arbitrary commands retry-safe to force progress. Exactly-once execution of arbitrary external effects cannot be guaranteed without an external idempotency mechanism.
 
 --resume-run reuses the saved task inventory, acceptance checks and original workspace. It never calls the planner again. A live launcher is adopted by PID, creation time, executable and command line; no replacement is opened while it survives. A dead controller's ownership is reclaimed under the coordinator mutex, and a second live controller is rejected. Completed tasks are rechecked; successful finalized runs resume without opening any window. Recovery of protocol-1 runs is not supported; their original explicit acceptance checks can still be used with --verify-run. After a controller crash, the initiating agent invokes --resume-run; there is no background service that restarts controllers automatically.
 
@@ -106,6 +106,15 @@ hatch: `ORCH_TRANSIENT_RETRIES` (default 1), `ORCH_TRANSIENT_WINDOW_MS` (default
 well past the window is never treated as transient, so real failures are not masked), and `"retrySafe": false`
 vetoes the automatic retry for tasks whose effects are not safe to repeat. `retrySafe: true` keeps its stronger
 meaning (always safe to re-run). Red-capable criterion: `test/transient-retry.test.mjs`.
+
+## Unproven results are retried once, then surfaced honestly
+
+A unit that ran on and still left no proven result is the *unproven* signature: the engine grants one extra
+attempt (`ORCH_UNPROVEN_RETRIES`, default 1 — `0` disables) unless any remaining task vetoes it with
+`"retrySafe": false`. The retry re-enters the same window pipeline as any other attempt; tasks that are already
+verified are never re-run. If the retry also leaves the result unproven, the block reports `needs-reconciliation`
+exactly once — never an infinite loop. Red-capable criteria: `test/transient-retry.test.mjs`
+("… exactly one unproven retry …" / "… ORCH_UNPROVEN_RETRIES=0 …").
 
 ## Power-cut posture (what survives a real power loss)
 

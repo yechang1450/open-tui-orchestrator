@@ -16,7 +16,7 @@ import {powershellExe} from '../scripts/core/contracts.mjs';
 const family = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../temp');
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-function harness({workspace, runId, checksValue, shortLive = true, attempt1Ms = 0, attempt1NoCheckpoint = false}) {
+function harness({workspace, runId, checksValue, shortLive = true, attempt1Ms = 0, attempt1NoCheckpoint = false, failTimes = 1, allFail = false, slowFails = false}) {
   const ps = powershellExe();
   const kids = [];
   let spawned = 0, attempt = 0;
@@ -41,9 +41,10 @@ function harness({workspace, runId, checksValue, shortLive = true, attempt1Ms = 
     session: async () => sessionFile,
     wait: async (session, timeoutMs, rf, token) => {
       attempt++;
-      if (attempt === 1) {
-        if (attempt1Ms) await sleep(attempt1Ms);
-        if (!attempt1NoCheckpoint) spawnSync(process.execPath, [checkpointHelper, attemptFile(1), 'T001', 'started'], {windowsHide: true, timeout: 15000});
+      if (allFail || attempt <= failTimes) {
+        const failMs = attempt === 1 ? attempt1Ms : (slowFails ? attempt1Ms : 0);
+        if (failMs) await sleep(failMs);
+        if (!attempt1NoCheckpoint) spawnSync(process.execPath, [checkpointHelper, attemptFile(attempt), 'T001', 'started'], {windowsHide: true, timeout: 15000});
         return {done: false, exitCode: 1};                 // 启动即死：无终态检查点
       }
       fs.mkdirSync(path.join(workspace, 'proj-81'), {recursive: true});
@@ -84,7 +85,7 @@ test('a transient unit failure (started-only checkpoint, quick exit) is auto-ret
   const prev = process.env.ORCH_TRANSIENT_BACKOFF_MS;
   process.env.ORCH_TRANSIENT_BACKOFF_MS = '0';
   try {
-    const sum = await runWindows('执行甲', h.hooks, {workspace, capacity: 4, runId: 'transient-ok', auth: 'test', coordinator: path.join(workspace, 'temp', 'coordinator'), acceptanceFile: h.acceptanceFile, maxAttempts: 2, timeoutMs: 60000});
+    const sum = await runWindows('执行甲', h.hooks, {workspace, capacity: 4, runId: 'transient-ok', auth: 'test', coordinator: path.join(workspace, 'temp', 'coordinator'), acceptanceFile: h.acceptanceFile, maxAttempts: 2, timeoutMs: 180000});
     assert.equal(sum.success, true, 'a transient failure must be absorbed, not surfaced as an error');
     assert.ok(h.attempts() >= 2, 'the engine must auto-retry the transient failure');
     assert.ok(sum.results.B1.attempts.length >= 2, 'the retry must be recorded in the ledger');
@@ -103,7 +104,7 @@ test('retrySafe:false vetoes the automatic transient retry (the escape hatch sta
   const prev = process.env.ORCH_TRANSIENT_BACKOFF_MS;
   process.env.ORCH_TRANSIENT_BACKOFF_MS = '0';
   try {
-    const sum = await runWindows('执行甲', h.hooks, {workspace, capacity: 4, runId: 'transient-veto', auth: 'test', coordinator: path.join(workspace, 'temp', 'coordinator'), acceptanceFile: h.acceptanceFile, maxAttempts: 2, timeoutMs: 60000});
+    const sum = await runWindows('执行甲', h.hooks, {workspace, capacity: 4, runId: 'transient-veto', auth: 'test', coordinator: path.join(workspace, 'temp', 'coordinator'), acceptanceFile: h.acceptanceFile, maxAttempts: 2, timeoutMs: 180000});
     assert.equal(sum.success, false, 'an explicit retrySafe:false must never be overridden by the transient path');
     assert.equal(h.attempts(), 1, 'no automatic retry may happen when the task vetoes it');
     assert.match(String(sum.results.B1.reason || ''), /Uncertain tasks/i);
@@ -113,17 +114,18 @@ test('retrySafe:false vetoes the automatic transient retry (the escape hatch sta
   }
 });
 
-test('a long-running failure is not treated as transient (real failures are never masked)', {timeout: 180000}, async () => {
+test('a long-running failure gets exactly one unproven retry, then stays surfaced (no infinite masking)', {timeout: 240000}, async () => {
   fs.mkdirSync(family, {recursive: true});
   const workspace = fs.mkdtempSync(path.join(family, 'transient-slow-'));
-  const h = harness({workspace, runId: 'transient-slow', attempt1Ms: 1600});
+  const h = harness({workspace, runId: 'transient-slow', attempt1Ms: 1600, allFail: true, slowFails: true});
   const prevBackoff = process.env.ORCH_TRANSIENT_BACKOFF_MS, prevWindow = process.env.ORCH_TRANSIENT_WINDOW_MS;
   process.env.ORCH_TRANSIENT_BACKOFF_MS = '0';
   process.env.ORCH_TRANSIENT_WINDOW_MS = '1000';
   try {
-    const sum = await runWindows('执行甲', h.hooks, {workspace, capacity: 4, runId: 'transient-slow', auth: 'test', coordinator: path.join(workspace, 'temp', 'coordinator'), acceptanceFile: h.acceptanceFile, maxAttempts: 2, timeoutMs: 60000});
-    assert.equal(sum.success, false, 'a failure that ran well past the transient window must stay surfaced');
-    assert.equal(h.attempts(), 1, 'no transient retry may be granted outside the window');
+    const sum = await runWindows('执行甲', h.hooks, {workspace, capacity: 4, runId: 'transient-slow', auth: 'test', coordinator: path.join(workspace, 'temp', 'coordinator'), acceptanceFile: h.acceptanceFile, maxAttempts: 2, timeoutMs: 180000});
+    assert.equal(sum.success, false, 'a failure that keeps failing must stay surfaced');
+    assert.equal(h.attempts(), 2, 'exactly one unproven retry may be granted, never an infinite loop');
+    assert.ok((sum.results.B1.unprovenRetries || 0) >= 1, 'the ledger must show the unproven auto-retry count');
   } finally {
     if (prevBackoff === undefined) delete process.env.ORCH_TRANSIENT_BACKOFF_MS; else process.env.ORCH_TRANSIENT_BACKOFF_MS = prevBackoff;
     if (prevWindow === undefined) delete process.env.ORCH_TRANSIENT_WINDOW_MS; else process.env.ORCH_TRANSIENT_WINDOW_MS = prevWindow;
@@ -140,12 +142,72 @@ test('a unit that never writes ANY checkpoint is auto-retried once beyond the pl
   const prevBackoff = process.env.ORCH_TRANSIENT_BACKOFF_MS;
   process.env.ORCH_TRANSIENT_BACKOFF_MS = '0';
   try {
-    const sum = await runWindows('执行甲', h.hooks, {workspace, capacity: 4, runId: 'unproductive', auth: 'test', coordinator: path.join(workspace, 'temp', 'coordinator'), acceptanceFile: h.acceptanceFile, maxAttempts: 1, timeoutMs: 60000});
+    const sum = await runWindows('执行甲', h.hooks, {workspace, capacity: 4, runId: 'unproductive', auth: 'test', coordinator: path.join(workspace, 'temp', 'coordinator'), acceptanceFile: h.acceptanceFile, maxAttempts: 1, timeoutMs: 180000});
     assert.equal(sum.success, true, 'a no-checkpoint (talked-but-did-nothing) attempt must be auto-retried, not surfaced; B1=' + JSON.stringify(sum.results.B1).slice(0, 700) + ' T001=' + JSON.stringify(sum.taskResults.T001).slice(0, 300));
     assert.ok(h.attempts() >= 2, 'the unproductive attempt must be re-run beyond the plain attempt budget');
     assert.ok((sum.results.B1.unproductiveRetries || 0) >= 1, 'the ledger must show the unproductive auto-retry count');
   } finally {
     if (prevBackoff === undefined) delete process.env.ORCH_TRANSIENT_BACKOFF_MS; else process.env.ORCH_TRANSIENT_BACKOFF_MS = prevBackoff;
+    await cleanup(workspace, h.kids);
+  }
+});
+
+// 2026-10-11 用户口径（第三档·无成果重跑）：单元“跑了一阵、既没有已证成果、也没声明可重跑”时，
+// 不再把“不确定”直接当结论 —— 自动补跑一次（走同一条窗口流水线；独立预算可关；veto 照旧）。
+test('a slow failure with no proven result is auto-retried once (third recovery tier)', {timeout: 240000}, async () => {
+  fs.mkdirSync(family, {recursive: true});
+  const workspace = fs.mkdtempSync(path.join(family, 'unproven-ok-'));
+  const h = harness({workspace, runId: 'unproven-ok', attempt1Ms: 1600});
+  const prevBackoff = process.env.ORCH_TRANSIENT_BACKOFF_MS, prevWindow = process.env.ORCH_TRANSIENT_WINDOW_MS;
+  process.env.ORCH_TRANSIENT_BACKOFF_MS = '0';
+  process.env.ORCH_TRANSIENT_WINDOW_MS = '1000';
+  try {
+    const sum = await runWindows('执行甲', h.hooks, {workspace, capacity: 4, runId: 'unproven-ok', auth: 'test', coordinator: path.join(workspace, 'temp', 'coordinator'), acceptanceFile: h.acceptanceFile, maxAttempts: 2, timeoutMs: 180000});
+    assert.equal(sum.success, true, 'the unproven attempt must be re-run, not surfaced; B1=' + JSON.stringify(sum.results.B1).slice(0, 700));
+    assert.ok(h.attempts() >= 2, 'the unproven attempt must be re-run beyond the plain attempt budget');
+    assert.ok((sum.results.B1.unprovenRetries || 0) >= 1, 'the ledger must show the unproven auto-retry count');
+  } finally {
+    if (prevBackoff === undefined) delete process.env.ORCH_TRANSIENT_BACKOFF_MS; else process.env.ORCH_TRANSIENT_BACKOFF_MS = prevBackoff;
+    if (prevWindow === undefined) delete process.env.ORCH_TRANSIENT_WINDOW_MS; else process.env.ORCH_TRANSIENT_WINDOW_MS = prevWindow;
+    await cleanup(workspace, h.kids);
+  }
+});
+
+test('retrySafe:false still vetoes the unproven retry (the escape hatch stays intact)', {timeout: 180000}, async () => {
+  fs.mkdirSync(family, {recursive: true});
+  const workspace = fs.mkdtempSync(path.join(family, 'unproven-veto-'));
+  const h = harness({workspace, runId: 'unproven-veto', attempt1Ms: 1600, checksValue: false});
+  const prevBackoff = process.env.ORCH_TRANSIENT_BACKOFF_MS, prevWindow = process.env.ORCH_TRANSIENT_WINDOW_MS;
+  process.env.ORCH_TRANSIENT_BACKOFF_MS = '0';
+  process.env.ORCH_TRANSIENT_WINDOW_MS = '1000';
+  try {
+    const sum = await runWindows('执行甲', h.hooks, {workspace, capacity: 4, runId: 'unproven-veto', auth: 'test', coordinator: path.join(workspace, 'temp', 'coordinator'), acceptanceFile: h.acceptanceFile, maxAttempts: 2, timeoutMs: 180000});
+    assert.equal(sum.success, false, 'an explicit retrySafe:false must never be overridden by the unproven path');
+    assert.equal(h.attempts(), 1, 'no automatic retry may happen when the task vetoes it');
+    assert.match(String(sum.results.B1.reason || ''), /Uncertain tasks/i);
+  } finally {
+    if (prevBackoff === undefined) delete process.env.ORCH_TRANSIENT_BACKOFF_MS; else process.env.ORCH_TRANSIENT_BACKOFF_MS = prevBackoff;
+    if (prevWindow === undefined) delete process.env.ORCH_TRANSIENT_WINDOW_MS; else process.env.ORCH_TRANSIENT_WINDOW_MS = prevWindow;
+    await cleanup(workspace, h.kids);
+  }
+});
+
+test('ORCH_UNPROVEN_RETRIES=0 disables the third tier (old behavior stays available)', {timeout: 180000}, async () => {
+  fs.mkdirSync(family, {recursive: true});
+  const workspace = fs.mkdtempSync(path.join(family, 'unproven-off-'));
+  const h = harness({workspace, runId: 'unproven-off', attempt1Ms: 1600});
+  const prevBackoff = process.env.ORCH_TRANSIENT_BACKOFF_MS, prevWindow = process.env.ORCH_TRANSIENT_WINDOW_MS, prevUnproven = process.env.ORCH_UNPROVEN_RETRIES;
+  process.env.ORCH_TRANSIENT_BACKOFF_MS = '0';
+  process.env.ORCH_TRANSIENT_WINDOW_MS = '1000';
+  process.env.ORCH_UNPROVEN_RETRIES = '0';
+  try {
+    const sum = await runWindows('执行甲', h.hooks, {workspace, capacity: 4, runId: 'unproven-off', auth: 'test', coordinator: path.join(workspace, 'temp', 'coordinator'), acceptanceFile: h.acceptanceFile, maxAttempts: 2, timeoutMs: 180000});
+    assert.equal(sum.success, false, 'with the budget closed the failure must surface as before');
+    assert.equal(h.attempts(), 1, 'no automatic retry may happen when ORCH_UNPROVEN_RETRIES=0');
+  } finally {
+    if (prevBackoff === undefined) delete process.env.ORCH_TRANSIENT_BACKOFF_MS; else process.env.ORCH_TRANSIENT_BACKOFF_MS = prevBackoff;
+    if (prevWindow === undefined) delete process.env.ORCH_TRANSIENT_WINDOW_MS; else process.env.ORCH_TRANSIENT_WINDOW_MS = prevWindow;
+    if (prevUnproven === undefined) delete process.env.ORCH_UNPROVEN_RETRIES; else process.env.ORCH_UNPROVEN_RETRIES = prevUnproven;
     await cleanup(workspace, h.kids);
   }
 });

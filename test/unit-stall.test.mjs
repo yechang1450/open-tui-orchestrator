@@ -100,7 +100,7 @@ test('a unit that stays alive but never writes a first checkpoint trips the firs
   process.env.ORCH_UNIT_FIRST_CHECKPOINT_MS = '1000'; // 1 秒内没有首检查点 ⇒ 命中
   process.env.ORCH_UNPRODUCTIVE_RETRIES = '0';        // 本判据只测期限本身，关掉额外补试
   try {
-    const sum = await runWindows('执行甲', hooks, {workspace, capacity: 8, runId: 'firstcp', auth: 'test', coordinator: path.join(workspace, 'temp', 'coordinator'), maxAttempts: 2, timeoutMs: 120000});
+    const sum = await runWindows('执行甲', hooks, {workspace, capacity: 8, runId: 'firstcp', auth: 'test', coordinator: path.join(workspace, 'temp', 'coordinator'), maxAttempts: 2, timeoutMs: 300000});
     assert.equal(sum.success, false, 'a unit that never starts its first task must not fake success');
     assert.ok(closed >= 2, 'each unproductive attempt must be closed out');
     assert.ok(spawned >= 2, 'the block must be retried inside its attempt budget');

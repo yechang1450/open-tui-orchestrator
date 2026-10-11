@@ -323,7 +323,7 @@ export async function runWindows(request,hooks,options={}) {
     async function execute(r) {
       const b=sum.blocks.find(b=>b.key===r.key),tasks=b.taskIds.map(id=>sum.tasks.find(t=>t.id===id));
       const leaseId=crypto.createHash('sha256').update(runKey).digest('hex').slice(0,16)+'-'+r.key;
-      let attemptsThisController=0,spawnConfirmed=false,transientRetries=0,transientGrant=false,unproductiveRetries=0,peakSampled=false;
+      let attemptsThisController=0,spawnConfirmed=false,transientRetries=0,transientGrant=false,unproductiveRetries=0,unprovenRetries=0,peakSampled=false;
       const limit=Math.max(1,Math.min(3,Number(options.maxAttempts||2)));
       while(Date.now()<deadline) {
         let e=sum.results[r.key],la=e.launcherFiles,identity;spawnConfirmed=false;
@@ -364,7 +364,25 @@ export async function runWindows(request,hooks,options={}) {
               persist();
               await pause(Math.min(transientBackoffMs+Math.floor(Math.random()*transientBackoffMs),Math.max(0,deadline-Date.now())));
             }else{
-              e.status='needs-reconciliation';e.reason='Uncertain tasks: '+recovery.uncertain.join(', ')+' — hint: declare {"checks":[...],"retrySafe":true} for idempotent tasks so the engine auto-retries instead of reporting';e.endedAt=Date.now();persist();return;
+              // 无成果重跑（2026-10-11 用户口径）：单元“跑了一阵、既没有已证成果、也没声明可重跑”时，
+              // 不再把“不确定”直接当结论 —— 与瞬时/无产出两档同构，自动补跑一次（独立预算
+              // ORCH_UNPROVEN_RETRIES，默认 1，0=关闭；retrySafe:false 照旧可否决）。重跑=任务回到
+              // pending 走同一条窗口流水线；已验证任务本就禁止重做，重复副作用面仅限未验过的任务。
+              const unprovenEnv=Number(process.env.ORCH_UNPROVEN_RETRIES);
+              const unprovenMax=Number.isFinite(unprovenEnv)&&unprovenEnv>=0?Math.floor(unprovenEnv):1;
+              const unproven=unprovenRetries<unprovenMax&&recovery.uncertain.every(id=>!taskPolicy(checks[id]).retryVeto);
+              if(unproven){
+                unprovenRetries++;transientGrant=true;
+                e.unprovenRetries=(e.unprovenRetries||0)+1;
+                e.unprovenReason=`no proven result after ${Math.round(runtimeMs/1000)}s for ${recovery.uncertain.join(', ')}`;
+                console.log(`[recovery] ${r.key}: no proven result (${e.unprovenReason}; not declared retryable) -> auto-retry ${unprovenRetries}/${unprovenMax}`);
+                for(const id of recovery.uncertain){recovery.pending.push(id);delete recovery.results[id];}
+                recovery.uncertain=[];
+                persist();
+                await pause(Math.min(transientBackoffMs+Math.floor(Math.random()*transientBackoffMs),Math.max(0,deadline-Date.now())));
+              }else{
+                e.status='needs-reconciliation';e.reason='Uncertain tasks: '+recovery.uncertain.join(', ')+' — hint: declare {"checks":[...],"retrySafe":true} for idempotent tasks so the engine auto-retries instead of reporting';e.endedAt=Date.now();persist();return;
+              }
             }
           }
           if(attemptsThisController>=limit&&!transientGrant){

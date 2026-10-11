@@ -8,7 +8,7 @@ import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { powershellExe } from '../scripts/core/contracts.mjs';
 import { processSnapshot, sameProcess } from '../scripts/core/leases.mjs';
-import { readJsonDiagnostic, captureProcessIdentity, inspectProcess, collectOwnedProcessTargets, codexFailureReasons, finalizeCodexReport } from './live-safety.mjs';
+import { readJsonDiagnostic, captureProcessIdentity, inspectProcess, collectOwnedProcessTargets, shutdownWindowTargets, parentProcessMap, pidsUnder, codexFailureReasons, finalizeCodexReport } from './live-safety.mjs';
 
 const exec = promisify(execFile);
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -58,6 +58,20 @@ const terminateVerified = async run => {
   if (current.state!=='live') return {state:current.state,reason:current.reason};
   killTree(current.pid);
   return {state:'kill-requested',pid:current.pid};
+};
+// 窗口收尾（2026-10-11）：温柔关失败时，把 launcher 的窗口句柄找出来发 WM_CLOSE。
+// 句柄路由：窗口注册表条目（本 run）pid → pidFile 的 basename → `win-<stem>.window.json`
+// （由窗口确认机制写过 hwnd）。找不到就返回 null，交给下一层兜底。
+const windowHandleFor = pid => {
+  try {
+    const registry=readJsonDiagnostic(path.join(workspace,'temp','orchestrator','orchestrator-windows.json'),{label:'orchestrator-windows.json'});
+    if(!registry.ok||!Array.isArray(registry.value))return null;
+    const entry=registry.value.find(w=>Number(w?.pid)===Number(pid)&&(!w?.runId||w.runId===runId));
+    if(!entry?.pidFile)return null;
+    const stem=path.basename(String(entry.pidFile)).replace(/^window-/,'').replace(/\.pid$/,'');
+    const record=readJsonDiagnostic(path.join(workspace,'temp','win-'+stem+'.window.json'),{label:'window record'});
+    return record.ok&&record.value?.hwnd?String(record.value.hwnd):null;
+  } catch { return null; }
 };
 try {
 if (process.platform !== 'win32') throw new Error('This acceptance scenario requires Windows');
@@ -305,16 +319,26 @@ process.exitCode = passed ? 0 : 1;
     const before=collectOwnedProcessTargets({controllers,runId,windows},()=>processSnapshot());
     diagnostics.push(...before.diagnostics);
     const killed=[];
-    for(const target of before.targets||[]){killTree(target.pid);killed.push({label:target.label,pid:target.pid});}
+    // 窗口收尾（2026-10-11 用户口径）：窗口“完事就关”，正常/异常同一套——但走温柔关
+    // （杀单元后代、等 launcher 自己 exit 0），绝不直接强杀 launcher 本体（那会留下 WT 的
+    // “[已退出进程，代码为 1]”残壳）。控制器（引擎/采样）照旧强杀。
+    const windowTargets=(before.targets||[]).filter(t=>/^window /.test(String(t.label||'')));
+    const controllerTargets=(before.targets||[]).filter(t=>!/^window /.test(String(t.label||'')));
+    for(const target of controllerTargets){killTree(target.pid);killed.push({label:target.label,pid:target.pid});}
+    // 身份快照不带父子关系：温柔关前另取一次父子表，把每个窗口 launcher 的整棵子树展开。
+    if(windowTargets.length){ const parentMap=parentProcessMap(); for(const t of windowTargets) t.descendants=pidsUnder(t.pid,parentMap); }
+    const shutdown=await shutdownWindowTargets(windowTargets,{snapshot:()=>processSnapshot(),graceMs:30000,resolveHandle:t=>windowHandleFor(t.pid)});
+    killed.push(...shutdown.killed);
+    diagnostics.push(...shutdown.diagnostics);
     let after=before;
-    const end=Date.now()+10000;
+    const end=Date.now()+45000;
     while(killed.length&&Date.now()<end){
       await new Promise(resolve=>setTimeout(resolve,250));
       after=collectOwnedProcessTargets({controllers,runId,windows},()=>processSnapshot());
       diagnostics.push(...after.diagnostics);
       if(after.state==='clean'||after.state==='unknown'||after.state==='mismatch')break;
     }
-    cleanup={state:diagnostics.length?'unknown':after.state,killed,diagnostics:[...new Set(diagnostics)]};
+    cleanup={state:diagnostics.length?'unknown':after.state,killed,windows:{graceful:shutdown.graceful,wmClosed:shutdown.wmClosed,forced:shutdown.forced},diagnostics:[...new Set(diagnostics)]};
   } catch(error) { cleanup={state:'unknown',error:String(error)}; }
  report=report||{passed:false,runId,entry:process.env.ORCH_LIVE_ENTRY||path.join(repo,'cli.mjs'),workspace,root,nonce,capacity};
  report.cleanup=cleanup;

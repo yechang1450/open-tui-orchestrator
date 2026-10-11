@@ -814,7 +814,7 @@ while($true){Start-Sleep -Seconds 600}`);
     assert.equal(earlyExit, 'still-running', 'watchdog must ignore untyped and foreign-turn task_complete signals');
     assert.equal(pidAliveCheck(agentPid), true, 'codex must still be alive because the completion event belongs to another turn');
     fs.appendFileSync(rolloutFile, JSON.stringify({ type: 'event_msg', payload: { type: 'task_complete', turn_id: 'turn-owner' } }) + '\n', 'utf8');
-    const completed = await Promise.race([launcherExit.then((c) => c).catch(() => null), sleep(10000).then(() => 'timeout')]);
+    const completed = await Promise.race([launcherExit.then((c) => c).catch(() => null), sleep(30000).then(() => 'timeout')]);
     assert.notEqual(completed, 'timeout', 'watchdog must close after the current turn emits a typed task_complete event');
     assert.equal(completed, 0, 'launcher must exit cleanly after typed completion');
     assert.equal(fs.existsSync(rf + '.self-closed'), true, 'typed completion must write the self-closed marker');

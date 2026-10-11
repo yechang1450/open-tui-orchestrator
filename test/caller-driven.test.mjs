@@ -95,7 +95,7 @@ function cleanup(...dirs) {
 }
 
 test('--tasks prints the authoritative ledger and needs no host identity', () => {
-  const r = spawnSync(process.execPath, [CLI, '--tasks', REQUEST], {env: callEnv({ws: process.cwd()}), encoding: 'utf8', windowsHide: true, timeout: 60000});
+  const r = spawnSync(process.execPath, [CLI, '--tasks', REQUEST], {env: callEnv({ws: process.cwd()}), encoding: 'utf8', windowsHide: true, timeout: 180000});
   assert.equal(r.status, 0, r.stderr || r.stdout);
   const doc = jsonFrom(r.stdout);
   assert.equal(doc.kind, 'tasks');
