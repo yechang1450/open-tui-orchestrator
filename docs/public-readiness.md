@@ -97,3 +97,11 @@ gh repo edit yechang1450/open-tui-orchestrator --visibility public --accept-visi
 - registry 回读：`npm view` → `version = 26.10.11`、`dist-tags = { latest: 26.10.11 }`；`npx -y open-tui-orchestrator@26.10.11 --version` → `open-tui-orchestrator 26.10.11 (core 0.9.24-1)`。
 - 注意：`26.10.11` 数值上低于旧日期版本（`2026.9.30-2`），npm 拒绝自动打 `latest`，必须显式 `--tag latest`；首次 PUT 后约 1–2 分钟 registry 生效。
 - 同轮清理：3 个 dependabot PR 分支与 dependabot 配置移除（单人仓库）；README 双语瘦身（EN 93 行 / ZH 92 行）；仓内 markdown 相对链接全量检查 61 条、死链 0。
+
+## 发布记录追加：26.10.12（2026-10-12 凌晨 +08）
+
+- 版本：`open-tui-orchestrator@26.10.12`（`latest` 已显式刷新为它，`--tag latest`）；内容＝外来 pi result 防护（等待端核对完成 token，不一致 fail-closed；判据 `test/pi-runtime.test.mjs`）＋ 公开面清理全轮（README 中英快速开始、适配器文档、CHANGELOG 历史条目、`docs/caller-driven.md` 示例计划、工具注释、测试夹具与验收记录统一中性占位：文本 项目A/项目B、编号值 07/08；classify 提示词去固定编号示例）。本轮同时用于刷新 npm 页面——注册表不提供历史版本 readme，旧版示例文案只能由新版本覆盖；仓库 HEAD `088abf7`。
+- 发布前实测：离线套件 **513/513**（3 条按平台跳过：本机未安装 kimi/opencode/pi CLI）；`node scripts/gate.mjs --all` = `ORCH_GATE: PASS — 5 criteria`（L1/L2a/L2b/L3/L4 逐层实读；全量两次 + L4 单跑一次）；封印 `schema 2 / 41 核心 + 65 运行时`。
+- 包面：92 文件、packed 385.2 kB、unpacked 905.2 kB、shasum `60e68bf6caf8b4ee88110072a246f4ae6103ae42`、tag `latest`。
+- registry 回读：`npm view` → `version = 26.10.12`、`dist-tags = { latest: 26.10.12 }`；`npx -y open-tui-orchestrator@26.10.12 --version` → `open-tui-orchestrator 26.10.12 (core 0.9.24-1)`；新版本 readme 实读零旧文案（`project 8x` 命中 0，新中性示例在位）。
+- 注意：`26.10.12` 数值上低于旧日期版本（`2026.9.30-2`），仍须显式 `--tag latest`；首次 PUT 后 registry 全量生效约 6 分钟（期间 `npm view` 先 404/旧值，直读注册表可先行确认）。
