@@ -1,6 +1,6 @@
 # Changelog
 
-## 2026.10.11 — 五 CLI 真机轮 + 恢复/画像增强
+## 26.10.11 — 五 CLI 真机轮 + 恢复/画像增强
 
 - **恢复第三档（unproven）**：跑过、无成果、未声明可重跑的单元自动补跑一次（`ORCH_UNPROVEN_RETRIES` 默认 1、0=关），仍无果时以 needs-reconciliation 诚实上报（恰一次）；`retrySafe:false` 保留否决权。
 - **窗口生命周期收口**：正常/异常一律关窗（温柔关三层：杀单元后代 → 等 launcher 自退 → WM_CLOSE → 强杀记账）；异常退出码只记录不判断。
