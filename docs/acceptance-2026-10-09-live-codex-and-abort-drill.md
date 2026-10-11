@@ -46,7 +46,7 @@
 | 区域 | 内容 | 执行者 | 验收 |
 |---|---|---|---|
 | OTUI 仓 `temp\` | 1279 项测试夹具 | 发起会话（见下） | PASS |
-| `D:\workspace\temp` | 运行残留（unit-peak-* / win-B*.window.json / live-codex-*.log / open-live-*） | hermes 单元（3 次尝试） | PASS |
+| `<workspace>\temp` | 运行残留（unit-peak-* / win-B*.window.json / live-codex-*.log / open-live-*） | hermes 单元（3 次尝试） | PASS |
 | 旧 C 盘工作区 | OTUI 残留 | hermes 单元（1 次尝试） | PASS |
 
 终判 `success=true`、2/2 verified；跨区域保护断言（其他开发线目录、审计证据、`.git`）全部 PASS；窗口收尾 0。
@@ -59,6 +59,6 @@
 
 ## 证据
 
-- 日志：`D:\workspace\temp\live-codex-20261009.log` / `…-r2.log`；`…\otui-abort-drill-20261009\drill-run.log` / `drill-run2.log`；`…\otui-cleanup-20261009\run2.log`
+- 日志：`<workspace>\temp\live-codex-20261009.log` / `…-r2.log`；`…\otui-abort-drill-20261009\drill-run.log` / `drill-run2.log`；`…\otui-cleanup-20261009\run2.log`
 - 采样与报告：`…\open-live-*` 的 `report.json`（含 310 / 263 个 (live, ready) 采样）；`…\temp\orchestrator\runs\<runId>\summary.json`
-- 验收脚本：`D:\workspace\temp\otui-cleanup-20261009\verify-cleanup.mjs`
+- 验收脚本：`<workspace>\temp\otui-cleanup-20261009\verify-cleanup.mjs`

@@ -31,7 +31,7 @@ open-tui-orchestrator --install-deps
 git clone <本仓库>
 cd open-tui-orchestrator
 npm run setup                                  # = npm ci --prefix scripts
-npm test                                       # 离线回归（测试环境约定见 README-zh.md）
+npm test                                       # 离线回归（环境要求见上）
 node scripts/gate.mjs --all                    # 机判门禁：套件 + doctor + 反例能红 + 未知 run + 版本·封印·文档口径对账
 node scripts/release-integrity.mjs             # 封印校验（跑之前先确认这份检出没被动过）
 node cli.mjs --agent codex --doctor

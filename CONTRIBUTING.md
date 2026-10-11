@@ -10,7 +10,7 @@ node scripts/gate.mjs --all        # the machine gate: L1 suite · L2a doctor ·
 ```
 
 The suite needs the agent CLI it drives to be resolvable (default `codex`); see
-*Test-env requirement* in `README.md`. A change is not ready if the gate is red, and a change
+*Requirements* in `INSTALL.md`. A change is not ready if the gate is red, and a change
 that silently weakens a criterion is worse than one that fails it.
 
 ## House rules

@@ -87,3 +87,12 @@ gh repo edit yechang1450/open-tui-orchestrator --visibility public --accept-visi
 - 包面：99 文件、unpacked 900.8 kB、shasum `2b43596cb831fe16f780956b783677e477c1cf20`、integrity `sha512-tnG5LLNU81+ojOqsdNqt063KMQpQryHrVcXt1tcWBMUZgdxdILy70Fu8z2CeWHHx0UkAEAipNakhKpRCw6z6Hg==`、tag `latest`。
 - registry 回读：`npm view` → `version = 0.9.24-1`、`dist-tags = { latest: 0.9.24-1 }`；`npx --yes --registry https://registry.npmjs.org open-tui-orchestrator@0.9.24-1 --version` → `open-tui-orchestrator 0.9.24-1 (core 0.9.24-1)`；全局安装已同步 `0.9.24-1`。
 - 注意：`0.9.24-1` 带预发布段，npm 需显式 `--tag latest`；PUT 回 202 后约 5 分钟 registry 生效；npmmirror 有同步延迟。
+
+## 发布记录追加：26.10.11（2026-10-11 晚 +08）
+
+- 版本：`open-tui-orchestrator@26.10.11`（`latest` 已显式刷新为它，`--tag latest`；日版本号体系 = YY.MM.DD）；内容＝恢复第三档（unproven 自动补跑一次）、窗口生命周期收口（正常/异常一律关窗、温柔关三层）、画像探测增强（ANSI 剥离 / 宽列注入 / npm shim 解析 / 安装位探测 / 子命令二级探测）、kimi 适配修复（接受 npm 全局安装的 `.cmd` shim）；仓库 HEAD `80690cf`。
+- 发布前实测：离线套件 **511/511**；`node scripts/gate.mjs --all` 分层全绿（L1 / L2a / L2b / L3 + L4）；五家 CLI（codex / hermes / pi / opencode / kimi）真机轮端到端全绿（三文件 + `node --test` 通过）；封印 `schema 2 / 41 核心 + 65 运行时`。
+- 包面：92 文件、packed 383.7 kB、unpacked 902.2 kB、shasum `ef06330e05eecec5e43f84500807a6ce507b2f80`、tag `latest`。
+- registry 回读：`npm view` → `version = 26.10.11`、`dist-tags = { latest: 26.10.11 }`；`npx -y open-tui-orchestrator@26.10.11 --version` → `open-tui-orchestrator 26.10.11 (core 0.9.24-1)`。
+- 注意：`26.10.11` 数值上低于旧日期版本（`2026.9.30-2`），npm 拒绝自动打 `latest`，必须显式 `--tag latest`；首次 PUT 后约 1–2 分钟 registry 生效。
+- 同轮清理：3 个 dependabot PR 分支与 dependabot 配置移除（单人仓库）；README 双语瘦身（EN 93 行 / ZH 92 行）；仓内 markdown 相对链接全量检查 61 条、死链 0。

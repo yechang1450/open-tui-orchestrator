@@ -9,8 +9,8 @@
 
 ### Other platforms (Linux / macOS)
 
-The product refuses to run outside Windows by design, and so does its test suite: ~70 of 230 cases
-drive the Windows runtime (visible TUI carrier, process snapshot, PowerShell launchers). Running
+The product refuses to run outside Windows by design, and so does its test suite: roughly a third of
+the cases drive the Windows runtime (visible TUI carrier, process snapshot, PowerShell launchers). Running
 `npm test` on Linux/macOS therefore stops immediately with one platform diagnostic instead of a wall
 of failures. Two escape hatches exist:
 
@@ -46,7 +46,7 @@ open-tui-orchestrator --install-deps
 git clone <this repository>
 cd open-tui-orchestrator
 npm run setup                                  # = npm ci --prefix scripts
-npm test                                       # offline regression (see the test-env note in README.md)
+npm test                                       # offline regression (see *Requirements* above)
 node scripts/gate.mjs --all                    # the machine gate: suite + doctor + red canary + unknown run + version/seal/docs cross-check
 node scripts/release-integrity.mjs             # seal verify for the checkout you are about to run
 node cli.mjs --agent codex --doctor
