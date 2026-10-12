@@ -22,7 +22,7 @@
 
 - **要证据，不要口头声明。** 每个窗口为它的块打印完整 TODO 清单，写 `started`/`completed` 检查点与 token 专属的 `__ORCH_DONE__` 标记；看护进程加上父级的验收条件，核实真实文件、命令输出、进程关闭与租约释放。**每个任务都 `verified` 时，整轮才算成功。**
 - **可恢复，但不盲目重放。** 中断的运行会按 PID / 创建时间 / 可执行文件 / 命令行认领存活的窗口；已开始但副作用无法证明的任务会变成 `needs-reconciliation`（交给人核实真实状态），而不是被盲目重放。停滞单元（证据停止推进超过 `ORCH_UNIT_STALL_MS`，默认 600000 ms）会被关闭并在块的尝试预算内重试；`ORCH_UNIT_TIMEOUT_MS`（默认 2700000 ms）限制单个单元的最长寿命。
-- **五种宿主、一套契约。** Codex、pi、opencode、Kimi Code、Hermes Agent 的适配器在共享契约之下分别实现参数构造、会话/结果读取、完成检测与关闭。宿主由 `--agent`/`ORCH_AGENT`、宿主环境标记、或从 Windows 祖先进程链推断发起方选定。未知宿主、未验证 CLI、可执行文件缺失都会给出诊断——**不自动安装、不静默回退到其它 Agent。**
+- **七种宿主、一套契约。** Codex、pi、opencode、Kimi Code、Claude Code、OpenClaw、Hermes Agent 的适配器在共享契约之下分别实现参数构造、会话/结果读取、完成检测与关闭。宿主由 `--agent`/`ORCH_AGENT`、宿主环境标记、或从 Windows 祖先进程链推断发起方选定。适配器细节：[Claude Code](docs/claude-adapter.md)、[OpenClaw](docs/openclaw-adapter.md)、[pi](docs/pi-adapter.md)。未知宿主、未验证 CLI、可执行文件缺失都会给出诊断——**不自动安装、不静默回退到其它 Agent。**
 
 运行状态（启动器、锁、结果、账本）在你工作区的 `temp/orchestrator` 下；你的 Agent 自己的配置、会话与凭据仍在原位置。编排器只会转交调用者已有的权限，绝不充当提权层。
 
@@ -34,7 +34,7 @@ open-tui-orchestrator --install-deps          # 拉取本包锁定的 SDK 依赖
 open-tui-orchestrator --agent codex --doctor  # 自检：hostError null、carrierAvailable true
 ```
 
-要求：Windows 10/11 (x64)、Node.js 22+、Windows Terminal（推荐）、以及一个你**已经在用且已登录**的 Agent CLI——Codex / pi / opencode / Kimi Code / Hermes Agent 之一。本工具从不安装或代替 Agent CLI。tarball 安装、源码安装、升级/回滚、卸载与排障见 **[INSTALL-zh.md](INSTALL-zh.md)**（英文: [INSTALL.md](INSTALL.md)）。
+要求：Windows 10/11 (x64)、Node.js 22+、Windows Terminal（推荐）、以及一个你**已经在用且已登录**的 Agent CLI——Codex / pi / opencode / Kimi Code / Claude Code / OpenClaw / Hermes Agent 之一。本工具从不安装或代替 Agent CLI。tarball 安装、源码安装、升级/回滚、卸载与排障见 **[INSTALL-zh.md](INSTALL-zh.md)**（英文: [INSTALL.md](INSTALL.md)）。
 
 ## 适用场景
 
@@ -60,11 +60,13 @@ node cli.mjs --plan-file plan.json --unit-cmd-file unit.json --run-windows '修�
 
 ## 支持的宿主
 
-Codex CLI、pi CLI、opencode CLI、Kimi Code CLI、Hermes Agent 均已接入适配器。诊断：
+Codex CLI、pi CLI、opencode CLI、Kimi Code CLI、Claude Code CLI、OpenClaw CLI、Hermes Agent 均已接入适配器。诊断：
 
 ```powershell
 node cli.mjs --agent codex --doctor
 node cli.mjs --agent pi --doctor
+node cli.mjs --agent claude --doctor
+node cli.mjs --agent openclaw --doctor
 node cli.mjs --agent hermes --doctor
 ```
 
@@ -72,4 +74,4 @@ node cli.mjs --agent hermes --doctor
 
 ## 验证状态
 
-当前通用核心为 0.9.24-1，离线回归为 513/513 通过。本机发布的判定器是 `node scripts/gate.mjs --all`——L1 离线套件、L2 宿主解析 + 反例能红（判据本身没坏）、L3 未知 run 干净失败、L4 版本/封印/文档/套件总数对账。任何核心或运行时文件变更都必须重新 `release-integrity --seal`。细节与证据：[docs/release-policy.md](docs/release-policy.md)。
+当前通用核心为 0.9.24-1，离线回归为 533/533 通过。本机发布的判定器是 `node scripts/gate.mjs --all`——L1 离线套件、L2 宿主解析 + 反例能红（判据本身没坏）、L3 未知 run 干净失败、L4 版本/封印/文档/套件总数对账。任何核心或运行时文件变更都必须重新 `release-integrity --seal`。细节与证据：[docs/release-policy.md](docs/release-policy.md)。

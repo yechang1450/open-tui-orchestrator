@@ -105,3 +105,11 @@ gh repo edit yechang1450/open-tui-orchestrator --visibility public --accept-visi
 - 包面：92 文件、packed 385.2 kB、unpacked 905.2 kB、shasum `60e68bf6caf8b4ee88110072a246f4ae6103ae42`、tag `latest`。
 - registry 回读：`npm view` → `version = 26.10.12`、`dist-tags = { latest: 26.10.12 }`；`npx -y open-tui-orchestrator@26.10.12 --version` → `open-tui-orchestrator 26.10.12 (core 0.9.24-1)`；新版本 readme 实读零旧文案（`project 8x` 命中 0，新中性示例在位）。
 - 注意：`26.10.12` 数值上低于旧日期版本（`2026.9.30-2`），仍须显式 `--tag latest`；首次 PUT 后 registry 全量生效约 6 分钟（期间 `npm view` 先 404/旧值，直读注册表可先行确认）。
+
+## 发布记录追加：26.10.13-2（beta 通道，2026-10-12 早间 +08）
+
+- 版本：`open-tui-orchestrator@26.10.13-2`（`--tag beta`；`latest` 不受影响，仍 26.10.12）。内容＝七宿主测试版（Claude Code 适配器复活 + OpenClaw 重建为 print 类驱动官方 `agent --local` 面）＋ GitHub 源安装循环实逮的**封印 CRLF 缺陷修复**（`scripts/package.json`/`scripts/package-lock.json` 工作区字节归一化 LF，封印按 LF 字节重算——修复前 npm 包自洽但任何干净 checkout 的 `release-integrity` 必红）。仓库 HEAD `cf7f6be`（分支 `beta`；master 不受影响）。
+- 发布前实测：离线套件 **533/533**（0 跳过：七家 CLI 全部实装）；`node scripts/gate.mjs --all` = `ORCH_GATE: PASS — 5 criteria`（dev 树 + GitHub 全新克隆各一遍）；封印 `schema 2 / 45 核心 + 69 运行时`。
+- registry 回读：`dist-tags = { latest: 26.10.12, beta: 26.10.13-2 }`；安装 `26.10.13-2` 后 `--version` = `26.10.13-2 (core 0.9.24-1)`；`--install-deps` 首跑 installed / 复跑 already-present（幂等）；七宿主 doctor 全绿。
+- 双通道验收：npm 副本七宿主真机轮全部 success=true、2/2 verified（verify-run 复核 rc=0）；GitHub 克隆七宿主真机轮同全绿（opencode 轮经官方 `--resume-run` 收编 gen=2）；两通道为同一棵 LF 树，克隆侧 `release-integrity` rc=0。
+- 注意：预发布版本号（`X.Y.Z-N` 形态）不带 `--tag` 会被 npm 拒发；`-beta.N` 形态不符合本仓 `--version` 输出契约（三处判据钉 `X.Y.Z(-N)?`），勿用。

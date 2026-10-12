@@ -23,7 +23,7 @@ admittable units       = floor((available memory MB − 1000) / unit estimate)
 
 - **Evidence, not verbal claims.** Each window prints a complete TODO LIST for its block, writes `started`/`completed` checkpoints and a token-specific `__ORCH_DONE__` marker; a watchdog plus the parent's acceptance checks verify real files, command output, process closure and lease release. The run is green only when every task is `verified`.
 - **Recovery without replaying blind.** An interrupted run adopts a surviving window by PID / creation time / executable / command line; a started task whose side effect cannot be proved becomes `needs-reconciliation` instead of being replayed. Stalled units (no evidence movement for `ORCH_UNIT_STALL_MS`, default 600000 ms) are closed and retried inside the block's attempt budget; `ORCH_UNIT_TIMEOUT_MS` (default 2700000 ms) caps one unit's lifetime.
-- **Five hosts, one contract.** Codex, pi, opencode, Kimi Code and Hermes Agent adapters implement argument construction, session/result reading, completion detection and shutdown behind one shared contract. The host is selected with `--agent`/`ORCH_AGENT`, host environment markers, or detection of the initiating agent from the Windows ancestor process chain. An unknown host, an unvalidated CLI or a missing executable produces a diagnostic — nothing is auto-installed and there is no silent fallback to another agent.
+- **Seven hosts, one contract.** Codex, pi, opencode, Kimi Code, Claude Code, OpenClaw and Hermes Agent adapters implement argument construction, session/result reading, completion detection and shutdown behind one shared contract. The host is selected with `--agent`/`ORCH_AGENT`, host environment markers, or detection of the initiating agent from the Windows ancestor process chain. Adapter details: [Claude Code](docs/claude-adapter.md), [OpenClaw](docs/openclaw-adapter.md), [pi](docs/pi-adapter.md). An unknown host, an unvalidated CLI or a missing executable produces a diagnostic — nothing is auto-installed and there is no silent fallback to another agent.
 
 Run state (launchers, locks, results, ledgers) lives under `temp/orchestrator` in the run workspace; your agent keeps its own configuration, sessions and credentials in its normal location. The orchestrator forwards the caller's permissions and never acts as a privilege-escalation layer.
 
@@ -35,7 +35,7 @@ open-tui-orchestrator --install-deps          # fetch this package's locked SDK 
 open-tui-orchestrator --agent codex --doctor  # verify: hostError null, carrierAvailable true
 ```
 
-Requirements: Windows 10/11 (x64), Node.js 22+, Windows Terminal (recommended) and one agent CLI you already use and are logged into — Codex, pi, opencode, Kimi Code or Hermes Agent. The tool never installs or substitutes an agent CLI. Tarball install, source install, upgrade/rollback, uninstall and troubleshooting: **[INSTALL.md](INSTALL.md)** (中文: [INSTALL-zh.md](INSTALL-zh.md)).
+Requirements: Windows 10/11 (x64), Node.js 22+, Windows Terminal (recommended) and one agent CLI you already use and are logged into — Codex, pi, opencode, Kimi Code, Claude Code, OpenClaw or Hermes Agent. The tool never installs or substitutes an agent CLI. Tarball install, source install, upgrade/rollback, uninstall and troubleshooting: **[INSTALL.md](INSTALL.md)** (中文: [INSTALL-zh.md](INSTALL-zh.md)).
 
 ## When to use it
 
@@ -61,11 +61,13 @@ I'm used to giving an AI agent a lot of work at once — and much of it isn't ev
 
 ## Supported hosts
 
-Codex CLI, pi CLI, opencode CLI, Kimi Code CLI and Hermes Agent have adapters. Run diagnostics with:
+Codex CLI, pi CLI, opencode CLI, Kimi Code CLI, Claude Code CLI, OpenClaw CLI and Hermes Agent have adapters. Run diagnostics with:
 
 ```powershell
 node cli.mjs --agent codex --doctor
 node cli.mjs --agent pi --doctor
+node cli.mjs --agent claude --doctor
+node cli.mjs --agent openclaw --doctor
 node cli.mjs --agent hermes --doctor
 ```
 
@@ -73,4 +75,4 @@ An unknown host, missing CLI or invalid explicit path fails with a diagnostic.
 
 ## Validation status
 
-The current generic core is 0.9.24-1, with 513/513 offline tests passing. The local release judge is `node scripts/gate.mjs --all` — L1 offline suite, L2 host resolution plus a must-fail canary (the criteria themselves can still go red), L3 clean unknown-run failure, L4 version / seal / docs / suite-total cross-check. Every core or runtime change requires a fresh `release-integrity --seal`. Details and evidence: [docs/release-policy.md](docs/release-policy.md).
+The current generic core is 0.9.24-1, with 533/533 offline tests passing. The local release judge is `node scripts/gate.mjs --all` — L1 offline suite, L2 host resolution plus a must-fail canary (the criteria themselves can still go red), L3 clean unknown-run failure, L4 version / seal / docs / suite-total cross-check. Every core or runtime change requires a fresh `release-integrity --seal`. Details and evidence: [docs/release-policy.md](docs/release-policy.md).
