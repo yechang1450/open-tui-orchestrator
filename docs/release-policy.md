@@ -29,7 +29,27 @@ npx -y <pkg>@<ver> --version                      # ⑧ 冷装烟测
 
 两个易错点：**③ 之后必须重封**（否则 ⑤ 会红）；带 `-N` 的版本号（如 `2026.9.29-1`）属 semver 预发布版，`npm publish` 不带 `--tag` 会被拒（`You must specify a tag using --tag when publishing a prerelease version`），要显式 `--tag latest`。
 
-版本号口径：`YY.MM.DD-N` —— 日期取**发布当天**，`N` 为**当天第几次更新**（例：10-13 当天第三次更新 = `26.10.13-3`）；下一次发布只需后缀 +1（如 `26.10.13-3` → `26.10.13-4`）。**通道（2026-10-13 主人定）**：npm 只发 `latest`（正式版；测试版不上 npm）；测试版经 GitHub `beta` 分支流转——GitHub 侧以分支为通道（`master` = 正式版线、`beta` = 测试版线）。**大流程**：隔离本地正式版 → 基于正式版在 `beta` 线开发测试版 → 全方位测试通过 → push `beta` → pull 回来与本地正式版 merge → 全方位测试通过 → push `master` → npm 发布新版 `latest`。
+版本号口径：`YY.MM.DD-N` —— 日期取**发布当天**，`N` 为**当天第几次更新**（例：10-13 当天第三次更新 = `26.10.13-3`）；下一次发布只需后缀 +1（如 `26.10.13-3` → `26.10.13-4`）。**通道（2026-10-13 主人定）**：npm 只发 `latest`（正式版；测试版不上 npm）；测试版经 GitHub `beta` 分支流转——GitHub 侧以分支为通道（`master` = 正式版线、`beta` = 测试版线）。**大流程**（一句话概述）：隔离本地正式版 → 基于正式版在 `beta` 线开发测试版 → 全方位测试通过 → push `beta` → pull 回来与本地正式版 merge → 全方位测试通过 → push `master` → npm 发布新版 `latest`。
+
+**大流程分步执行单（2026-10-14 定稿）**：
+
+1. **基线隔离**——`master` 树净、与远端同步（fetch 后无分叉），记下基线 SHA。
+2. **测试版开发**——自基线拉 `beta` 开发线；改动与判据同线完成；`master` 不动。
+3. **全方位测试（分级）**：
+   - L1 离线套件全绿：`fail == 0`；跳过必须逐条具名且理由为「CLI is not installed」（允许缺席宿主的具名跳过；不允许静默跳过，解析数须与 reporter 一致）。
+   - L2 门禁 `node scripts/gate.mjs --all` 五判据全绿。
+   - L3 封印：`release-integrity` rc=0；凡触及密封件（核心 / 运行时 / package.json）必须重封（`--seal`）并复核。
+   - L4 真机轮（按变更面）：核心/运行时 → codex+hermes 必跑；适配层 → 涉及宿主各自真机；发布级 → 全宿主（按装机情况，缺装时如实记录）。
+   - L5 文档对账：版本号 / 封印计数 / 套件总数在 README×2 与 release-policy 三处一致（含于门禁 L4）。
+4. **测试版上线**——push 至 GitHub `beta` 分支（测试版线上存档）。
+5. **合流**——pull 回来与基线 `--no-ff` merge；合并后 `git diff beta master` 必须为空（合流树与通过验收的 beta 树逐字节一致）。
+6. **合并后复测**——封印 + 门禁（L2/L3）。
+7. **正式版上线**——push `master`。
+8. **npm 发布**——按上方「顺序陷阱」七步执行（回归 → 门禁 → `npm version` → 重封 → `--tasks smoke` → `npm publish --tag latest` → 回读 → 冷装）。
+9. **发布后验证**——registry 回读、`npx` 冷装、本机全局安装更新。
+10. **记录**——release-policy 轮次条目 + `CHANGELOG.md` + `docs/public-readiness.md`。
+
+**npm 页快照（2026-10-14 注）**：npm 页面上的 README 与元数据是**发布时快照**——用户面文档（README / INSTALL）的修改须经一次发布才能反映到 npm 页；每轮发布前须确认用户面文档为最新。
 
 2026-10-13 npm 极限瘦身 + 公开面审计轮（26.10.13-4）：① **npm 极限瘦身**——发布包只留运行闭包与用户文档（98→66 文件、packed 399.2→217.3KB＝−45%、解包 −37%）；`repair.mjs`、`docs/`、`CHANGELOG.md` 与 9 个开发/工作流件（gate / force / preflight / todo-list / 测试 shim / auth 模板 / 守卫自测）挡在包外且仅存于仓库；封印面与装机面同构（`release-integrity` 的 `DEV_ONLY_FILES` 与 package.json 否定项同步、由判据双向锁定；**`orch.mjs` 首次纳入封印**＝45 核心/60 运行时）；README/INSTALL 链接绝对化（npm 页面可点；15/15 实测可达）。② **信息面审计**——GitHub 仓开启 secret scanning ＋ push protection ＋ dependabot 告警（security updates 保持关：单人不引入自动 PR）；修复 `SECURITY.md` 与 `trust-and-safety.md` 中残留的 `~/.tools/releases`＋junction 发布模型描述（改为 npm/解压目录/仓检出＝运行位置、卸载＝删包目录）；退役已废 `flip-orch-junction` 装置（连其 4 条判据）；`orch-patrol-install` 迁移为自定位＋PATH python＋%LOCALAPPDATA% 载体（真装、真跑一 tick rc=0、真卸）；`orch-level-check` 翻转例提示去死路径。③ **攻击面审计**——复核 09-09 基线全项仍成立（无 shell 注入、生成物无插值、提示词全程走文件、系统工具锚定、身份四元组、pi/claude/openclaw 外来 result token 防护、验收哈希锚定、runId 与 state 包容校验、供应链精确钉版、无运行期网络、ci.yml 仅手动且 GitHub 侧禁用）；新修 `locateCli` 的裸名 `where.exe` 残留→SystemRoot 锚定（红例实证：cwd 劫持件在修复版下必须不被执行）；09-09 登记的 7 项同用户低危维持登记。④ 判据：531/531（＋1 锚定判据、−4 废装置判据）；`gate --all` 五判据全绿；打包清单实证（dev/docs 零残留）；tarball 装机 + 真机轮复验。
 
