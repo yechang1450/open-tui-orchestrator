@@ -6,6 +6,14 @@ import {fileURLToPath} from 'node:url';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const EXCLUDED_DIRS = new Set(['.git', '.plugin-eval', 'coverage', 'node_modules', 'temp']);
 const EXCLUDED_FILES = new Set(['.agent-cache.json']);
+// Repository-only development files: they stay in the repo but NEVER enter the npm package, so the
+// seal must follow the SHIPPED surface — an installed copy verifies against this same manifest.
+// Keep in sync with the `files` negations in package.json (guarded by test/release-integrity.test.mjs).
+const DEV_ONLY_FILES = new Set([
+  'gate.mjs', 'host-cli.mjs', 'network-policy.mjs', 'agent.mjs', 'agent-auth-prompt.txt',
+  'test-platform-guard.mjs', 'open-tui-orchestrator-force.mjs',
+  'open-tui-orchestrator-preflight.mjs', 'todo-list.mjs',
+]);
 
 function sha256(file) {
   return crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
@@ -44,12 +52,15 @@ export function coreInventory(packageRoot = root) {
 
 export function runtimeInventory(packageRoot = root) {
   const files = {};
-  for (const rel of ['cli.mjs', 'package.json', 'repair.mjs', 'scripts/recover-stale.mjs']) {
+  for (const rel of ['cli.mjs', 'orch.mjs', 'package.json', 'scripts/recover-stale.mjs']) {
     const file = path.join(packageRoot, rel);
     if (fs.existsSync(file)) walkFile(file, rel, files);
   }
   const scripts = path.join(packageRoot, 'scripts');
-  if (fs.existsSync(scripts)) walkDirectory(scripts, 'scripts', files);
+  if (fs.existsSync(scripts)) {
+    walkDirectory(scripts, 'scripts', files);
+    for (const name of DEV_ONLY_FILES) delete files['scripts/' + name];
+  }
   return files;
 }
 

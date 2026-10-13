@@ -88,7 +88,7 @@ npm uninstall -g open-tui-orchestrator
 
 ## 它在你的机器上做什么（简版）
 
-完整声明（包括**没有**沙箱化的部分）见 [docs/trust-and-safety.md](docs/trust-and-safety.md)。简版：
+完整声明（包括**没有**沙箱化的部分）见 [docs/trust-and-safety.md](https://github.com/yechang1450/open-tui-orchestrator/blob/master/docs/trust-and-safety.md)。简版：
 
 - 只驱动你已有的 agent CLI，并沿用你现有的授权——Codex 在「never 审批 + full access」策略下会带 `--dangerously-bypass-approvals-and-sandbox`，以免已授权的窗口卡在项目信任提示上；
 - 运行状态**只写** `<工作区>\temp\orchestrator`；

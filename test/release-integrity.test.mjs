@@ -68,3 +68,23 @@ test('generic release verification refuses a linked entry inside the sealed tree
     fs.rmSync(root, {recursive: true, force: true});
   }
 });
+
+// npm 包只装「跑起来用得上的」：仓库侧的开发件不得进入封印面（=不得进 npm 包），随包入口必须在。
+// 红例方向：把任一 dev 件从 DEV_ONLY_FILES 移回（或把 files 白名单还原），本判据必红。
+test('the sealed runtime surface excludes repository-only development files', () => {
+  const inv = runtimeInventory(source);
+  for (const rel of [
+    'scripts/gate.mjs', 'scripts/host-cli.mjs', 'scripts/network-policy.mjs', 'scripts/agent.mjs',
+    'scripts/agent-auth-prompt.txt', 'scripts/test-platform-guard.mjs',
+    'scripts/open-tui-orchestrator-force.mjs', 'scripts/open-tui-orchestrator-preflight.mjs',
+    'scripts/todo-list.mjs', 'repair.mjs',
+  ]) assert.equal(rel in inv, false, `${rel} must not be sealed (dev-only, not shipped)`);
+  for (const rel of [
+    'cli.mjs', 'orch.mjs', 'package.json',
+    'scripts/adapt.mjs', 'scripts/install-deps.mjs', 'scripts/maintenance-lock.mjs',
+    'scripts/orchestrate-sdk.mjs', 'scripts/poll-windows.mjs', 'scripts/release-integrity.mjs',
+    'scripts/sdk-dependency-check.mjs', 'scripts/recover-stale.mjs', 'scripts/runtime-context.mjs',
+    'scripts/package.json', 'scripts/package-lock.json', 'scripts/core/orchestrate-sdk.mjs',
+    'scripts/core/agent-auth-prompt.txt',
+  ]) assert.equal(rel in inv, true, `${rel} must stay sealed (shipped runtime)`);
+});

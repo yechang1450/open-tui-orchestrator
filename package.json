@@ -19,18 +19,24 @@
   "files": [
     "cli.mjs",
     "orch.mjs",
-    "repair.mjs",
     "package.json",
     "release.json",
     "README.md",
     "README-zh.md",
     "INSTALL.md",
     "INSTALL-zh.md",
-    "CHANGELOG.md",
     "LICENSE",
-    "docs",
     "scripts",
-    "!scripts/node_modules"
+    "!scripts/node_modules",
+    "!scripts/gate.mjs",
+    "!scripts/host-cli.mjs",
+    "!scripts/network-policy.mjs",
+    "!scripts/agent.mjs",
+    "!scripts/agent-auth-prompt.txt",
+    "!scripts/test-platform-guard.mjs",
+    "!scripts/open-tui-orchestrator-force.mjs",
+    "!scripts/open-tui-orchestrator-preflight.mjs",
+    "!scripts/todo-list.mjs"
   ],
   "keywords": [
     "agent",

@@ -2,9 +2,9 @@
 
 面向 Agent CLI 的本地 Node.js 编排器：把复杂请求拆成**无损失、可验证**的任务账本，并按你机器**实际可让出的内存**并发运行其中的并行块——每块一个 TUI 窗口。
 
-> 项目文档：[贡献指南](CONTRIBUTING.md) · [安全政策](SECURITY.md) · [行为准则](CODE_OF_CONDUCT.md) · [Issue 模板](.github/ISSUE_TEMPLATE) · [PR 模板](.github/pull_request_template.md)
+> 项目文档：[贡献指南](https://github.com/yechang1450/open-tui-orchestrator/blob/master/CONTRIBUTING.md) · [安全政策](https://github.com/yechang1450/open-tui-orchestrator/blob/master/SECURITY.md) · [行为准则](https://github.com/yechang1450/open-tui-orchestrator/blob/master/CODE_OF_CONDUCT.md) · [Issue 模板](https://github.com/yechang1450/open-tui-orchestrator/tree/master/.github/ISSUE_TEMPLATE) · [PR 模板](https://github.com/yechang1450/open-tui-orchestrator/blob/master/.github/pull_request_template.md)
 
-**当前仅支持 Windows。** 启动器、隐形 ConPTY 载体与全机协调器都是 Windows 专属；其他平台会得到明确的诊断而不是一个"半能用"的安装。运行前请先读 **[docs/trust-and-safety.md](docs/trust-and-safety.md)**——它如实说明这个工具会在你的机器上做什么（用你的凭据运行的隐藏 Agent、Codex 宿主运行的免审批模式、具体写入哪些文件）。安全报告渠道：[SECURITY.md](SECURITY.md)。
+**当前仅支持 Windows。** 启动器、隐形 ConPTY 载体与全机协调器都是 Windows 专属；其他平台会得到明确的诊断而不是一个"半能用"的安装。运行前请先读 **[docs/trust-and-safety.md](https://github.com/yechang1450/open-tui-orchestrator/blob/master/docs/trust-and-safety.md)**——它如实说明这个工具会在你的机器上做什么（用你的凭据运行的隐藏 Agent、Codex 宿主运行的免审批模式、具体写入哪些文件）。安全报告渠道：[SECURITY.md](https://github.com/yechang1450/open-tui-orchestrator/blob/master/SECURITY.md)。
 
 ## 它可以做什么
 
@@ -22,7 +22,7 @@
 
 - **要证据，不要口头声明。** 每个窗口为它的块打印完整 TODO 清单，写 `started`/`completed` 检查点与 token 专属的 `__ORCH_DONE__` 标记；看护进程加上父级的验收条件，核实真实文件、命令输出、进程关闭与租约释放。**每个任务都 `verified` 时，整轮才算成功。**
 - **可恢复，但不盲目重放。** 中断的运行会按 PID / 创建时间 / 可执行文件 / 命令行认领存活的窗口；已开始但副作用无法证明的任务会变成 `needs-reconciliation`（交给人核实真实状态），而不是被盲目重放。停滞单元（证据停止推进超过 `ORCH_UNIT_STALL_MS`，默认 600000 ms）会被关闭并在块的尝试预算内重试；`ORCH_UNIT_TIMEOUT_MS`（默认 2700000 ms）限制单个单元的最长寿命。
-- **七种宿主、一套契约。** Codex、pi、opencode、Kimi Code、Claude Code、OpenClaw、Hermes Agent 的适配器在共享契约之下分别实现参数构造、会话/结果读取、完成检测与关闭。宿主由 `--agent`/`ORCH_AGENT`、宿主环境标记、或从 Windows 祖先进程链推断发起方选定。适配器细节：[Claude Code](docs/claude-adapter.md)、[OpenClaw](docs/openclaw-adapter.md)、[pi](docs/pi-adapter.md)。未知宿主、未验证 CLI、可执行文件缺失都会给出诊断——**不自动安装、不静默回退到其它 Agent。**
+- **七种宿主、一套契约。** Codex、pi、opencode、Kimi Code、Claude Code、OpenClaw、Hermes Agent 的适配器在共享契约之下分别实现参数构造、会话/结果读取、完成检测与关闭。宿主由 `--agent`/`ORCH_AGENT`、宿主环境标记、或从 Windows 祖先进程链推断发起方选定。适配器细节：[Claude Code](https://github.com/yechang1450/open-tui-orchestrator/blob/master/docs/claude-adapter.md)、[OpenClaw](https://github.com/yechang1450/open-tui-orchestrator/blob/master/docs/openclaw-adapter.md)、[pi](https://github.com/yechang1450/open-tui-orchestrator/blob/master/docs/pi-adapter.md)。未知宿主、未验证 CLI、可执行文件缺失都会给出诊断——**不自动安装、不静默回退到其它 Agent。**
 
 运行状态（启动器、锁、结果、账本）在你工作区的 `temp/orchestrator` 下；你的 Agent 自己的配置、会话与凭据仍在原位置。编排器只会转交调用者已有的权限，绝不充当提权层。
 
@@ -34,7 +34,7 @@ open-tui-orchestrator --install-deps          # 拉取本包锁定的 SDK 依赖
 open-tui-orchestrator --agent codex --doctor  # 自检：hostError null、carrierAvailable true
 ```
 
-要求：Windows 10/11 (x64)、Node.js 22+、Windows Terminal（推荐）、以及一个你**已经在用且已登录**的 Agent CLI——Codex / pi / opencode / Kimi Code / Claude Code / OpenClaw / Hermes Agent 之一。本工具从不安装或代替 Agent CLI。tarball 安装、源码安装、升级/回滚、卸载与排障见 **[INSTALL-zh.md](INSTALL-zh.md)**（英文: [INSTALL.md](INSTALL.md)）。
+要求：Windows 10/11 (x64)、Node.js 22+、Windows Terminal（推荐）、以及一个你**已经在用且已登录**的 Agent CLI——Codex / pi / opencode / Kimi Code / Claude Code / OpenClaw / Hermes Agent 之一。本工具从不安装或代替 Agent CLI。tarball 安装、源码安装、升级/回滚、卸载与排障见 **[INSTALL-zh.md](https://github.com/yechang1450/open-tui-orchestrator/blob/master/INSTALL-zh.md)**（英文: [INSTALL.md](https://github.com/yechang1450/open-tui-orchestrator/blob/master/INSTALL.md)）。
 
 ## 适用场景
 
@@ -52,7 +52,7 @@ node cli.mjs --tasks '修复登录页；优化购物车'
 node cli.mjs --plan-file plan.json --unit-cmd-file unit.json --run-windows '修复登录页；优化购物车'
 ```
 
-`--plan` 只做规划；新的 `--run-windows` 仅在存在并行波时才开窗；`--resume-run <id>` 在中断后认领已保存的运行；`--verify-run <id>` 只复核不执行；`--status --readonly` 报告窗口、租约与活动运行；`--watch <id> [--jsonl]` 只读流式输出运行看板；`orch` 是强制执行入口——绕过一切内联回退（维护锁除外）。任何 Agent 都可以**不装适配器**直接调用：`--plan-file` 接收调用方自己的账本/分块（全程零模型调用），`--unit-cmd`/`--unit-cmd-file` 提供单元命令——见 [docs/caller-driven.md](docs/caller-driven.md)。接入新的 print 类 CLI：`node scripts/adapt.mjs`——见 [docs/adapt.md](docs/adapt.md)。维护编排器自身时，`node scripts/maintenance-lock.mjs lock --reason "为什么"` 会暂停一切动作入口直至解锁——见 [docs/maintenance-lock.md](docs/maintenance-lock.md)。
+`--plan` 只做规划；新的 `--run-windows` 仅在存在并行波时才开窗；`--resume-run <id>` 在中断后认领已保存的运行；`--verify-run <id>` 只复核不执行；`--status --readonly` 报告窗口、租约与活动运行；`--watch <id> [--jsonl]` 只读流式输出运行看板；`orch` 是强制执行入口——绕过一切内联回退（维护锁除外）。任何 Agent 都可以**不装适配器**直接调用：`--plan-file` 接收调用方自己的账本/分块（全程零模型调用），`--unit-cmd`/`--unit-cmd-file` 提供单元命令——见 [docs/caller-driven.md](https://github.com/yechang1450/open-tui-orchestrator/blob/master/docs/caller-driven.md)。接入新的 print 类 CLI：`node scripts/adapt.mjs`——见 [docs/adapt.md](https://github.com/yechang1450/open-tui-orchestrator/blob/master/docs/adapt.md)。维护编排器自身时，`node scripts/maintenance-lock.mjs lock --reason "为什么"` 会暂停一切动作入口直至解锁——见 [docs/maintenance-lock.md](https://github.com/yechang1450/open-tui-orchestrator/blob/master/docs/maintenance-lock.md)。
 
 ## 为什么做这个
 
@@ -74,4 +74,4 @@ node cli.mjs --agent hermes --doctor
 
 ## 验证状态
 
-当前通用核心为 0.9.24-1，离线回归为 533/533 通过。本机发布的判定器是 `node scripts/gate.mjs --all`——L1 离线套件、L2 宿主解析 + 反例能红（判据本身没坏）、L3 未知 run 干净失败、L4 版本/封印/文档/套件总数对账。任何核心或运行时文件变更都必须重新 `release-integrity --seal`。细节与证据：[docs/release-policy.md](docs/release-policy.md)。
+当前通用核心为 0.9.24-1，离线回归为 534/534 通过。仓库内发布的判定器是 `node scripts/gate.mjs --all`——L1 离线套件、L2 宿主解析 + 反例能红（判据本身没坏）、L3 未知 run 干净失败、L4 版本/封印/文档/套件总数对账。任何核心或运行时文件变更都必须重新 `release-integrity --seal`。细节与证据：[docs/release-policy.md](https://github.com/yechang1450/open-tui-orchestrator/blob/master/docs/release-policy.md)。

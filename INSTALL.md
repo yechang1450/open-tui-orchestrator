@@ -103,7 +103,7 @@ Per-workspace state stays under `<workspace>\temp\orchestrator`; delete it if yo
 
 ## What it does on your machine (short version)
 
-The full statement, including what is *not* sandboxed, is [docs/trust-and-safety.md](docs/trust-and-safety.md). In short:
+The full statement, including what is *not* sandboxed, is [docs/trust-and-safety.md](https://github.com/yechang1450/open-tui-orchestrator/blob/master/docs/trust-and-safety.md). In short:
 
 - drives the agent CLI you already have and carries your existing permissions — for Codex under the never-approval + full-access policy the launcher passes `--dangerously-bypass-approvals-and-sandbox` so an already-authorized window cannot stall on a project-trust prompt;
 - writes run state **only** under `<workspace>\temp\orchestrator`;
