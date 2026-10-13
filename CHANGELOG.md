@@ -1,5 +1,12 @@
 # Changelog
 
+## 26.10.13-4 — 公开面瘦身 + 安全审计
+
+- **npm 包极限瘦身**：发布包只保留运行闭包与用户文档（98→66 文件、打包体积 −45%）；仅维护者用的开发文件（gate/force/preflight/todo-list/测试 shim 等）与 `repair.mjs`、`docs/`、`CHANGELOG.md` 不再进包、只存在于仓库；封印面与装机面同构（`orch.mjs` 首次纳入封印）。
+- **GitHub 仓安全加固**：secret scanning、push protection、dependabot 告警开启；修复 `SECURITY.md` / `docs/trust-and-safety.md` 中已废弃的发布副本（`~/.tools` + junction）描述；退役已废的 junction 切换工具；patrol 安装器迁移为自定位（不再引用旧布局）。
+- **攻击面复核与加固**：复核既有安全基线全项仍成立；修复 `locateCli` 的裸名 `where.exe` 解析 → SystemRoot 锚定（附可红判据：cwd 劫持件必须不被执行）。
+- 发布前实测：离线套件 531/531；`gate --all` 五判据全绿；tarball 装机 + 真机轮复验。
+
 ## 26.10.13-3 — 七宿主正式版（master 合流）
 
 - **正式版线推进**：`beta` 测试版线一次性合入 `master`（合并提交，`--no-ff`；合并后树与通过双通道验收的 beta 树逐字节一致），七宿主（Codex、pi、opencode、Kimi Code、Claude Code、OpenClaw、Hermes Agent）进入正式版。
