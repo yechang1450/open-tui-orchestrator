@@ -121,3 +121,11 @@ gh repo edit yechang1450/open-tui-orchestrator --visibility public --accept-visi
 - 包面：98 文件、packed 399.2 kB、unpacked 946.7 kB、shasum `c77e4fb71c6700118d2229b856cc47992497e121`、tag `latest`。
 - registry 回读：`npm view` → `version = 26.10.13-3`、`dist-tags = { latest: 26.10.13-3, beta: 26.10.13-2 }`；tarball 直接解包运行 → `open-tui-orchestrator 26.10.13-3 (core 0.9.24-1)`；`npx -y --prefer-online open-tui-orchestrator@26.10.13-3 --version` 同读数（发布后首分钟内 npx 元数据缓存可能仍解析旧值——用 `--prefer-online` 或直读 tarball 复核）；线上 readme 实读 8606 字符、禁用模式命中 0。本机全局安装已更新至 `26.10.13-3`。
 - 注意：`26.10.13-3` 仍须显式 `--tag latest`（日版本号数值排序低于旧 `2026.9.x`）；本次传播快——PUT 后约 1 分钟直读注册表即见新版本与新 tag。
+
+## 发布记录追加：26.10.13-4（正式版·瘦身+审计轮，2026-10-13 午间 +08）
+
+- 版本：`open-tui-orchestrator@26.10.13-4`（`--tag latest`，`latest` 已显式刷新为它）。内容＝npm 极限瘦身（发布包只留运行闭包 + 用户文档）＋ 公开面两遍审计（GitHub 安全特性开启、死件退役、发布文档修订、`locateCli` 锚定修复）；仓库 HEAD `44d01eb`。
+- 包面：**66 文件**、packed 217.4 kB（−45%）、unpacked 598.3 kB、shasum `f435c6be55dce5054ac9f6757ab8621486e70cc2`、tag `latest`。开发件（gate / force / preflight / todo-list / 测试 shim / auth 模板 / 守卫自测）、`repair.mjs`、`docs/`、`CHANGELOG.md` 不再随包（仅存仓库）；封印面与装机面同构（45 核心 / 60 运行时；`orch.mjs` 首次纳入封印）。
+- 发布前实测：离线套件 **531/531**（0 跳过）；`gate --all` = `ORCH_GATE: PASS — 5 criteria`（L1 531 pass / 0 fail）；`release-integrity` rc=0；`--tasks smoke` rc=0；tarball 装机 + claude 真机轮（2/2 verified、复核 rc=0）。
+- registry 回读：`npm view` → `version = 26.10.13-4`、`dist-tags = { latest: 26.10.13-4, beta: 26.10.13-2 }`；tarball 直解包运行 → `open-tui-orchestrator 26.10.13-4 (core 0.9.24-1)`（66 文件实点）；`npx -y --prefer-online open-tui-orchestrator@26.10.13-4 --version` 同读数；发布件补充冒烟 `--install-deps` ok、doctor `hostError=null` / `carrierAvailable=true`。本机全局安装已更新至 `26.10.13-4`。
+- 附记：`beta` 指针（`26.10.13-2`）删除仍被 npm 403 拒（token 权限粒度；读/发型操作不受影响，通道简化后 beta 已不参与流程）。
