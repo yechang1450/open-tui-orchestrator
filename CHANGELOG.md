@@ -1,5 +1,12 @@
 # Changelog
 
+## 26.10.13-3 — 七宿主正式版（master 合流）
+
+- **正式版线推进**：`beta` 测试版线一次性合入 `master`（合并提交，`--no-ff`；合并后树与通过双通道验收的 beta 树逐字节一致），七宿主（Codex、pi、opencode、Kimi Code、Claude Code、OpenClaw、Hermes Agent）进入正式版。
+- **合并后全量验证**：`release-integrity` rc=0；`gate --all` 五判据全绿（L1 533/533）；七宿主本地形态真机轮 7/7 全绿（每轮 RUN_RC=0 + 复核 rc=0、双任务内容级核验）。
+- **内含**：Claude Code 适配器复活；OpenClaw 重建为 print 类（官方 `agent --local` 面）；封印 CRLF 缺陷修复（重封前对账「工作区字节 vs 提交 blob」）。
+- 发布：npm `latest` 显式刷新为 `26.10.13-3`；`beta` 通道保持 `26.10.13-2` 不动。
+
 ## 26.10.13-2 — beta 测试版（七宿主）
 
 - **修复（GitHub 源安装循环实逮）**：`scripts/package.json` / `scripts/package-lock.json` 的工作区字节曾是 CRLF（提交 blob 为 LF）——封印把 CRLF 字节烘进 runtime 哈希：npm 包自洽，但全新 clone 的 `release-integrity` 必红（`runtime differs`）。已把两文件归一化为 LF 并重封。
