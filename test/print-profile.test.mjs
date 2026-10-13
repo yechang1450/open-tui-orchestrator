@@ -177,6 +177,47 @@ test('model/effort detection follows the initiating agent config for profiled ag
   } finally { fs.rmSync(s.dir, {recursive: true, force: true}); }
 });
 
+// ---- 版本地板（P2-6，2026-10-14）：低于地板拒绝（below floor 诊断）；不可比较一律放行 ----
+
+const writeFloorProfile = (s, id, extra) => {
+  fs.mkdirSync(s.profiles, {recursive: true});
+  fs.writeFileSync(path.join(s.profiles, id + '.json'), JSON.stringify({
+    schema: 1, id, label: id, bin: [id + '.exe'], helpFlags: ['--message'],
+    versionPattern: '([0-9]+[.][0-9]+[.][0-9]+)',
+    ...extra,
+    args: {approve: [], extra: [], model: ['--model'], effort: null, prompt: ['--message']},
+  }));
+};
+
+test('a profile minVersion rejects a CLI whose version is below the floor',()=>{
+ const s=setup();
+ try{
+  writeFloorProfile(s,'fakefloor',{minVersion:'9.0.0'});
+  const env={...process.env,ORCH_AGENT_PROFILES_DIR:s.profiles,ORCH_CLI:s.fake,FAKE_VERSION:'FakeAgent 8.0.0'};
+  assert.throws(()=>resolveProfileHost(env,'fakefloor'),/below floor 9[.]0[.]0/);
+ }finally{fs.rmSync(s.dir,{recursive:true,force:true});}
+});
+
+test('a profile minVersion accepts a CLI at or above the floor',()=>{
+ const s=setup();
+ try{
+  writeFloorProfile(s,'fakefloor',{minVersion:'9.0.0'});
+  const env={...process.env,ORCH_AGENT_PROFILES_DIR:s.profiles,ORCH_CLI:s.fake,FAKE_VERSION:'FakeAgent 9.1.0'};
+  const host=resolveProfileHost(env,'fakefloor');
+  assert.equal(host.config.version,'9.1.0');
+ }finally{fs.rmSync(s.dir,{recursive:true,force:true});}
+});
+
+test('an unparsable version string is never condemned by the floor',()=>{
+ const s=setup();
+ try{
+  writeFloorProfile(s,'fakefloorsnow',{minVersion:'9.0.0',versionPattern:'(.+)'});
+  const env={...process.env,ORCH_AGENT_PROFILES_DIR:s.profiles,ORCH_CLI:s.fake,FAKE_VERSION:'FakeAgent snowy'};
+  const host=resolveProfileHost(env,'fakefloorsnow');
+  assert.equal(host.config.version,'FakeAgent snowy','non-semver strings pass the floor and reach the live check');
+ }finally{fs.rmSync(s.dir,{recursive:true,force:true});}
+});
+
 test('built-in agents are reported as already adapted and nothing is written', async () => {
   const report = await adaptAgent({id: 'kimi', live: false, commit: false});
   assert.equal(report.passed, true);

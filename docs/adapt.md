@@ -28,6 +28,9 @@ node scripts/adapt.mjs [--agent <id>] [--cli <path>] [--profiles-dir <dir>]
    画像 `args.subcommand`（一次性调用时置于 argv 最前）。
 3. **生成画像**：`scripts/core/agent-profiles/<id>.json`（schema 见文件头注释；含 adaptedFrom 审计字段；
    子命令型 CLI 额外带可选 `args.subcommand`，与 `windowPrefix` 并用时应避免词项重复）。
+   另有两个可选字段（2026-10-14 起）：`minVersion`（版本地板：解析版本低于它一律拒绝——below floor 诊断；
+   版本串不可比较时不判死、缺省放行）与 `plannerTimeoutMs`（规划等待预算：缺省/0/非法值=沿用 240000ms，
+   显式 `ORCH_DECOMPOSE_TIMEOUT_MS` 仍优先）。
 4. **解析自检**：用画像走一遍 `resolveProfileHost`，版本必须与探测一致。
 5. **活体验证（默认开）**：真实调用一次该 CLI，要求它只回一个随机探活令牌
    （`ADAPTOK-xxxxxxxx`）；未回、超时或非零退出即失败回滚。`--no-live` 关闭（不推荐）。

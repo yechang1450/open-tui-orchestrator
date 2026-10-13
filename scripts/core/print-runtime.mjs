@@ -11,6 +11,15 @@ import {nativeArgumentLines} from './native-argv.mjs';
 
 const quote = (s) => "'" + String(s).replaceAll("'", "''") + "'";
 
+// 规划等待预算（2026-10-14, P2-8）：显式 env ORCH_DECOMPOSE_TIMEOUT_MS 优先；其次画像可选
+// plannerTimeoutMs；都未给（含 0/非法值）时沿用 240000 默认。只覆盖规划器等待，不涉其它超时。
+export function resolvePlannerTimeoutMs(config, env = process.env) {
+  const envV = Number(env.ORCH_DECOMPOSE_TIMEOUT_MS);
+  if (Number.isFinite(envV) && envV > 0) return envV;
+  const profileV = Number(config && config.profile && config.profile.plannerTimeoutMs);
+  return Number.isFinite(profileV) && profileV > 0 ? profileV : 240000;
+}
+
 export async function runProfilePlanner(config, prompt, cwd) {
   const args = [...profileArgs(config, {model: process.env.ORCH_MODEL, effort: process.env.ORCH_EFFORT}), prompt];
   return new Promise((resolve, reject) => {
@@ -18,7 +27,7 @@ export async function runProfilePlanner(config, prompt, cwd) {
     let raw = '', errorText = '', timedOut = false, oversized = false, settled = false;
     let exitCode = null, timer = null, killTimer = null, graceTimer = null;
     const MAX_OUTPUT_BYTES = 8000000;
-    const timeoutMs = (() => { const v = Number(process.env.ORCH_DECOMPOSE_TIMEOUT_MS); return Number.isFinite(v) && v > 0 ? v : 240000; })();
+    const timeoutMs = resolvePlannerTimeoutMs(config);
     const finish = (code) => {
       if (settled) return;
       settled = true;
