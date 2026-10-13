@@ -1,6 +1,6 @@
 # 公开可用性差距清单（2026-09-14）
 
-> **当前状态（2026-10-12）**：仓库包版本为 `26.10.12`，封印核心版本为 `0.9.24-1`（以 `package.json` 与 `release.json` 为准）。GitHub Actions workflow 已按仓库决策保留为 RETIRED（不上膛）；dependabot 配置已随公开前清理移除（不再自动开 PR）。当前发布判断以本机 `node scripts/gate.mjs --all` 为准。本文其余带日期、版本号和测试数量的条目是推进记录；除非明确标注当前状态，不应当作今天的运行结果。
+> **当前状态（2026-10-13）**：仓库包版本为 `26.10.13-3`，封印核心版本为 `0.9.24-1`（以 `package.json` 与 `release.json` 为准）。GitHub Actions workflow 已按仓库决策保留为 RETIRED（不上膛）；dependabot 配置已随公开前清理移除（不再自动开 PR）。当前发布判断以本机 `node scripts/gate.mjs --all` 为准。本文其余带日期、版本号和测试数量的条目是推进记录；除非明确标注当前状态，不应当作今天的运行结果。
 
 
 目标：让**外人**装得上、跑得起来、看得懂。每条都有验证方式；状态只有三种：**已具备** / **待补** / **需你决策**。
@@ -113,3 +113,11 @@ gh repo edit yechang1450/open-tui-orchestrator --visibility public --accept-visi
 - registry 回读：`dist-tags = { latest: 26.10.12, beta: 26.10.13-2 }`；安装 `26.10.13-2` 后 `--version` = `26.10.13-2 (core 0.9.24-1)`；`--install-deps` 首跑 installed / 复跑 already-present（幂等）；七宿主 doctor 全绿。
 - 双通道验收：npm 副本七宿主真机轮全部 success=true、2/2 verified（verify-run 复核 rc=0）；GitHub 克隆七宿主真机轮同全绿（opencode 轮经官方 `--resume-run` 收编 gen=2）；两通道为同一棵 LF 树，克隆侧 `release-integrity` rc=0。
 - 注意：预发布版本号（`X.Y.Z-N` 形态）不带 `--tag` 会被 npm 拒发；`-beta.N` 形态不符合本仓 `--version` 输出契约（三处判据钉 `X.Y.Z(-N)?`），勿用。
+
+## 发布记录追加：26.10.13-3（正式版，2026-10-13 上午 +08）
+
+- 版本：`open-tui-orchestrator@26.10.13-3`（`--tag latest`，`latest` 已显式刷新为它）。内容＝七宿主测试版线正式合流：`beta` 6 笔提交经 `--no-ff` 合入 master（合并提交 `00f314a`；合并后树与通过双通道验收的 beta 树逐字节一致），含 Claude Code 适配器复活、OpenClaw 重建为 print 类（官方 `agent --local` 面）、封印 CRLF 缺陷修复。仓库 HEAD `8dbcfbe`（master；`beta` 分支保持 `0f3cff2` 不动）。
+- 合并后实测：`release-integrity` rc=0（45 核心 + 69 运行时）；`gate --all` = `ORCH_GATE: PASS — 5 criteria`（L1 533 pass / 0 fail；首跑因机器负载超出默认套件预算被截断 = INCONCLUSIVE，按预算旋钮 `ORCH_GATE_SUITE_TIMEOUT_MS=1800000` + `ORCH_GATE_TEST_CONCURRENCY=2` 重跑全绿，判据未动）；七宿主本地形态真机轮 7/7（claude/openclaw/codex/pi/opencode/kimi/hermes 每轮 RUN_RC=0 + verify rc=0；验收账本：工作区 `temp/otui-audit-20261012/master-rounds/RECEIPT.md`）。
+- 包面：98 文件、packed 399.2 kB、unpacked 946.7 kB、shasum `c77e4fb71c6700118d2229b856cc47992497e121`、tag `latest`。
+- registry 回读：`npm view` → `version = 26.10.13-3`、`dist-tags = { latest: 26.10.13-3, beta: 26.10.13-2 }`；tarball 直接解包运行 → `open-tui-orchestrator 26.10.13-3 (core 0.9.24-1)`；`npx -y --prefer-online open-tui-orchestrator@26.10.13-3 --version` 同读数（发布后首分钟内 npx 元数据缓存可能仍解析旧值——用 `--prefer-online` 或直读 tarball 复核）；线上 readme 实读 8606 字符、禁用模式命中 0。本机全局安装已更新至 `26.10.13-3`。
+- 注意：`26.10.13-3` 仍须显式 `--tag latest`（日版本号数值排序低于旧 `2026.9.x`）；本次传播快——PUT 后约 1 分钟直读注册表即见新版本与新 tag。
