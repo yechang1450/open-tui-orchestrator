@@ -166,7 +166,7 @@ def verify_missing() -> int:
     ok = p.returncode != 0 and frames == 0 and clean
     print(f"    → {'PASS' if ok else 'FAIL**GAP**（在账：core 改动需走发布流程 repair.mjs，不许裸改冻结件）'}")
     if not ok:
-        print('    翻转例（把缺口补上它必须判绿）：dev 仓改 scripts/core/runner.mjs 的 verifyRun 缺件分支 → `node repair.mjs --target ~/.tools/releases/<新版本>` → 切 junction → 重跑本判据，期望 exit=0 且「Run not found」在输出里')
+        print('    翻转例（把缺口补上它必须判绿）：dev 仓改 scripts/core/runner.mjs 的 verifyRun 缺件分支 → 重跑本判据，期望 exit=0 且「Run not found」在输出里')
         print('    不做翻转的理由（2026-09-13 ENTJ 判）：一条纯话术改进不值得为它单独发一版冻结件（用户口径「先用简单方式、别因为小事先卡住」）——本条归入 **下一个真实 core 改动的随车项**，届时随那次发版一起翻转')
     return 0 if ok else 1
 

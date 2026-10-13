@@ -9,40 +9,8 @@ import {fileURLToPath} from 'node:url';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const leakScript = path.join(root, 'tools', 'orch-leak-scan.py');
 const patrolScript = path.join(root, 'tools', 'orch-patrol.py');
-const junctionScript = path.join(root, 'tools', 'flip-orch-junction.ps1');
 const evidenceRoot = path.join(root, 'temp', 'review-audit-tools-20261004');
 const fixtureEmail = ['audit-test', 'example.invalid'].join('@');
-
-function trustedPwshExe() {
-  if (process.platform !== 'win32') return '';
-  const systemRoot = process.env.SystemRoot || process.env.WINDIR || 'C:/Windows';
-  const programFiles = process.env.ProgramW6432 || process.env.ProgramFiles || 'C:/Program Files';
-  const localAppData = process.env.LOCALAPPDATA || '';
-  const candidates = [
-    path.win32.join(programFiles, 'PowerShell', '7', 'pwsh.exe'),
-    localAppData && path.win32.join(localAppData, 'Microsoft', 'WindowsApps', 'pwsh.exe'),
-  ].filter(Boolean);
-  const whereExe = path.win32.join(systemRoot, 'System32', 'where.exe');
-  const where = spawnSync(whereExe, ['pwsh.exe'], {encoding: 'utf8', windowsHide: true, timeout: 5000});
-  const trustedRoots = candidates.map((candidate) => path.win32.dirname(candidate).toLowerCase());
-  for (const raw of String(where.stdout || '').split(/\r?\n/).map((value) => value.trim()).filter(Boolean)) {
-    const candidate = path.win32.normalize(raw);
-    if (trustedRoots.some((rootPath) => candidate.toLowerCase() === path.win32.join(rootPath, 'pwsh.exe').toLowerCase())) {
-      return candidate;
-    }
-  }
-  const resolved = candidates.find((candidate) => {
-    try {
-      return fs.existsSync(candidate);
-    } catch {
-      return false;
-    }
-  });
-  assert.ok(resolved, 'PowerShell 7 executable not found in trusted absolute locations');
-  return resolved;
-}
-
-const PS_EXE = trustedPwshExe();
 
 function fixture() {
   fs.mkdirSync(evidenceRoot, {recursive: true});
@@ -92,67 +60,6 @@ function makeGitRepo(dir, {commit = true} = {}) {
     });
     assert.equal(r.status, 0, resultText(r));
   }
-}
-
-function writePsFixture(dir, name, body) {
-  const file = path.join(dir, name);
-  fs.writeFileSync(file, body.replaceAll('\n', '\r\n'), 'utf8');
-  return file;
-}
-
-function runPwsh(file, args = [], options = {}) {
-  return spawnSync(PS_EXE, ['-NoProfile', '-File', file, ...args], {
-    cwd: root,
-    encoding: 'utf8',
-    windowsHide: true,
-    timeout: 30000,
-    ...options,
-  });
-}
-
-function makeJunction(dir, link, target) {
-  const ps = writePsFixture(dir, 'make-junction.ps1', [
-    'param([string]$Link,[string]$Target)',
-    "$ErrorActionPreference = 'Stop'",
-    'New-Item -ItemType Junction -Path $Link -Target $Target | Out-Null',
-  ].join('\n'));
-  const r = runPwsh(ps, [link, target]);
-  assert.equal(r.status, 0, resultText(r));
-}
-
-function junctionTarget(dir, link) {
-  const ps = writePsFixture(dir, 'read-junction.ps1', [
-    'param([string]$Link)',
-    "$ErrorActionPreference = 'Stop'",
-    "[string](Get-Item -LiteralPath $Link -Force).Target",
-  ].join('\n'));
-  const r = runPwsh(ps, [link]);
-  assert.equal(r.status, 0, resultText(r));
-  return String(r.stdout).trim();
-}
-
-function flip(home, version, options = {}) {
-  return spawnSync(PS_EXE, ['-NoProfile', '-File', junctionScript, '-Version', version], {
-    cwd: root,
-    encoding: 'utf8',
-    windowsHide: true,
-    timeout: 30000,
-    env: {...process.env, USERPROFILE: home, HOME: home, ...options.env},
-  });
-}
-
-function setupJunctionFixture(dir, version = '2026.10.4') {
-  const tools = path.join(dir, '.tools');
-  const nodeModules = path.join(tools, 'node24-fresh', 'node_modules');
-  const releases = path.join(tools, 'releases');
-  const oldTarget = path.join(tools, 'previous', 'open-tui-orchestrator');
-  const target = path.join(releases, version, 'open-tui-orchestrator');
-  fs.mkdirSync(nodeModules, {recursive: true});
-  fs.mkdirSync(oldTarget, {recursive: true});
-  fs.mkdirSync(target, {recursive: true});
-  const link = path.join(nodeModules, 'open-tui-orchestrator');
-  makeJunction(dir, link, oldTarget);
-  return {tools, nodeModules, releases, oldTarget, target, link, version};
 }
 
 function assertClean(dir) {
@@ -304,67 +211,4 @@ print(json.dumps({'value': value, 'argv': calls[0] if calls else []}))
   assert.notEqual(observed.argv[0], 'pwsh');
   assert.notEqual(observed.argv[0], 'powershell');
   assert.match(observed.argv[0], /pwsh\.exe$/i);
-});
-
-test('junction switch rejects a releases junction escape and preserves the original link', {skip: process.platform !== 'win32'}, () => {
-  const dir = fixture();
-  try {
-    const setup = setupJunctionFixture(dir);
-    const outside = path.join(dir, 'outside-releases');
-    const outsideTarget = path.join(outside, setup.version, 'open-tui-orchestrator');
-    fs.mkdirSync(outsideTarget, {recursive: true});
-    fs.rmSync(setup.releases, {recursive: true, force: true});
-    makeJunction(dir, setup.releases, outside);
-
-    const r = flip(dir, setup.version);
-    assert.notEqual(r.status, 0, resultText(r));
-    assert.equal(path.normalize(junctionTarget(dir, setup.link)), path.normalize(setup.oldTarget));
-  } finally {
-    assertClean(dir);
-  }
-});
-
-test('junction switch rejects a version-directory junction escape and preserves the original link', {skip: process.platform !== 'win32'}, () => {
-  const dir = fixture();
-  try {
-    const setup = setupJunctionFixture(dir);
-    const versionDir = path.join(setup.releases, setup.version);
-    const outsideVersion = path.join(dir, 'outside-version', setup.version);
-    fs.rmSync(versionDir, {recursive: true, force: true});
-    fs.mkdirSync(outsideVersion, {recursive: true});
-    fs.mkdirSync(path.join(outsideVersion, 'open-tui-orchestrator'), {recursive: true});
-    makeJunction(dir, versionDir, outsideVersion);
-
-    const r = flip(dir, setup.version);
-    assert.notEqual(r.status, 0, resultText(r));
-    assert.equal(path.normalize(junctionTarget(dir, setup.link)), path.normalize(setup.oldTarget));
-  } finally {
-    assertClean(dir);
-  }
-});
-
-test('junction switch reports rollback failure instead of swallowing it', {skip: process.platform !== 'win32'}, () => {
-  const dir = fixture();
-  try {
-    const setup = setupJunctionFixture(dir);
-    const wrapper = writePsFixture(dir, 'inject-junction-failure.ps1', [
-      'param([string]$Tool,[string]$Version,[ValidateSet("primary","rollback")] [string]$Mode)',
-      '$script:attempt = 0',
-      'function New-Item {',
-      '  param([string]$ItemType,[string]$Path,[string]$Target,[switch]$Force)',
-      '  $script:attempt++',
-      '  if ($script:attempt -eq 1) { throw "injected primary create failure" }',
-      '  if ($Mode -eq "rollback") { throw "injected rollback failure" }',
-      '  Microsoft.PowerShell.Management\\New-Item -ItemType $ItemType -Path $Path -Target $Target -Force:$Force | Out-Null',
-      '}',
-      '& $Tool -Version $Version',
-    ].join('\n'));
-    const r = runPwsh(wrapper, [junctionScript, setup.version, 'rollback'], {
-      env: {...process.env, USERPROFILE: dir, HOME: dir},
-    });
-    assert.notEqual(r.status, 0, resultText(r));
-    assert.match(resultText(r), /rollback|injected rollback failure/i);
-  } finally {
-    assertClean(dir);
-  }
 });

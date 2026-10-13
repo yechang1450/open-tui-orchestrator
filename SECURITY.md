@@ -38,6 +38,7 @@ release notes unless you ask otherwise. Fixes ship as a new release copy with a 
 
 ## Supported versions
 
-Only the newest release copy is supported. `~/.tools/releases/<version>/open-tui-orchestrator`
-snapshots are rollback material, not supported versions. Fixes are never backported to an
-older copy silently — the seal and the version number always move together.
+Only the newest release copy is supported. Older copies kept for rollback (previous package
+versions from npm, or snapshots made with `node repair.mjs --target <dir>`) are rollback
+material, not supported versions. Fixes are never backported to an older copy silently —
+the seal and the version number always move together.

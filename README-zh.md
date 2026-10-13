@@ -52,7 +52,7 @@ node cli.mjs --tasks '修复登录页；优化购物车'
 node cli.mjs --plan-file plan.json --unit-cmd-file unit.json --run-windows '修复登录页；优化购物车'
 ```
 
-`--plan` 只做规划；新的 `--run-windows` 仅在存在并行波时才开窗；`--resume-run <id>` 在中断后认领已保存的运行；`--verify-run <id>` 只复核不执行；`--status --readonly` 报告窗口、租约与活动运行；`--watch <id> [--jsonl]` 只读流式输出运行看板；`orch` 是强制执行入口——绕过一切内联回退（维护锁除外）。任何 Agent 都可以**不装适配器**直接调用：`--plan-file` 接收调用方自己的账本/分块（全程零模型调用），`--unit-cmd`/`--unit-cmd-file` 提供单元命令——见 [docs/caller-driven.md](https://github.com/yechang1450/open-tui-orchestrator/blob/master/docs/caller-driven.md)。接入新的 print 类 CLI：`node scripts/adapt.mjs`——见 [docs/adapt.md](https://github.com/yechang1450/open-tui-orchestrator/blob/master/docs/adapt.md)。维护编排器自身时，`node scripts/maintenance-lock.mjs lock --reason "为什么"` 会暂停一切动作入口直至解锁——见 [docs/maintenance-lock.md](https://github.com/yechang1450/open-tui-orchestrator/blob/master/docs/maintenance-lock.md)。
+`--plan` 只做规划；新的 `--run-windows` 仅在存在并行波时才开窗；`--resume-run <id>` 在中断后认领已保存的运行；`--verify-run <id>` 只复核不执行；`--status --readonly` 报告窗口、租约与活动运行；`--watch <id> [--jsonl]` 只读流式输出运行看板；`orch` 是强制执行入口——绕过一切内联回退（维护锁除外）。任何 Agent 都可以**不装适配器**直接调用：`--plan-file` 接收调用方自己的账本/分块（编排器零模型调用——两个规划阶段全部跳过），`--unit-cmd`/`--unit-cmd-file` 提供单元命令——见 [docs/caller-driven.md](https://github.com/yechang1450/open-tui-orchestrator/blob/master/docs/caller-driven.md)。接入新的 print 类 CLI：`node scripts/adapt.mjs`——见 [docs/adapt.md](https://github.com/yechang1450/open-tui-orchestrator/blob/master/docs/adapt.md)。维护编排器自身时，`node scripts/maintenance-lock.mjs lock --reason "为什么"` 会暂停一切动作入口直至解锁——见 [docs/maintenance-lock.md](https://github.com/yechang1450/open-tui-orchestrator/blob/master/docs/maintenance-lock.md)。
 
 ## 为什么做这个
 
@@ -74,4 +74,4 @@ node cli.mjs --agent hermes --doctor
 
 ## 验证状态
 
-当前通用核心为 0.9.24-1，离线回归为 534/534 通过。仓库内发布的判定器是 `node scripts/gate.mjs --all`——L1 离线套件、L2 宿主解析 + 反例能红（判据本身没坏）、L3 未知 run 干净失败、L4 版本/封印/文档/套件总数对账。任何核心或运行时文件变更都必须重新 `release-integrity --seal`。细节与证据：[docs/release-policy.md](https://github.com/yechang1450/open-tui-orchestrator/blob/master/docs/release-policy.md)。
+当前通用核心为 0.9.24-1，离线回归为 530/530 通过。仓库内发布的判定器是 `node scripts/gate.mjs --all`——L1 离线套件、L2 宿主解析 + 反例能红（判据本身没坏）、L3 未知 run 干净失败、L4 版本/封印/文档/套件总数对账。任何核心或运行时文件变更都必须重新 `release-integrity --seal`。细节与证据：[docs/release-policy.md](https://github.com/yechang1450/open-tui-orchestrator/blob/master/docs/release-policy.md)。

@@ -5,28 +5,34 @@
 # gets refused unelevated on this machine (0x80070005) - same workaround as an earlier local patrol.
 # Pattern proven on this machine (2026-09-15):
 #   -WindowStyle Hidden is NOT enough; SW_HIDE at CreateProcess time is (window delta = 0).
+# 2026-10-13: repo and python are resolved at install time - the script self-locates to the
+#   repository it lives in (tools/..) and `python` comes from PATH; the retired ~/.tools
+#   layout is no longer referenced. The VBS launcher lives under %LOCALAPPDATA%\orch-patrol.
+#   Keep the repo path ASCII-only: the VBS embeds it literally (Set-Content -Encoding Ascii).
 # ASCII-only on purpose (PS 5.1 reads BOM-less files as ANSI; keep this file pure ASCII).
 #
 # Usage:
-#   powershell -NoProfile -ExecutionPolicy Bypass -File tools/orch-patrol-install.ps1
-#   powershell -NoProfile -ExecutionPolicy Bypass -File tools/orch-patrol-install.ps1 -Uninstall
+#   pwsh -NoProfile -ExecutionPolicy Bypass -File tools/orch-patrol-install.ps1
+#   pwsh -NoProfile -ExecutionPolicy Bypass -File tools/orch-patrol-install.ps1 -Uninstall
 param([switch]$Uninstall)
 
 $ErrorActionPreference = 'Stop'
-$repo      = Join-Path $HOME '.tools\open-tui-orchestrator'
-$python    = Join-Path $HOME 'AppData\Local\Programs\Python\Python312\python.exe'
-$launchers = Join-Path $HOME '.tools\launchers'
+$repo      = Split-Path -Parent $PSScriptRoot
+$python    = (Get-Command python -ErrorAction Stop).Source
+$launchers = Join-Path $env:LOCALAPPDATA 'orch-patrol'
 $vbsPath   = Join-Path $launchers 'orch-level-patrol.vbs'
 $task      = 'orch-level-patrol'
 
 if ($Uninstall) {
   schtasks.exe /Delete /TN $task /F
+  if (Test-Path -LiteralPath $vbsPath) { Remove-Item -LiteralPath $vbsPath -Force }
   'OK unregistered ' + $task
   exit 0
 }
 
-if (-not (Test-Path $python)) { throw 'python not found: ' + $python }
-if (-not (Test-Path (Join-Path $repo 'tools\orch-patrol.py'))) { throw 'patrol script not found under ' + $repo }
+if (-not (Test-Path -LiteralPath $python)) { throw 'python not found: ' + $python }
+$patrol = Join-Path $repo 'tools\orch-patrol.py'
+if (-not (Test-Path -LiteralPath $patrol)) { throw 'patrol script not found: ' + $patrol }
 
 New-Item -ItemType Directory -Force -Path $launchers | Out-Null
 $vbs = @'
@@ -36,11 +42,12 @@ $vbs = @'
 ' Exit code is propagated so the task history carries the verdict:
 '   0 = tick green/skip, 1 = tick red, 2 = internal error.
 Set sh = CreateObject("WScript.Shell")
-py = sh.ExpandEnvironmentStrings("%USERPROFILE%\AppData\Local\Programs\Python\Python312\python.exe")
-sc = sh.ExpandEnvironmentStrings("%USERPROFILE%\.tools\open-tui-orchestrator\tools\orch-patrol.py")
+py = "__PY__"
+sc = "__SC__"
 rc = sh.Run("""" & py & """" & " -B -u " & """" & sc & """", 0, True)
 WScript.Quit rc
 '@
+$vbs = $vbs.Replace('__PY__', $python).Replace('__SC__', $patrol)
 Set-Content -Path $vbsPath -Value $vbs -Encoding Ascii
 
 $tr = 'wscript.exe //nologo //B "' + $vbsPath + '"'

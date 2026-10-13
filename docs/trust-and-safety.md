@@ -35,9 +35,10 @@ here is checkable in the source, and behaviour that deviates from this page is a
   the **first** initiating workspace's `temp\orchestrator`. It holds the global capacity lease
   file and short-lived mutex tickets so that two orchestrator runs (or two agents) cannot
   overbook the machine. `ORCH_COORDINATOR_DIR` overrides it.
-- **Release copies**: implementations live under your user directory
-  (`~/.tools/releases/<version>/open-tui-orchestrator`), switched by a junction; the tool does
-  not write to `Program Files`, the registry outside the key above, or other users' profiles.
+- **Release copies**: the tool runs from the directory it was installed into — npm's global
+  directory, a directory you unpacked yourself, or a repository checkout. It does not copy
+  itself elsewhere, and does not write to `Program Files`, the registry outside the key
+  above, or other users' profiles.
 - It does **not** modify your agent CLIs' configuration, credentials or session stores. Setting
   them is out of scope: the tool only reads what it needs to inherit your model/effort choice.
 
@@ -61,5 +62,6 @@ here is checkable in the source, and behaviour that deviates from this page is a
 - `scripts/gate.mjs` is the machine gate: it runs the offline regression suite, the host
   check, a deliberately failing test (proving the criteria can go red), the unknown-run
   diagnostic, and the version/seal/docs cross-check.
-- Removal: delete the release copies and the junction, drop `HKCU\Software\TuiOrchestrator`,
-  and delete the workspaces' `temp\orchestrator` directories. Nothing else is left behind.
+- Removal: uninstall the package (or delete the directory you installed from), drop
+  `HKCU\Software\TuiOrchestrator`, and delete the workspaces' `temp\orchestrator`
+  directories. Nothing else is left behind.
