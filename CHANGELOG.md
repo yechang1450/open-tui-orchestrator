@@ -1,5 +1,11 @@
 # Changelog
 
+## 26.10.14-1 — 画像强化：版本地板 + 规划超时预算
+
+- **画像新增两个可选字段**：`minVersion`（任意 major 的数字三段版本地板——解析版本低于它一律拒绝并给 below floor 诊断；版本串不可比较时不判死、缺省放行）与 `plannerTimeoutMs`（规划等待预算——优先级 env `ORCH_DECOMPOSE_TIMEOUT_MS` > 画像值 > 240000 缺省；只覆盖规划器等待）。
+- **大流程定稿**：release-policy 的「大流程」升级为 10 步分步执行单（基线隔离 → 测试版开发 → 全方位测试 L1–L5 → push beta → 合流 → 复测 → master → npm 发布七步 → 发布后验证 → 记录）＋ npm 页快照机制说明（用户面文档改动须经一次发布才反映到 npm 页）。
+- 发布前实测：离线套件 **537/537**（＋6 判据：地板 3 + 超时 3；0 跳过）；`gate --all` 五判据全绿；`release-integrity` rc=0；真机轮 codex + hermes 双绿（每轮 RUN_RC=0 + 复核 rc=0、双任务内容级核验）。
+
 ## 26.10.13-4 — 公开面瘦身 + 安全审计
 
 - **npm 包极限瘦身**：发布包只保留运行闭包与用户文档（98→66 文件、打包体积 −45%）；仅维护者用的开发文件（gate/force/preflight/todo-list/测试 shim 等）与 `repair.mjs`、`docs/`、`CHANGELOG.md` 不再进包、只存在于仓库；封印面与装机面同构（`orch.mjs` 首次纳入封印）。

@@ -129,3 +129,10 @@ gh repo edit yechang1450/open-tui-orchestrator --visibility public --accept-visi
 - 发布前实测：离线套件 **531/531**（0 跳过）；`gate --all` = `ORCH_GATE: PASS — 5 criteria`（L1 531 pass / 0 fail）；`release-integrity` rc=0；`--tasks smoke` rc=0；tarball 装机 + claude 真机轮（2/2 verified、复核 rc=0）。
 - registry 回读：`npm view` → `version = 26.10.13-4`、`dist-tags = { latest: 26.10.13-4, beta: 26.10.13-2 }`；tarball 直解包运行 → `open-tui-orchestrator 26.10.13-4 (core 0.9.24-1)`（66 文件实点）；`npx -y --prefer-online open-tui-orchestrator@26.10.13-4 --version` 同读数；发布件补充冒烟 `--install-deps` ok、doctor `hostError=null` / `carrierAvailable=true`。本机全局安装已更新至 `26.10.13-4`。
 - 附记：`beta` 指针（`26.10.13-2`）删除仍被 npm 403 拒（token 权限粒度；读/发型操作不受影响，通道简化后 beta 已不参与流程）。
+
+## 发布记录追加：26.10.14-1（正式版·画像强化轮，2026-10-14 凌晨 +08）
+
+- 版本：`open-tui-orchestrator@26.10.14-1`（`--tag latest`，`latest` 已显式刷新为它）。内容＝画像两项可选字段（`minVersion` 版本地板、`plannerTimeoutMs` 规划超时预算）＋ 大流程 10 步执行单定稿 ＋ npm 页快照说明；`beta` 分支已同步至 `24e10fd`（测试版线上存档）。仓库 HEAD `60be928`（master 合流提交）；发布提交 `c7883ec`。
+- 包面：**66 文件**、packed 218.1 kB、unpacked 600.1 kB、shasum `88777e722be64ae0f0dcd63108d0e0f434d5a509`、tag `latest`。
+- 发布前实测：离线套件 **537/537**（0 跳过）；`gate --all` = `ORCH_GATE: PASS — 5 criteria`（L1 537 pass / 0 fail；L4 三文档对账 537==537）；`release-integrity` rc=0（45 核心 / 60 运行时）；`--tasks smoke` rc=0；真机轮 codex + hermes 双绿（每轮 RUN_RC=0 + verify rc=0；产物内容级核验 `LIVE-07-OK` / `LIVE-08-OK`）。
+- registry 回读：`npm view` → `latest = 26.10.14-1`（传播约 2–3 分钟）；tarball 直解包 → 66 文件、shasum 与发布心跳一致 `88777e72…`；`npx -y --prefer-online open-tui-orchestrator@26.10.14-1 --version` → `open-tui-orchestrator 26.10.14-1 (core 0.9.24-1)`；本机全局安装已更新至 `26.10.14-1`。
