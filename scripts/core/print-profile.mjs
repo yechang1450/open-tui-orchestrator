@@ -10,6 +10,8 @@ import {probeCli} from './host-probe.mjs';
 // 画像 schema（v1）:
 //   { schema:1, id, label, bin:[候选名...], helpFlags:[必须出现在 --help 的旗标...],
 //     versionPattern:'正则(含捕获组)', probePrompt:'探活提示词',
+//     minVersion:'X.Y.Z' 可选——版本地板：解析版本低于它一律拒绝（below floor 诊断）；版本串不可比较时不判死（2026-10-14, P2-6）,
+//     plannerTimeoutMs:毫秒 可选——规划等待预算：缺省/0/非法值=沿用 240000，显式 ORCH_DECOMPOSE_TIMEOUT_MS 仍优先（2026-10-14, P2-8）,
 //     args:{ approve:[自动批准旗标...], extra:[附加旗标...], model:['--model']|null,
 //            effort:['--effort']|null, prompt:['--message']|null,
 //            subcommand:['run'] 可选——子命令型 CLI（如 opencode）的一次性调用子命令词，置于 argv 最前 } }
@@ -61,6 +63,16 @@ export function profileArgs(config, {model, effort, mode} = {}) {
   ];
 }
 
+// 版本地板比较（2026-10-14, P2-6）：任意 major 的数字三段比较（泛化 pi-host 的 0.x 专用地板）；
+// 任一侧不是可解析的数字三段返回 null —— 调用方按「缺省放行」处理，防误杀非 semver 版本串。
+export function compareSemver(a, b) {
+  const parse = (v) => { const parts = String(v ?? '').trim().split('.').slice(0, 3).map(Number); return parts.length === 3 && parts.every(Number.isFinite) ? parts : null; };
+  const pa = parse(a), pb = parse(b);
+  if (!pa || !pb) return null;
+  for (let i = 0; i < 3; i++) if (pa[i] !== pb[i]) return pa[i] < pb[i] ? -1 : 1;
+  return 0;
+}
+
 export function resolveProfileHost(env = process.env, id) {
   const profile = loadProfile(id, env);
   if (!profile) return null;
@@ -91,6 +103,11 @@ export function resolveProfileHost(env = process.env, id) {
     const versionResult = probeCli(bin, [...prefixArgs, '--version'], {env});
     const version = new RegExp(profile.versionPattern || '(\\d+\\.\\d+\\.\\d+)').exec(String(versionResult.stdout || ''))?.[1];
     if (versionResult.status !== 0 || !version) { rejected.push(`${file}: --version ${versionResult.error ? 'probe error ' + versionResult.error : 'exit ' + versionResult.status + '; unusable output ' + JSON.stringify(String(versionResult.stdout || '').trim().slice(0, 120))}`); continue; }
+    // 版本地板（2026-10-14, P2-6）：仅当版本与地板都能按数字三段解析时比较；不可比较一律放行。
+    if (profile.minVersion) {
+      const floor = compareSemver(version, profile.minVersion);
+      if (floor !== null && floor < 0) { rejected.push(`${file}: version ${version} below floor ${profile.minVersion}`); continue; }
+    }
     return { agent: id, config: { id, label: profile.label || id, version, bin, prefixArgs, available: true, native: prefixArgs.length === 0, completionMarker: '__ORCH_DONE__', modelEnv: 'ORCH_MODEL', effortEnv: 'ORCH_EFFORT', carrier: profile.carrier || null, profile, profileFile: path.join(profilesDir(env), id + '.json'), reusable: true } };
   }
   throw new Error(`CLI_MISSING: ${id}; no supported installed ${id} CLI found (print-class profile ${path.join(profilesDir(env), id + '.json')}). No fallback or automatic install. Tried: ${rejected.join(' | ') || 'no candidate found on disk'}`);

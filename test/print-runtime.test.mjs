@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {runProfilePlanner,writeProfileLauncher} from '../scripts/core/print-runtime.mjs';
+import {runProfilePlanner,writeProfileLauncher,resolvePlannerTimeoutMs} from '../scripts/core/print-runtime.mjs';
 import {writeUnitLauncher} from '../scripts/core/unit-runtime.mjs';
 
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
@@ -27,6 +27,37 @@ test('print planner reports an explicit oversized-output failure instead of an a
   fs.writeFileSync(worker,"const chunk='A'.repeat(65536);\nlet n=0;\nconst pump=()=>{while(n<140){n++;if(!process.stdout.write(chunk)){process.stdout.once('drain',pump);return;}}}\npump();\n");
   await assert.rejects(runProfilePlanner(fakeConfig(worker),'规划',dir),/PLANNER_OUTPUT_TOO_LARGE/);
  }finally{fs.rmSync(dir,{recursive:true,force:true});}
+});
+
+test('planner timeout resolution: env > profile field > 240000 default',()=>{
+ assert.equal(resolvePlannerTimeoutMs({profile:{plannerTimeoutMs:800}},{ORCH_DECOMPOSE_TIMEOUT_MS:'5000'}),5000);
+ assert.equal(resolvePlannerTimeoutMs({profile:{plannerTimeoutMs:800}},{}),800);
+ assert.equal(resolvePlannerTimeoutMs({profile:{}},{}),240000);
+ assert.equal(resolvePlannerTimeoutMs({},{}),240000);
+ assert.equal(resolvePlannerTimeoutMs({profile:{plannerTimeoutMs:0}},{}),240000,'0 keeps the current default');
+});
+
+test('print planner honors the profile plannerTimeoutMs',async()=>{
+ const dir=fs.mkdtempSync(path.join(family,'print-runtime-prof-timeout-'));
+ const prev=process.env.ORCH_DECOMPOSE_TIMEOUT_MS; delete process.env.ORCH_DECOMPOSE_TIMEOUT_MS;
+ try{
+  const worker=path.join(dir,'hung-prof.mjs');
+  fs.writeFileSync(worker,'setTimeout(()=>{},30000);');
+  const cfg={...fakeConfig(worker),profile:{args:{prompt:['--message']},plannerTimeoutMs:500}};
+  await assert.rejects(runProfilePlanner(cfg,'规划',dir),/PLANNER_TIMEOUT/);
+ }finally{if(prev===undefined)delete process.env.ORCH_DECOMPOSE_TIMEOUT_MS;else process.env.ORCH_DECOMPOSE_TIMEOUT_MS=prev;fs.rmSync(dir,{recursive:true,force:true});}
+});
+
+test('an explicit env planner timeout overrides the profile value',async()=>{
+ const dir=fs.mkdtempSync(path.join(family,'print-runtime-env-first-'));
+ const prev=process.env.ORCH_DECOMPOSE_TIMEOUT_MS; process.env.ORCH_DECOMPOSE_TIMEOUT_MS='30000';
+ try{
+  const worker=path.join(dir,'slow-ok.mjs');
+  fs.writeFileSync(worker,"setTimeout(()=>{process.stdout.write('ok');},1200);");
+  const cfg={...fakeConfig(worker),profile:{args:{prompt:['--message']},plannerTimeoutMs:500}};
+  const r=await runProfilePlanner(cfg,'规划',dir);
+  assert.equal(r.final,'ok','env timeout must win over the 500ms profile value');
+ }finally{if(prev===undefined)delete process.env.ORCH_DECOMPOSE_TIMEOUT_MS;else process.env.ORCH_DECOMPOSE_TIMEOUT_MS=prev;fs.rmSync(dir,{recursive:true,force:true});}
 });
 
 test('print planner kills a hung child after the configured timeout and settles',async()=>{
