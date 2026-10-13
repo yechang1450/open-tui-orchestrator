@@ -260,3 +260,24 @@ test('locateCli keeps the old shim verdict when the wrapper has no resolvable en
     assert.equal(located.shim, shim, 'an unresolvable shim must keep the legacy verdict');
   } finally { fs.rmSync(dir, {recursive: true, force: true}); }
 });
+
+test('locateCli never resolves where.exe through the process cwd (anchored to SystemRoot)', {skip: process.platform !== 'win32'}, () => {
+  fs.mkdirSync(family, {recursive: true});
+  const dir = fs.mkdtempSync(path.join(family, 'locate-anchor-'));
+  const prevCwd = process.cwd();
+  try {
+    // 劫持件：进程 cwd 里放一个伪 where.exe（= node 本体拷贝）。裸名解析会先命中 cwd，
+    // 它一被执行就会写下标记文件——SystemRoot 锚定后的实现必须完全绕开它。
+    fs.copyFileSync(process.execPath, path.join(dir, 'where.exe'));
+    const marker = path.join(dir, 'called.txt');
+    const script = path.join(dir, 'marker.mjs');
+    fs.writeFileSync(script, `import fs from 'node:fs';\nfs.writeFileSync(${JSON.stringify(marker)}, 'called');\nconsole.log('C:/fake/hit.exe');\n`, 'utf8');
+    process.chdir(dir);
+    const located = locateCli(script, {...process.env});
+    assert.equal(fs.existsSync(marker), false, 'the cwd hijack must not run; where.exe must stay SystemRoot-anchored');
+    assert.ok(located, 'resolution must return a verdict');
+  } finally {
+    process.chdir(prevCwd);
+    fs.rmSync(dir, {recursive: true, force: true});
+  }
+});

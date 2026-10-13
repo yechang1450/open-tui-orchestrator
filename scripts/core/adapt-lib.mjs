@@ -3,6 +3,7 @@ import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {probeCli} from './host-probe.mjs';
+import {systemToolExe} from './contracts.mjs';
 import {profilesDir,loadProfile} from './print-profile.mjs';
 import {detectHostAgent} from './host-cli.mjs';
 import {readProfileKey,readSectionKey} from './host-model.mjs';
@@ -127,7 +128,9 @@ export function locateCli(id, env = process.env, explicit) {
   const shim = [...dirs.map((d) => path.join(d, id + '.cmd')), ...dirs.map((d) => path.join(d, id))].find((f) => { try { return fs.statSync(f).isFile(); } catch { return false; } });
   if (shim) { const resolved = resolveShimEntry(shim); if (resolved) return resolved; return { shim }; }
   if (process.platform === 'win32') {
-    const w = spawnSync('where.exe', [id], { encoding: 'utf8', windowsHide: true, timeout: 10000, env });
+    // 2026-10-13 审计：where.exe 同样走 SystemRoot 锚定（裸名解析会先看进程 cwd，
+    // 在不受信工作区运行时可被同名 exe 劫持——与 contracts 系统工具锚定同一原则）。
+    const w = spawnSync(systemToolExe('where.exe', env), [id], { encoding: 'utf8', windowsHide: true, timeout: 10000, env });
     if (w.status === 0) {
       const hits = String(w.stdout || '').split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
       const exeHit = hits.find((f) => /\.exe$/i.test(f));
