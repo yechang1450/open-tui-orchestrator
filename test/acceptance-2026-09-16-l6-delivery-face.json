@@ -57,7 +57,7 @@
   },
   "deliverySurfaceScan": {
     "tarball": { "files": 93, "suspiciousFilenames": 0, "machinePathHits": 0, "nonPublicUsernameHits": 0, "credentialPatternHits": 0 },
-    "currentTreeBeforeFix": { "nonHandleYechaHits": 6, "files": ["tools/orch-patrol.py", "tools/orch-patrol-install.ps1"] },
+    "currentTreeBeforeFix": { "nonHandleUserHits": 6, "files": ["tools/orch-patrol.py", "tools/orch-patrol-install.ps1"] },
     "finding": "the L10 patrol tools hardcoded a local user path - a regression against the 2026-09-14 identity scrub; the public-readiness identity claim had become false again",
     "fix": {
       "orch-patrol.py": "NODE_DIR / CODEX_BIN now derive from os.path.expanduser('~/.tools/...')",
