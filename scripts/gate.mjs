@@ -156,6 +156,14 @@ function suiteRedsLine(reds) {
 }
 
 // ---------------------------------------------------------------- L1: the suite
+// 实测套件规模（2026-10-15 修）：pass + fail + skipped。具名合法的宿主缺席 skip 必须计入——
+// 它们是被承认的套件成员（L1 的 unjustified / skipAccounting 两道门逐条验名验理由，不放松）；
+// 只数 pass 会让「文档声明总数 vs 实测总数」在宿主未装的机器上永远差着那几条（2026-10-15 实测：
+// 536 pass + 3 skip vs 文档 539 ⇒ L4 假红，并逼出「为无关用例装 CLI 或改文档数字」两种坏选择）。
+export function measuredSuiteTotal(pass, fail, skipped) {
+  return (pass || 0) + (fail || 0) + (skipped || 0);
+}
+
 function suite() {
   const files = fs.readdirSync(path.join(REPO, 'test')).filter((n) => n.endsWith('.test.mjs')).sort().map((n) => path.join('test', n));
   const env = {...process.env, ORCH_AGENT: process.env.ORCH_AGENT || AGENT};
@@ -228,7 +236,7 @@ function suite() {
   check('L1', 'offline regression suite', ok, lines);
   if (redLine) console.log(redLine);
   if (missing.length) return undefined;                       // 被截断：不许放行，L4 也会对不上
-  return ok && fail > 0 ? pass + fail : pass;                 // 环境假红放行时，实测总数 = pass+fail（隔离复跑已逐条证绿）
+  return measuredSuiteTotal(pass, fail, skipped);             // 实测总数 = pass(+环境假红的 fail，隔离复跑已证绿) + 具名合法 skip
 }
 
 export function canAutoPassEnvironmentFlake(reds, attributed, stillRed) {
