@@ -70,7 +70,21 @@ node cli.mjs --agent codex --doctor
 orch "refresh the login page copy; add a regression test for the token refresh path"
 ```
 
-`orch` is the force-execute entry; `open-tui-orchestrator --run-windows "<request>"` is the regular one. A genuinely parallel request opens one execution unit per block — headless by default, nothing pops up. Watch it read-only from another shell:
+`orch` is the force-execute entry; `open-tui-orchestrator --run-windows "<request>"` is the regular one. A genuinely parallel request opens one execution unit per block — headless by default, nothing pops up.
+
+### `orch` and the read-only entries
+
+`orch "<request>"` really launches units. To inspect the task split without launching anything, use a read-only entry — they print and return, identically under both `orch` and `open-tui-orchestrator`:
+
+```powershell
+orch --tasks "<request>"        # print the authoritative task ledger (T001, T002, …) to align ids
+orch --doctor                   # host / carrier / unit-type self-check
+orch --status --readonly        # read-only run state
+```
+
+Read-only entries pass straight through without the force-execute flag; any other flag after `orch` is still treated as an execution request.
+
+Watch it read-only from another shell:
 
 ```powershell
 open-tui-orchestrator --status --readonly

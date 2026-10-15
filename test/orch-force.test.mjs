@@ -99,3 +99,39 @@ test('the maintenance lock still blocks a forced invocation', () => {
     assert.doesNotMatch(r.stdout, /spawned headless/);
   } finally { for (let i = 0; i < 5; i++) { try { fs.rmSync(s.ws, { recursive: true, force: true }); break; } catch { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 400); } } }
 });
+
+// orch.mjs 自己的入口语义（2026-10-15）：强制发车只该加在执行类请求上；只读入口必须
+// 原样透传给 cli.mjs。回归场景：`orch --tasks "<request>"` 曾把 --tasks 落到 argv[3]
+// 被引擎当成请求文本（mode 取 argv[2]），只想核对账本却真的开了四个执行单元。
+test('orch passes read-only entries through instead of force-launching them', () => {
+  const orch = path.join(root, 'orch.mjs');
+  const result = spawnSync(process.execPath, [orch, '--tasks', '甲任务；乙任务；丙任务'], {
+    cwd: family, encoding: 'utf8', windowsHide: true, timeout: 60000,
+    env: { ...process.env, ORCH_MAINTENANCE_LOCK: path.join(family, 'no-lock-ro.json') },
+  });
+  assert.equal(result.error, undefined, result.error?.message);
+  assert.notEqual(result.status, null, 'orch --tasks must return, not hang');
+  assert.equal(result.status, 0, result.stderr);
+  // 账本真的打印了（JSON 可解析、三个 id 齐），且一个单元都没发车。
+  const ledger = JSON.parse(result.stdout);
+  assert.equal(ledger.kind, 'tasks');
+  assert.deepEqual(ledger.tasks.map((t) => t.id), ['T001', 'T002', 'T003']);
+  assert.doesNotMatch(result.stdout + (result.stderr || ''), /spawned headless/);
+  // 没有留下任何 run 目录 = 确实没发车。目录可能压根没被创建（没发车就没有状态落盘），
+  // 所以"不存在"与"存在但为空"都算通过 —— 直接 readdir 一个不存在的目录会抛 ENOENT。
+  const runsDir = path.join(family, 'orchestrator', 'runs');
+  const runsEntries = fs.existsSync(runsDir) ? fs.readdirSync(runsDir) : [];
+  assert.deepEqual(runsEntries, [], 'orch --tasks must not leave a run directory');
+});
+
+test('orch --doctor stays read-only', () => {
+  const orch = path.join(root, 'orch.mjs');
+  const result = spawnSync(process.execPath, [orch, '--doctor'], {
+    cwd: family, encoding: 'utf8', windowsHide: true, timeout: 60000,
+    env: { ...process.env, ORCH_MAINTENANCE_LOCK: path.join(family, 'no-lock-doc.json') },
+  });
+  assert.equal(result.status, 0, result.stderr);
+  const doctor = JSON.parse(result.stdout);
+  assert.ok(doctor.agent, '--doctor must report the resolved agent');
+  assert.doesNotMatch(result.stdout + (result.stderr || ''), /spawned headless/);
+});
