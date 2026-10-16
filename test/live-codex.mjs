@@ -8,7 +8,7 @@ import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { powershellExe } from '../scripts/core/contracts.mjs';
 import { processSnapshot, sameProcess } from '../scripts/core/leases.mjs';
-import { readJsonDiagnostic, captureProcessIdentity, inspectProcess, collectOwnedProcessTargets, shutdownWindowTargets, parentProcessMap, pidsUnder, codexFailureReasons, finalizeCodexReport } from './live-safety.mjs';
+import { readJsonDiagnostic, captureProcessIdentity, inspectProcess, collectOwnedProcessTargets, shutdownWindowTargets, parentProcessMap, pidsUnder, codexFailureReasons, finalizeCodexReport, ninthOrderedAfterAFreedSlot } from './live-safety.mjs';
 
 const exec = promisify(execFile);
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -293,7 +293,7 @@ if(summaryRead.ok&&summary===null)jsonDiagnostics.push('summary.json has invalid
 const measurementFailures = [...samplingErrors.values()];
 const samplingComplete = engineEnded;
 const receiptsValid = results.every((r, i) => !r.missing && r.id === config.ids[i] && r.nonce === nonce && r.sum === 50005000 && r.cwd === workspace && r.finished > r.started);
-const ordered = receiptsValid && results[8].started >= results[7].finished;
+const ordered = ninthOrderedAfterAFreedSlot(results, receiptsValid);
 const windowLaunches = (engine.output().match(new RegExp('spawned visible '+agent+' TUI','g')) || []).length;
 const uniqueLaunchers = new Set(samples.flatMap(s => s.live.map(w => w.launcherPid))).size;
 const overlap = receiptsValid && Math.max(...results.slice(0, 8).map(r => r.started)) < Math.min(...results.slice(0, 8).map(r => r.finished));

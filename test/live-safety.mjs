@@ -121,6 +121,22 @@ export function collectOwnedProcessTargets({controllers=[],runId,windows=[]}={},
   return {state,targets,diagnostics,snapshot};
 }
 
+// The ninth block must wait for a freed slot: with a window cap of eight, a ninth unit can only
+// START after at least one of the first eight has FINISHED. History: the original criterion
+// (2026-10-09) compared against results[7].finished — "block eight", implicitly "the one that
+// finishes last". That holds in a lockstep round but breaks as soon as launch pacing staggers the
+// blocks (measured 2026-10-16: the ninth legally took a slot freed before block eight had even
+// launched, and the round read `ordering-invalid` while live-window capacity ≤8 held at every
+// sample). Comparing against the EARLIEST finish across the first eight expresses the real
+// contract and stays fail-closed: if a defect lets the ninth run alongside all eight, its start
+// predates every finish and the check reds.
+export function ninthOrderedAfterAFreedSlot(results, receiptsValid) {
+  if (!receiptsValid) return false;
+  const firstEight = results.slice(0, 8);
+  if (firstEight.some(r => !Number.isFinite(r?.finished))) return false;
+  return results[8].started >= Math.min(...firstEight.map(r => r.finished));
+}
+
 export function codexFailureReasons({
   samplingComplete,measurementFailures=[],engineExit,pollExit,peak,capacity,tasks,receiptsValid,
   ordered,overlap,windowLaunches,uniqueLaunchers,summaryResultCount,summaryResultsVerified,

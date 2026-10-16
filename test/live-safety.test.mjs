@@ -9,6 +9,7 @@ import {
   inspectProcess,
   collectOwnedProcessTargets,
   codexFailureReasons,
+  ninthOrderedAfterAFreedSlot,
 } from './live-safety.mjs';
 
 const family=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../temp');
@@ -148,4 +149,36 @@ test('live scripts use the fail-closed helpers and cannot lose their report on c
   assert.doesNotMatch(recovery,/child\.kill\(/);
   assert.doesNotMatch(codex,/JSON\.parse\(fs\.readFileSync\(f,\s*['"]utf8['"]\)\)/);
   assert.doesNotMatch(codex,/JSON\.parse\(fs\.readFileSync\(summaryFile,\s*['"]utf8['"]\)\)/);
+});
+
+test('ninth ordering: the ninth must wait for a freed slot, not for one specific block',()=>{
+  const at=(started,finished)=>({started,finished});
+  // Lockstep round: the first eight start nearly together and finish between 2000-2007; the ninth
+  // starts at 2100, after all of them — the old shape stays green here.
+  const lockstep=[
+    at(1000,2000),at(1002,2001),at(1004,2002),at(1006,2003),
+    at(1008,2004),at(1010,2005),at(1012,2006),at(1014,2007),
+    at(2100,2200),
+  ];
+  assert.equal(ninthOrderedAfterAFreedSlot(lockstep,true),true,'lockstep must pass');
+
+  // Paced round (the measured 2026-10-16 shape, seconds-compressed): the ninth starts after the
+  // EARLIEST finish (434) has freed a slot, while block eight launched later and is still running.
+  // This is legal under the capacity contract and must pass; the old results[7]-based criterion
+  // read it as `ordering-invalid`.
+  const staggered=[at(0,434),at(18,434),at(36,434),at(142,434),at(68,434),at(38,434),at(90,434),at(418,500),at(440,460)];
+  assert.equal(ninthOrderedAfterAFreedSlot(staggered,true),true,'paced-but-legal must pass');
+
+  // Red case: a defect lets the ninth run while ALL eight are still live (its start predates every
+  // finish) — the criterion must red. This is the regression the original criterion was written
+  // for, and the new expression keeps it fail-closed.
+  const racing=staggered.map(r=>({...r}));
+  racing[8]=at(400,460);
+  assert.equal(ninthOrderedAfterAFreedSlot(racing,true),false,'racing the ninth must red');
+
+  // Red cases: fail-closed on invalid receipts and on missing finishes.
+  assert.equal(ninthOrderedAfterAFreedSlot(lockstep,false),false,'invalid receipts must red');
+  const broken=lockstep.map(r=>({...r}));
+  broken[3]=at(1000,undefined);
+  assert.equal(ninthOrderedAfterAFreedSlot(broken,true),false,'missing finish must red');
 });
