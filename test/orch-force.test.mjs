@@ -135,3 +135,23 @@ test('orch --doctor stays read-only', () => {
   assert.ok(doctor.agent, '--doctor must report the resolved agent');
   assert.doesNotMatch(result.stdout + (result.stderr || ''), /spawned headless/);
 });
+
+// orch 的主业（强制发车）也必须钉住（2026-10-15）：只读透传修只该影响只读入口；执行类请求
+// 仍走 ORCH_FORCE_EXECUTE 强制发车（跳过 inline 门、真的派单元）。orch.mjs 此前没有任何测试
+// ——这正是 --tasks 静默发车能藏那么久的原因；只读与发车两个分支从此各有判据。
+// 红例：把判断改坏成「任何请求都透传」时，inline 门会拦下单块请求、本用例必红。
+test('orch still force-launches an execution request', () => {
+  const s = setup();
+  const env = { ...s.env, __ws: s.ws };
+  try {
+    const r = spawnSync(process.execPath, [path.join(root, 'orch.mjs'), '修复登录页'], {
+      cwd: s.ws, encoding: 'utf8', windowsHide: true, timeout: RUN_TIMEOUT_MS,
+      env: (() => { const e = { ...env, WORKSPACE_DIR: s.ws, ORCH_STATE_DIR: path.join(s.ws, 'temp', 'orchestrator') }; delete e.__ws; return e; })(),
+    });
+    assertRunStarted(r);
+    assert.equal(r.status, 0, r.stderr);
+    assert.doesNotMatch(r.stdout, /"mode":"inline"/, 'orch must bypass the inline gate');
+    assert.match(r.stdout, /spawned headless kimi unit/);
+    assert.match(fs.readFileSync(path.join(s.ws, 'receipt.json'), 'utf8'), /"ok":true/);
+  } finally { for (let i = 0; i < 5; i++) { try { fs.rmSync(s.ws, { recursive: true, force: true }); break; } catch { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 400); } } }
+});
