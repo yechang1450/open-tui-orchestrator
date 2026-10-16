@@ -264,8 +264,19 @@ while (!engineEnded && Date.now() < deadline) {
   if (engineDied && fs.existsSync(summaryFile)) { engineEnded = true; break; }
   await new Promise(r => setTimeout(r, 3000));
 }
-const engineResult = await engine.done;
-const pollResult = await poll.done;
+// 2026-10-16: past the live deadline the engine can stay blocked on windows that never
+// self-exit (e.g. a hermes TUI parked on an unanswered prompt), so the finalize awaits
+// would hang forever and no report would be written. Bound each child's exit wait; on
+// timeout record a measurement failure and let the cleanup phase handle the leftovers.
+const finalizeWait = (childDone, label) => Promise.race([
+  childDone,
+  new Promise(resolve => setTimeout(() => {
+    noteSamplingError('finalize', label + ' did not exit after the live deadline; proceeding with cleanup');
+    resolve(null);
+  }, 120000)),
+]);
+const engineResult = await finalizeWait(engine.done, 'engine');
+const pollResult = await finalizeWait(poll.done, 'poll');
 const results = config.ids.map(id => {
   const f = path.join(root, 'project-' + id, 'result' + id + '.json');
   if (!fs.existsSync(f)) return {id,missing:true};
