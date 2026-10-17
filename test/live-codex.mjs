@@ -243,7 +243,7 @@ while (!engineEnded && Date.now() < deadline) {
         }
         return false;
       });
-      const agents = descendants.filter(p => agent==='pi'?(/^pi(?:\.exe)?$/i.test(p.Name)||(/^node(?:\.exe)?$/i.test(p.Name)&&/pi-coding-agent.*cli\.js/i.test(p.CommandLine||''))):agent==='hermes'?/^hermes(?:\.exe)?$/i.test(p.Name):agent==='opencode'?/^opencode(?:\.exe)?$/i.test(p.Name):agent==='kimi'?/^kimi(?:\.exe)?$/i.test(p.Name):agent==='claude'?/^claude(?:\.exe)?$/i.test(p.Name):/^codex(?:\.exe)?$/i.test(p.Name));
+      const agents = descendants.filter(p => agent==='pi'?(/^pi(?:\.exe)?$/i.test(p.Name)||(/^node(?:\.exe)?$/i.test(p.Name)&&/pi-coding-agent.*cli\.js/i.test(p.CommandLine||''))):agent==='hermes'?/^hermes(?:\.exe)?$/i.test(p.Name):agent==='opencode'?/^opencode(?:\.exe)?$/i.test(p.Name):agent==='kimi'?(/^kimi(?:\.exe)?$/i.test(p.Name)||(/^node(?:\.exe)?$/i.test(p.Name)&&/kimi/i.test(p.CommandLine||''))):agent==='claude'?/^claude(?:\.exe)?$/i.test(p.Name):/^codex(?:\.exe)?$/i.test(p.Name));
       if (agents.length) live.push({ title: w.title, launcherPid: pid, launcherParentPid: launcher.ParentProcessId, agentPids: agents.map(p => p.ProcessId) });
     }
     const ready = config.ids.filter(id => fs.existsSync(path.join(root, 'project-' + id, 'started.json')));
@@ -277,19 +277,23 @@ const finalizeWait = (childDone, label) => Promise.race([
 ]);
 const engineResult = await finalizeWait(engine.done, 'engine');
 const pollResult = await finalizeWait(poll.done, 'poll');
-const results = config.ids.map(id => {
-  const f = path.join(root, 'project-' + id, 'result' + id + '.json');
-  if (!fs.existsSync(f)) return {id,missing:true};
-  const parsed=readJsonDiagnostic(f,{label:'result '+id});
-  if (!parsed.ok) { noteJsonDiagnostic(parsed); return {id,missing:true,jsonError:parsed.message}; }
-  return parsed.value&&typeof parsed.value==='object'&&!Array.isArray(parsed.value) ? parsed.value : {id,missing:true,jsonError:'result '+id+' has invalid JSON shape'};
-});
 
 const summaryRead=readJsonDiagnostic(summaryFile,{label:'summary.json'});
 noteJsonDiagnostic(summaryRead);
 const summary=summaryRead.ok&&summaryRead.value&&typeof summaryRead.value==='object'&&!Array.isArray(summaryRead.value)
   ? summaryRead.value : null;
 if(summaryRead.ok&&summary===null)jsonDiagnostics.push('summary.json has invalid JSON shape');
+
+const results = config.ids.map((id, i) => {
+  const f = path.join(root, 'project-' + id, 'result' + id + '.json');
+  const firstEnd = Number(summary?.results?.['B' + (i + 1)]?.attempts?.[0]?.endedAt);
+  const withFirst = v => ({...v, firstFinished: Number.isFinite(firstEnd) ? firstEnd : undefined});
+  if (!fs.existsSync(f)) return withFirst({id,missing:true});
+  const parsed=readJsonDiagnostic(f,{label:'result '+id});
+  if (!parsed.ok) { noteJsonDiagnostic(parsed); return withFirst({id,missing:true,jsonError:parsed.message}); }
+  return withFirst(parsed.value&&typeof parsed.value==='object'&&!Array.isArray(parsed.value) ? parsed.value : {id,missing:true,jsonError:'result '+id+' has invalid JSON shape'});
+});
+
 const measurementFailures = [...samplingErrors.values()];
 const samplingComplete = engineEnded;
 const receiptsValid = results.every((r, i) => !r.missing && r.id === config.ids[i] && r.nonce === nonce && r.sum === 50005000 && r.cwd === workspace && r.finished > r.started);

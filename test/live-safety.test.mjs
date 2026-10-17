@@ -169,6 +169,19 @@ test('ninth ordering: the ninth must wait for a freed slot, not for one specific
   const staggered=[at(0,434),at(18,434),at(36,434),at(142,434),at(68,434),at(38,434),at(90,434),at(418,500),at(440,460)];
   assert.equal(ninthOrderedAfterAFreedSlot(staggered,true),true,'paced-but-legal must pass');
 
+  // Retried block (measured 2026-10-17, kimi R2 / hermes): block five's FINAL finish is 3000 (it
+  // ran a second attempt), but attempt 1 ended at 1500 and released the slot the ninth took at
+  // 1600. firstFinished carries that first end; without it the same data falls back to the final
+  // finish and reds (fail-closed).
+  const retried=[
+    at(1000,2200),at(1000,2300),at(1000,2400),at(1000,2500),
+    {started:1000,finished:3000,firstFinished:1500},at(1000,2600),at(1000,2700),at(1000,2800),
+    at(1600,1800),
+  ];
+  assert.equal(ninthOrderedAfterAFreedSlot(retried,true),true,'first attempt freed the slot');
+  const noFirst=retried.map(r=>({started:r.started,finished:r.finished}));
+  assert.equal(ninthOrderedAfterAFreedSlot(noFirst,true),false,'final finish alone stays strict');
+
   // Red case: a defect lets the ninth run while ALL eight are still live (its start predates every
   // finish) — the criterion must red. This is the regression the original criterion was written
   // for, and the new expression keeps it fail-closed.

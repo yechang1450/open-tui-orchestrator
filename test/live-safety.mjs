@@ -133,8 +133,12 @@ export function collectOwnedProcessTargets({controllers=[],runId,windows=[]}={},
 export function ninthOrderedAfterAFreedSlot(results, receiptsValid) {
   if (!receiptsValid) return false;
   const firstEight = results.slice(0, 8);
-  if (firstEight.some(r => !Number.isFinite(r?.finished))) return false;
-  return results[8].started >= Math.min(...firstEight.map(r => r.finished));
+  // A RETRIED block finishes (finally) later than the slot it actually freed: the ninth may start
+  // right after the first attempt ended, while `finished` still points at the retry. Prefer the
+  // caller-supplied firstFinished (attempt 1's endedAt) when present; fall back to finished.
+  const freed = firstEight.map(r => (Number.isFinite(r?.firstFinished) ? r.firstFinished : r?.finished));
+  if (freed.some(v => !Number.isFinite(v))) return false;
+  return results[8].started >= Math.min(...freed);
 }
 
 export function codexFailureReasons({
