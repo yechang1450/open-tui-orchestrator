@@ -243,7 +243,7 @@ while (!engineEnded && Date.now() < deadline) {
         }
         return false;
       });
-      const agents = descendants.filter(p => agent==='pi'?(/^pi(?:\.exe)?$/i.test(p.Name)||(/^node(?:\.exe)?$/i.test(p.Name)&&/pi-coding-agent.*cli\.js/i.test(p.CommandLine||''))):agent==='hermes'?/^hermes(?:\.exe)?$/i.test(p.Name):agent==='opencode'?/^opencode(?:\.exe)?$/i.test(p.Name):agent==='kimi'?/^kimi(?:\.exe)?$/i.test(p.Name):/^codex(?:\.exe)?$/i.test(p.Name));
+      const agents = descendants.filter(p => agent==='pi'?(/^pi(?:\.exe)?$/i.test(p.Name)||(/^node(?:\.exe)?$/i.test(p.Name)&&/pi-coding-agent.*cli\.js/i.test(p.CommandLine||''))):agent==='hermes'?/^hermes(?:\.exe)?$/i.test(p.Name):agent==='opencode'?/^opencode(?:\.exe)?$/i.test(p.Name):agent==='kimi'?/^kimi(?:\.exe)?$/i.test(p.Name):agent==='claude'?/^claude(?:\.exe)?$/i.test(p.Name):/^codex(?:\.exe)?$/i.test(p.Name));
       if (agents.length) live.push({ title: w.title, launcherPid: pid, launcherParentPid: launcher.ParentProcessId, agentPids: agents.map(p => p.ProcessId) });
     }
     const ready = config.ids.filter(id => fs.existsSync(path.join(root, 'project-' + id, 'started.json')));
