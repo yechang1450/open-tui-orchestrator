@@ -99,3 +99,59 @@ test('the maintenance lock still blocks a forced invocation', () => {
     assert.doesNotMatch(r.stdout, /spawned headless/);
   } finally { for (let i = 0; i < 5; i++) { try { fs.rmSync(s.ws, { recursive: true, force: true }); break; } catch { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 400); } } }
 });
+
+// orch.mjs 自己的入口语义（2026-10-15）：强制发车只该加在执行类请求上；只读入口必须
+// 原样透传给 cli.mjs。回归场景：`orch --tasks "<request>"` 曾把 --tasks 落到 argv[3]
+// 被引擎当成请求文本（mode 取 argv[2]），只想核对账本却真的开了四个执行单元。
+test('orch passes read-only entries through instead of force-launching them', () => {
+  const orch = path.join(root, 'orch.mjs');
+  const result = spawnSync(process.execPath, [orch, '--tasks', '甲任务；乙任务；丙任务'], {
+    cwd: family, encoding: 'utf8', windowsHide: true, timeout: 60000,
+    env: { ...process.env, ORCH_MAINTENANCE_LOCK: path.join(family, 'no-lock-ro.json') },
+  });
+  assert.equal(result.error, undefined, result.error?.message);
+  assert.notEqual(result.status, null, 'orch --tasks must return, not hang');
+  assert.equal(result.status, 0, result.stderr);
+  // 账本真的打印了（JSON 可解析、三个 id 齐），且一个单元都没发车。
+  const ledger = JSON.parse(result.stdout);
+  assert.equal(ledger.kind, 'tasks');
+  assert.deepEqual(ledger.tasks.map((t) => t.id), ['T001', 'T002', 'T003']);
+  assert.doesNotMatch(result.stdout + (result.stderr || ''), /spawned headless/);
+  // 没有留下任何 run 目录 = 确实没发车。目录可能压根没被创建（没发车就没有状态落盘），
+  // 所以"不存在"与"存在但为空"都算通过 —— 直接 readdir 一个不存在的目录会抛 ENOENT。
+  const runsDir = path.join(family, 'orchestrator', 'runs');
+  const runsEntries = fs.existsSync(runsDir) ? fs.readdirSync(runsDir) : [];
+  assert.deepEqual(runsEntries, [], 'orch --tasks must not leave a run directory');
+});
+
+test('orch --doctor stays read-only', () => {
+  const orch = path.join(root, 'orch.mjs');
+  const result = spawnSync(process.execPath, [orch, '--doctor'], {
+    cwd: family, encoding: 'utf8', windowsHide: true, timeout: 60000,
+    env: { ...process.env, ORCH_MAINTENANCE_LOCK: path.join(family, 'no-lock-doc.json') },
+  });
+  assert.equal(result.status, 0, result.stderr);
+  const doctor = JSON.parse(result.stdout);
+  assert.ok(doctor.agent, '--doctor must report the resolved agent');
+  assert.doesNotMatch(result.stdout + (result.stderr || ''), /spawned headless/);
+});
+
+// orch 的主业（强制发车）也必须钉住（2026-10-15）：只读透传修只该影响只读入口；执行类请求
+// 仍走 ORCH_FORCE_EXECUTE 强制发车（跳过 inline 门、真的派单元）。orch.mjs 此前没有任何测试
+// ——这正是 --tasks 静默发车能藏那么久的原因；只读与发车两个分支从此各有判据。
+// 红例：把判断改坏成「任何请求都透传」时，inline 门会拦下单块请求、本用例必红。
+test('orch still force-launches an execution request', () => {
+  const s = setup();
+  const env = { ...s.env, __ws: s.ws };
+  try {
+    const r = spawnSync(process.execPath, [path.join(root, 'orch.mjs'), '修复登录页'], {
+      cwd: s.ws, encoding: 'utf8', windowsHide: true, timeout: RUN_TIMEOUT_MS,
+      env: (() => { const e = { ...env, WORKSPACE_DIR: s.ws, ORCH_STATE_DIR: path.join(s.ws, 'temp', 'orchestrator') }; delete e.__ws; return e; })(),
+    });
+    assertRunStarted(r);
+    assert.equal(r.status, 0, r.stderr);
+    assert.doesNotMatch(r.stdout, /"mode":"inline"/, 'orch must bypass the inline gate');
+    assert.match(r.stdout, /spawned headless kimi unit/);
+    assert.match(fs.readFileSync(path.join(s.ws, 'receipt.json'), 'utf8'), /"ok":true/);
+  } finally { for (let i = 0; i < 5; i++) { try { fs.rmSync(s.ws, { recursive: true, force: true }); break; } catch { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 400); } } }
+});

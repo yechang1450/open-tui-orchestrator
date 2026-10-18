@@ -55,7 +55,21 @@ node cli.mjs --agent codex --doctor
 orch "刷新登录页文案；给令牌刷新路径补一条回归测试"
 ```
 
-`orch` 是强制编排入口；常规入口是 `open-tui-orchestrator --run-windows "<请求>"`。真正可并行的请求会按块拉起执行单元——默认 headless、不弹窗。从另一个 shell 只读观察：
+`orch` 是强制编排入口；常规入口是 `open-tui-orchestrator --run-windows "<请求>"`。真正可并行的请求会按块拉起执行单元——默认 headless、不弹窗。
+
+### `orch` 与只读入口
+
+`orch "<请求>"` 会**真的发车**。只想核对任务切分、不要开跑时，用只读入口——它们只打印、不发车，在 `orch` 和 `open-tui-orchestrator` 两种命令下行为一致：
+
+```powershell
+orch --tasks "<请求>"        # 打印权威任务账本（T001、T002…），据此对齐 id
+orch --doctor               # 宿主 / 载体 / 单元类型自检
+orch --status --readonly    # 只读看运行态
+```
+
+只读入口透传、不注入强制发车；`orch "<请求>"` 之外的其它 flag 仍按执行类处理。
+
+从另一个 shell 只读观察：
 
 ```powershell
 open-tui-orchestrator --status --readonly

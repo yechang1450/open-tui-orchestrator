@@ -135,6 +135,17 @@ test('gate: only named host-absence skips are accepted, every other skip fails L
   assert.equal(suiteSkips('\u2714 only a pass (1ms)').length, 0);
 });
 
+// 实测套件规模把具名合法 skip 计入（2026-10-15 修）：宿主未装的机器上，套件实测 536 pass + 3 skip
+// 与文档声明的 539 曾永远对不上（L4 假红），并逼出「为无关用例装 CLI 或改文档数字」两种坏选择。
+// 红例：退回「只数 pass」的旧口径时本用例必红。
+test('gate: the measured suite total counts named host-absence skips', async () => {
+  const {measuredSuiteTotal} = await import(pathToFileURL(path.join(root, 'scripts', 'gate.mjs')).href);
+  assert.equal(measuredSuiteTotal(536, 0, 3), 539, 'host-absence skips are suite members');
+  assert.equal(measuredSuiteTotal(539, 0, 0), 539, 'no skips: unchanged');
+  assert.equal(measuredSuiteTotal(537, 2, 0), 539, 'an environment-flake pass keeps its fail counted');
+  assert.equal(measuredSuiteTotal(536, 2, 3), 541, 'all three classes add up');
+});
+
 // 进程快照预算钉给 gate 子进程（2026-10-06）：L1 以 --test-concurrency=3 真起进程，满载机器上
 // PowerShell/WMI 枚举超过 15s，成片测试以 `did not return within 15000 ms` 收场——预算红而非判据红。
 // 生产默认值不动（snapshot-diagnostics.test.mjs 把 15s 钉成契约），只在 gate 子进程里钉大预算。

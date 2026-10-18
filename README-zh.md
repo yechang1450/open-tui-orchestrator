@@ -21,7 +21,7 @@
 `ORCH_MIN_FREE_MEM_MB` 设定保留下限（默认 1000 MB）；刻意使用**可用**内存（而非总量）。超出容量的任务合并进串行块并保留在账本里——绝不推给隐藏队列、绝不删除。跨运行协调器确认活动窗口数；活动窗口与启动中的预留都占用容量。
 
 - **要证据，不要口头声明。** 每个窗口为它的块打印完整 TODO 清单，写 `started`/`completed` 检查点与 token 专属的 `__ORCH_DONE__` 标记；看护进程加上父级的验收条件，核实真实文件、命令输出、进程关闭与租约释放。**每个任务都 `verified` 时，整轮才算成功。**
-- **可恢复，但不盲目重放。** 中断的运行会按 PID / 创建时间 / 可执行文件 / 命令行认领存活的窗口；已开始但副作用无法证明的任务会变成 `needs-reconciliation`（交给人核实真实状态），而不是被盲目重放。停滞单元（证据停止推进超过 `ORCH_UNIT_STALL_MS`，默认 600000 ms）会被关闭并在块的尝试预算内重试；`ORCH_UNIT_TIMEOUT_MS`（默认 2700000 ms）限制单个单元的最长寿命。
+- **可恢复，但不盲目重放。** 中断的运行会按 PID / 创建时间 / 可执行文件 / 命令行认领存活的窗口；已开始但副作用无法证明的任务会变成 `needs-reconciliation`（交给人核实真实状态），而不是被盲目重放。停滞单元（证据停止推进超过 `ORCH_UNIT_STALL_MS`，默认 600000 ms）会被关闭并在块的尝试预算内重试；`ORCH_UNIT_TIMEOUT_MS`（默认 2700000 ms）限制单个单元的最长寿命。窗口按 `ORCH_WINDOW_STAGGER_MS`（默认 5000 ms）错峰拉起，避免首回合突发打满宿主每分钟限流；设 `0` 可同起。
 - **七种宿主、一套契约。** Codex、pi、opencode、Kimi Code、Claude Code、OpenClaw、Hermes Agent 的适配器在共享契约之下分别实现参数构造、会话/结果读取、完成检测与关闭。宿主由 `--agent`/`ORCH_AGENT`、宿主环境标记、或从 Windows 祖先进程链推断发起方选定。适配器细节：[Claude Code](https://github.com/yechang1450/open-tui-orchestrator/blob/master/docs/claude-adapter.md)、[OpenClaw](https://github.com/yechang1450/open-tui-orchestrator/blob/master/docs/openclaw-adapter.md)、[pi](https://github.com/yechang1450/open-tui-orchestrator/blob/master/docs/pi-adapter.md)。未知宿主、未验证 CLI、可执行文件缺失都会给出诊断——**不自动安装、不静默回退到其它 Agent。**
 
 运行状态（启动器、锁、结果、账本）在你工作区的 `temp/orchestrator` 下；你的 Agent 自己的配置、会话与凭据仍在原位置。编排器只会转交调用者已有的权限，绝不充当提权层。
@@ -52,7 +52,7 @@ node cli.mjs --tasks '修复登录页；优化购物车'
 node cli.mjs --plan-file plan.json --unit-cmd-file unit.json --run-windows '修复登录页；优化购物车'
 ```
 
-`--plan` 只做规划；新的 `--run-windows` 仅在存在并行波时才开窗；`--resume-run <id>` 在中断后认领已保存的运行；`--verify-run <id>` 只复核不执行；`--status --readonly` 报告窗口、租约与活动运行；`--watch <id> [--jsonl]` 只读流式输出运行看板；`orch` 是强制执行入口——绕过一切内联回退（维护锁除外）。任何 Agent 都可以**不装适配器**直接调用：`--plan-file` 接收调用方自己的账本/分块（编排器零模型调用——两个规划阶段全部跳过），`--unit-cmd`/`--unit-cmd-file` 提供单元命令——见 [docs/caller-driven.md](https://github.com/yechang1450/open-tui-orchestrator/blob/master/docs/caller-driven.md)。接入新的 print 类 CLI：`node scripts/adapt.mjs`——见 [docs/adapt.md](https://github.com/yechang1450/open-tui-orchestrator/blob/master/docs/adapt.md)。维护编排器自身时，`node scripts/maintenance-lock.mjs lock --reason "为什么"` 会暂停一切动作入口直至解锁——见 [docs/maintenance-lock.md](https://github.com/yechang1450/open-tui-orchestrator/blob/master/docs/maintenance-lock.md)。
+`--plan` 只做规划；新的 `--run-windows` 仅在存在并行波时才开窗；`--resume-run <id>` 在中断后认领已保存的运行；`--verify-run <id>` 只复核不执行；`--status --readonly` 报告窗口、租约与活动运行；`--watch <id> [--jsonl]` 只读流式输出运行看板；`orch` 是强制执行入口——绕过一切内联回退（维护锁除外）。`orch "<请求>"` 真的会发车；只想核对切分就用只读入口（`orch --tasks "<请求>"` 打印权威任务账本，`--doctor` 自检宿主）——它们只打印、不发车。任何 Agent 都可以**不装适配器**直接调用：`--plan-file` 接收调用方自己的账本/分块（编排器零模型调用——两个规划阶段全部跳过），`--unit-cmd`/`--unit-cmd-file` 提供单元命令——见 [docs/caller-driven.md](https://github.com/yechang1450/open-tui-orchestrator/blob/master/docs/caller-driven.md)。接入新的 print 类 CLI：`node scripts/adapt.mjs`——见 [docs/adapt.md](https://github.com/yechang1450/open-tui-orchestrator/blob/master/docs/adapt.md)。维护编排器自身时，`node scripts/maintenance-lock.mjs lock --reason "为什么"` 会暂停一切动作入口直至解锁——见 [docs/maintenance-lock.md](https://github.com/yechang1450/open-tui-orchestrator/blob/master/docs/maintenance-lock.md)。
 
 ## 为什么做这个
 
@@ -74,4 +74,4 @@ node cli.mjs --agent hermes --doctor
 
 ## 验证状态
 
-当前通用核心为 0.9.24-1，离线回归为 537/537 通过。仓库内发布的判定器是 `node scripts/gate.mjs --all`——L1 离线套件、L2 宿主解析 + 反例能红（判据本身没坏）、L3 未知 run 干净失败、L4 版本/封印/文档/套件总数对账。任何核心或运行时文件变更都必须重新 `release-integrity --seal`。细节与证据：[docs/release-policy.md](https://github.com/yechang1450/open-tui-orchestrator/blob/master/docs/release-policy.md)。
+当前通用核心为 0.9.24-1，离线回归为 543/543 通过。仓库内发布的判定器是 `node scripts/gate.mjs --all`——L1 离线套件、L2 宿主解析 + 反例能红（判据本身没坏）、L3 未知 run 干净失败、L4 版本/封印/文档/套件总数对账。任何核心或运行时文件变更都必须重新 `release-integrity --seal`。细节与证据：[docs/release-policy.md](https://github.com/yechang1450/open-tui-orchestrator/blob/master/docs/release-policy.md)。

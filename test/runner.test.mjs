@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {runWindows,runDirectory,verifyRun,firstCheckpointTimedOut} from '../scripts/core/runner.mjs';
+import {runWindows,runDirectory,verifyRun,firstCheckpointTimedOut,resolveSpawnStaggerMs} from '../scripts/core/runner.mjs';
 const family=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../temp');
 // This file runs in its own Node test worker; pin the retry policy once so concurrent subtests do not race on process.env.
 process.env.ORCH_UNPRODUCTIVE_RETRIES='0';
@@ -47,6 +47,17 @@ test('spawnStaggerMs serializes window births within a run',async()=>{
   for(const gap of gaps)assert.ok(gap>=150,'spawn gap below stagger: '+JSON.stringify({times,gaps}));
   assert.equal(sum.success,false);assert.ok(sum.finishedAt);
  }finally{await new Promise(r=>setTimeout(r,500));fs.rmSync(workspace,{recursive:true,force:true});}
+});
+
+// resolveSpawnStaggerMs is the user-entry default for ORCH_WINDOW_STAGGER_MS: windows are paced
+// 5000 ms apart unless the operator overrides it; an explicit "0" disables pacing entirely, and
+// garbage falls back to the paced default (never to silence).
+test('resolveSpawnStaggerMs: paced by default, overridable, 0 disables, garbage falls back',()=>{
+ assert.equal(resolveSpawnStaggerMs({}),5000,'unset env keeps the paced default');
+ assert.equal(resolveSpawnStaggerMs({ORCH_WINDOW_STAGGER_MS:'0'}),0,'explicit 0 disables pacing');
+ assert.equal(resolveSpawnStaggerMs({ORCH_WINDOW_STAGGER_MS:'3000'}),3000);
+ assert.equal(resolveSpawnStaggerMs({ORCH_WINDOW_STAGGER_MS:'nope'}),5000,'garbage falls back to the default');
+ assert.equal(resolveSpawnStaggerMs({ORCH_WINDOW_STAGGER_MS:'999999'}),60000,'clamped to a sane ceiling');
 });
 
 // windowCap (ORCH_MAX_WINDOWS) throttles admission only; planning capacity is untouched.

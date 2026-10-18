@@ -23,6 +23,16 @@ const pause=ms=>new Promise(r=>setTimeout(r,ms));
 // 就判停滞 → 关窗/强制收口单元树 → 计入 attempts 预算自动重跑；预算耗尽则诚实以 stalled 收口。
 const UNIT_STALL_MS=Math.max(1000,Number(process.env.ORCH_UNIT_STALL_MS||600000)||600000);
 const UNIT_TIMEOUT_MS=Math.max(5000,Number(process.env.ORCH_UNIT_TIMEOUT_MS||2700000)||2700000);
+// 起窗节奏（2026-10-17）：默认 5000ms 逐窗错峰。九块同时冷启动会撞 TUI 首启竞争与宿主账号
+// 每分钟限流（两轮实测全红：hermes 八单元全卡欢迎页、codex 三块 Reservation expired）；错峰后
+// 同一预算下峰值 8、9/9 verified。`0` = 关闭（显式同起）。库语义：本函数是**用户入口**
+// （orchestrate-sdk）的默认值解析；runWindows 的 options.spawnStaggerMs 仍保持「显式传才生效」，
+// 直接调 runWindows 的测试不会被默认值拖慢。
+export const DEFAULT_SPAWN_STAGGER_MS = 5000;
+export function resolveSpawnStaggerMs(env = process.env) {
+  const v = Number(env.ORCH_WINDOW_STAGGER_MS);
+  return Number.isFinite(v) && v >= 0 ? Math.min(60000, Math.floor(v)) : DEFAULT_SPAWN_STAGGER_MS;
+}
 
 // —— 0.9.17 通用内存采样接线（宿主无关）：只拿单元根 pid；采样/回写任何失败都不影响编排（fail-open）。
 function unitPeakFile(la, key, token) {
