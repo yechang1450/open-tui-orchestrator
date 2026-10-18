@@ -176,7 +176,11 @@ const MACHINE_READABLE = isMachineReadableEntry();
 const diag = (line) => { if (MACHINE_READABLE) console.error(line); else console.log(line); };
 const noteModel = (line) => diag(line);
 let MODEL_PLAN = {model:null,effort:null,modelSource:'none',effortSource:'none'};
-if (!AGENT_ERROR) try {
+// 只读入口不做「宿主模型/effort 继承」：该继承要扫宿主的会话记录（codex sessions 可达 GB 级），
+// 2026-10-17 实测 --status 因此耗时 32s 并被 20s 的测试超时判红（环境积累后必然复现）。
+// 需要模型分类的入口（--plan/--tasks/--run-windows/--resume-run/…）不受影响，仍照常继承。
+const NO_MODEL_ENTRY = new Set(['--status','--doctor','--watch','--verify-run','--version','--help','-h','--clear-cache','--install-deps']);
+if (!AGENT_ERROR && !NO_MODEL_ENTRY.has(String(process.argv[2] || ''))) try {
   const explicitModel = String(process.env.ORCH_MODEL || '').trim() || null;
   const explicitEffort = String(process.env.ORCH_EFFORT || '').trim() || null;
   let inheritFrom = AGENT.agent;
@@ -2128,9 +2132,11 @@ function readExitCode(rf) {
   } catch { return null; }
 }
 // A window is "alive" if its launcher PID still exists (window still open).
-function windowAlive(win) {
+// snapshot(可选)：一次全表快照供多个窗口复用——每次 windowAlive 各取一次全表 WMI
+// 在历史窗口多时是 N×0.6s（2026-10-17 实测 --status 26s 的主因）。
+function windowAlive(win, snapshot) {
   if(!win?.pidFile||!existsSync(win.pidFile))return false;
-  const actual=launcherIdentity(readPidFile(win.pidFile),win.pidFile);
+  const actual=launcherIdentity(readPidFile(win.pidFile),win.pidFile,snapshot);
   return !!actual&&(!win.identity||sameProcess(win.identity,actual));
 }
 // Returns the conflictKeys of a block (never empty -> at least [<title>]).
@@ -2252,8 +2258,10 @@ function cleanStaleTransients() {
 // readonly=true 仅用于外部只读查询（如 poll-windows），不释放/改写锁，避免与运行中的编排器竞争。
 function showStatus(readonly) {
   const wins = loadWindows();
-  const alive = wins.filter((w) => windowAlive(w));
-  const closed = wins.filter((w) => !windowAlive(w));
+  // 一次全表快照给所有窗口复用：windowAlive 逐窗取快照是 N×WMI（历史窗口多时 --status 数十秒）。
+  let snap; try { snap = processSnapshot(); } catch { snap = undefined; }
+  const alive = wins.filter((w) => windowAlive(w, snap));
+  const closed = wins.filter((w) => !windowAlive(w, snap));
   let locks = loadLocks();
   const before = locks.length;
   locks = locks.filter((l) => { const bw = alive.find((w) => w.title === l.blockedBy); return !!bw; });

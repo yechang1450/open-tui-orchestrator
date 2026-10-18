@@ -1,5 +1,16 @@
 # Changelog
 
+## 26.10.17-1 — 六宿主双形态验收 + 动态容量
+
+- **`orch` 只读入口透传**：`--tasks` / `--status` / `--doctor` 等只读入口不再被强制发车（此前 `orch --tasks` 会静默启动一轮真执行）；执行类入口仍强制发车。
+- **`ordered` 判据治本**：第九块只等「一个被释放的槽位」（前八块中最早完成者），且重试块以其**首次 attempt 结束**为释放时刻（此前会被最终 finish 拉后而误红）；无 firstFinished 的数据保持旧严格读法（fail-closed）。
+- **起窗节奏默认 5000ms**：`ORCH_WINDOW_STAGGER_MS` 从 0（九块同起）改为默认 5000ms——同起两轮实测全红（八窗全卡欢迎页 / `Reservation expired`），错峰后两轮全绿；`runWindows` 的显式参数语义不变（库调用不会被默认值拖慢）。
+- **gate L4 计数口径**：实测总数 = `pass + fail + 具名合法 skip`（node 报告的 `ℹ tests` 真值）——宿主未安装的机器不再假红。
+- **六宿主双形态验收**：headless+exec（产品默认形态）6/6 全绿；窗口容量腿 6/6 理想轮（codex / pi / opencode / kimi / claude / hermes，全部 `passed=true`、peak=8、9 启动器）。
+- **动态容量实测**：24 个独立块 → 引擎按实时内存自算（学习值 1021MB、floor 1000MB）合并为 12 块 → 12 窗并发 → 24/24 产物、12/12 verified；学习表回写后估算下调（1021→837MB），下次同一内存下容量自动变大。
+- **`--status` 只读入口提速（发布前实测出的真缺陷）**：`showStatus` 此前对每个历史窗口各取一次全表 WMI 快照（N 个窗口 → 2N 次查询），历史窗口积累后实测 **26s**，超过测试的 20s 上限判红；改为**一次快照供所有窗口复用**（26s → 5s）。同时只读入口（`--status`/`--doctor`/`--watch`/`--verify-run`/`--version`/`--help`/`--clear-cache`/`--install-deps`）不再做宿主模型/effort 继承——该继承要扫宿主会话记录（codex sessions 可达 GB 级），只读入口不需要。
+- 判据：**543/543**；`gate --all` 五判据全绿。
+
 ## 26.10.14-1 — 画像强化：版本地板 + 规划超时预算
 
 - **画像新增两个可选字段**：`minVersion`（任意 major 的数字三段版本地板——解析版本低于它一律拒绝并给 below floor 诊断；版本串不可比较时不判死、缺省放行）与 `plannerTimeoutMs`（规划等待预算——优先级 env `ORCH_DECOMPOSE_TIMEOUT_MS` > 画像值 > 240000 缺省；只覆盖规划器等待）。
