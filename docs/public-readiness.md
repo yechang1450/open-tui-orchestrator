@@ -136,3 +136,11 @@ gh repo edit yechang1450/open-tui-orchestrator --visibility public --accept-visi
 - 包面：**66 文件**、packed 218.1 kB、unpacked 600.1 kB、shasum `88777e722be64ae0f0dcd63108d0e0f434d5a509`、tag `latest`。
 - 发布前实测：离线套件 **537/537**（0 跳过）；`gate --all` = `ORCH_GATE: PASS — 5 criteria`（L1 537 pass / 0 fail；L4 三文档对账 537==537）；`release-integrity` rc=0（45 核心 / 60 运行时）；`--tasks smoke` rc=0；真机轮 codex + hermes 双绿（每轮 RUN_RC=0 + verify rc=0；产物内容级核验 `LIVE-07-OK` / `LIVE-08-OK`）。
 - registry 回读：`npm view` → `latest = 26.10.14-1`（传播约 2–3 分钟）；tarball 直解包 → 66 文件、shasum 与发布心跳一致 `88777e72…`；`npx -y --prefer-online open-tui-orchestrator@26.10.14-1 --version` → `open-tui-orchestrator 26.10.14-1 (core 0.9.24-1)`；本机全局安装已更新至 `26.10.14-1`。
+
+## 发布记录追加：26.10.18-1（正式版·六宿主双形态 + 动态容量轮，2026-10-18 下午 +08）
+
+- 版本：`open-tui-orchestrator@26.10.18-1`（`--tag latest`）。内容＝六宿主双形态验收（headless 6/6、窗口容量 6/6 理想轮）＋ 动态容量实证（24 个独立块 → 引擎按实时内存自足合并 12 块 → 12 窗 → 24/24 产物、12/12 verified）＋ `ordered` 第二边界治本（重试块以首次 attempt 结束为释放时刻）＋ 起窗节奏默认 5000ms ＋ `--status` 真缺陷修复（每历史窗口一次全表 WMI 快照 → 一次快照复用，26s→5s；只读入口不再做宿主模型/effort 继承）；合并提交 `b844f2d`，发布提交 `9769ba8`；`beta` 与 `master` 同点。
+- 包面：**66 文件**、packed 220.1 kB、unpacked 604.9 kB、shasum `2ba8aa9f1ea04aada41e0d18a410e0a1a7499cc6`、tag `latest`。
+- 发布前实测：离线套件 **543/543**（0 跳过）；`gate --all` = `ORCH_GATE: PASS — 5 criteria`（L1 543 pass / 0 fail；L4 三文档 543==543）；`release-integrity` rc=0（45 核心 / 60 运行时）；`--tasks smoke` rc=0。
+- registry 回读：`npm view` → `latest = 26.10.18-1`（传播约 2 分钟）；`npx -y --cache <fresh> open-tui-orchestrator@26.10.18-1 --version` → `open-tui-orchestrator 26.10.18-1 (core 0.9.24-1)`；本机全局已更新至 `26.10.18-1`；`orch --tasks` 只读零发车、`orch --doctor` `hostError=null`。
+- 附记：本轮发布登录票失效（`npm whoami` 401），改用 granular token（Bypass 2FA）完成发布；旧 token 全盘残留扫描仅 1 处（Hermes `interrupted_turns.json`）已清理，复扫 0 命中。
