@@ -1325,15 +1325,22 @@ export function applyAuthPromptPolicy(auth) {
 function isOrchestratorSelfMod(text) {
   const t = String(text || "");
   // 通用化（不假设特定 agent/语言）：识别「改/修/升级 编排器自身 源码/脚本/进程/skill」这类自引用意图。
-  // 覆盖英文 + 中文关键词，并对编排器自身的通用称谓（orchestrator/编排/调度/TUI 窗/skill）都命中；
-  // 命中只是「可能改自己」的信号，进一步由调用方决定是否返回 inline（宁可多识、不误把改自己的活交给窗）。
-  const selfRef =
-    /open-tui-orchestrator|orchestrator|orchestrate|编排|调度器|调度窗|TUI 窗|TUI窗|并发编排/i.test(t) ||
-    /scripts\/?orchestrate|orchestrate-sdk\.mjs|\.codex.*\/?orchestrat/i.test(t);
-  if (!selfRef) return false;
-  const modifyIntent =
-    /(修复|修改|改|升级|加固|优化|调整|重构|补|加固|收紧|fix|edit|update|build|harden|refactor|improve|rework)/i.test(t);
-  return modifyIntent;
+  // 2026-10-18 修（独立实测报告 §4.1）：旧实现「全文 selfRef × 全文 modifyIntent」误拦无关审计——
+  // 「审计 build/80、禁止修改任何文件、禁止调用编排器」同时命中远距离的 build/修改/编排器，整轮被退回；
+  // 同时漏拦「升级 OTUI」类真自改（OTUI 不在词表）。现改为「紧邻窗口」判定：
+  //   selfRef 与 modifyIntent 须落在同一 ≤24 字符窗口内，且窗口内不含否定词；selfRef 补 OTUI、去裸「编排」。
+  const SELF_REF =
+    /open-tui-orchestrator|orchestrate-sdk\.mjs|scripts\/?orchestrate|\bOTUI\b|orchestrator|orchestrate|编排器|编排逻辑|并发编排|调度器|调度窗|TUI 窗|TUI窗/gi;
+  const MODIFY = /(修改|修复|改动|改造|改一下|改|升级|加固|优化|调整|重构|收紧|变更|fix|edit|update|harden|refactor|improve|rework|build)/i;
+  const NEG = /(禁止|不要|不得|切勿|勿|别|无需|不准|严禁|不许|no\s|don'?t|never|without)/i;
+  const NEAR = 24;
+  SELF_REF.lastIndex = 0;
+  let m;
+  while ((m = SELF_REF.exec(t))) {
+    const win = t.slice(Math.max(0, m.index - NEAR), Math.min(t.length, m.index + m[0].length + NEAR));
+    if (MODIFY.test(win) && !NEG.test(win)) return true;
+  }
+  return false;
 }
 
 function writeInteractiveLauncher(title, prompt, sfx) {
@@ -2507,7 +2514,11 @@ export async function main() {
   }
   if (mode === '--verify-run') {
     const id=process.argv[3]||process.env.ORCH_RUN_ID;
-    process.exitCode=verifyRun(WORKSPACE,id,process.env.ORCH_ACCEPTANCE_FILE,STATE_DIR)?0:1;return;
+    // 机器可读契约：stdout 只允许纯数据——旧实现只设 exitCode、无输出，机器调用方拿不到读数
+    // （2026-10-18 独立实测报告 §4.5）。这里回一行 JSON 摘要（与其它只读入口一致）。
+    const ok=verifyRun(WORKSPACE,id,process.env.ORCH_ACCEPTANCE_FILE,STATE_DIR);
+    console.log(JSON.stringify({kind:'verify-run',runId:id,success:ok}));
+    process.exitCode=ok?0:1;return;
   }
   if (mode === '--install-deps') {
     // 公开安装路径的补依赖入口：npm 发行包里不带锁定 SDK 依赖（node-pty + codex-sdk），
