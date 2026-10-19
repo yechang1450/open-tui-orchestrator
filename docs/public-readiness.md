@@ -144,3 +144,11 @@ gh repo edit yechang1450/open-tui-orchestrator --visibility public --accept-visi
 - 发布前实测：离线套件 **543/543**（0 跳过）；`gate --all` = `ORCH_GATE: PASS — 5 criteria`（L1 543 pass / 0 fail；L4 三文档 543==543）；`release-integrity` rc=0（45 核心 / 60 运行时）；`--tasks smoke` rc=0。
 - registry 回读：`npm view` → `latest = 26.10.18-1`（传播约 2 分钟）；`npx -y --cache <fresh> open-tui-orchestrator@26.10.18-1 --version` → `open-tui-orchestrator 26.10.18-1 (core 0.9.24-1)`；本机全局已更新至 `26.10.18-1`；`orch --tasks` 只读零发车、`orch --doctor` `hostError=null`。
 - 附记：本轮发布登录票失效（`npm whoami` 401），改用 granular token（Bypass 2FA）完成发布；旧 token 全盘残留扫描仅 1 处（Hermes `interrupted_turns.json`）已清理，复扫 0 命中。
+
+## 发布记录追加：26.10.19-1（自改判定精度修复轮，2026-10-19 上午 +08）
+
+- 版本：`open-tui-orchestrator@26.10.19-1`（`--tag latest`）。内容＝自改判定误拦修复（紧邻窗口判定：自指词与修改词须同一 ≤24 字符窗口内且无否定词；词表补 OTUI/编排逻辑、去裸编排；报告语料不再误拦、OTUI 自改不再漏拦）＋ `--verify-run` JSON 输出 ＋ caller-driven 文档三处（id 位置生成 / profile 级继承 / verify-run stdout）；发布提交 `23b0981`；`beta` 与 `master` 同点。
+- 包面：**66 文件**、packed 220.6 kB、unpacked 605.8 kB、shasum `0a1c0e55c622ffe545aaa6c5d3479b83771905c7`、tag `latest`。
+- 发布前实测：离线套件 **544/544**（0 跳过，+7 用例）；`gate --all` = `ORCH_GATE: PASS — 5 criteria`（L1 544 pass / 0 fail；L4 三文档 544==544）；`release-integrity` rc=0（45 核心 / 60 运行时）；`--tasks smoke` rc=0；真机双向（审计语料 → single-block inline 退回；自改语料 → self-mod 拦）。
+- registry 回读：`latest = 26.10.19-1`；tarball 直解包 → `open-tui-orchestrator 26.10.19-1 (core 0.9.24-1)`、包内 `release-integrity` rc=0（解包副本自洽）；本机全局已升级至 `26.10.19-1`。
+- 附记：npm 自 2025-12 起 `npm login` 只发 **2 小时 session token**（官方："expire after two hours"）——本轮首次发布遇 401 即此机制；改用 90 天 granular token（Bypass 2FA）后免反复登录，unpublish 仍需临时删 token 走交互式 2FA。
