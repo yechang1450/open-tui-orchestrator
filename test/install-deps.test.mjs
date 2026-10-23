@@ -8,7 +8,7 @@ import {fileURLToPath} from 'node:url';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const family = path.join(root, 'temp');
 const cliEntry = path.join(root, 'cli.mjs');
-const PKG_FILES = ['cli.mjs', 'orch.mjs', 'repair.mjs', 'package.json', 'release.json', 'README.md', 'LICENSE'];
+const PKG_FILES = ['cli.mjs', 'orch.mjs', 'repair.mjs', 'package.json', 'release.json', 'README.md'];
 
 // 公开安装路径：npm 发行包里不带锁定的 SDK 依赖（node-pty + codex-sdk），用户装完包必须能用
 // 一条命令补上，不需要自己拼路径。三条判据都可红：幂等路径若改成每次都联网跑 npm ci 会失败；

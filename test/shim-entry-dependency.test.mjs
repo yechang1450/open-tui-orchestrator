@@ -7,7 +7,7 @@ import {fileURLToPath} from 'node:url';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const family = path.join(root, 'temp');
-const PKG_FILES = ['cli.mjs', 'orch.mjs', 'repair.mjs', 'package.json', 'release.json', 'README.md', 'LICENSE'];
+const PKG_FILES = ['cli.mjs', 'orch.mjs', 'repair.mjs', 'package.json', 'release.json', 'README.md'];
 
 function minimalPackage() {
   fs.mkdirSync(family, {recursive: true});
