@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {spawnSync} from 'node:child_process';
+import {spawn, spawnSync} from 'node:child_process';
+import {recordCheckpoint} from '../scripts/core/checkpoint.mjs';
 import {powershellExe} from '../scripts/core/contracts.mjs';
 import {CODEX_CLI_SKIP} from './helpers/external.mjs';
 const runner=await import('../scripts/core/runner.mjs');
@@ -110,4 +111,140 @@ test('a block that was never attempted is still skipped when endedAt is missing'
  assert.equal(sum.results.B1.status,'failed');
  assert.equal(sum.taskResults.T1.status,'pending');
  assert.equal('endedAt' in sum.results.B1,false);
+});
+
+// —— 状态收口回归（2026-10-24）：F1 收尾隔离 / F2 终态 endedAt / F3 收尾重算 / F4 verified 优先 ——
+const psLit=s=>"'" + String(s).replaceAll("'","''") + "'";
+// 真实路径的假单元：真 pwsh 起一个 worker（写 started/completed 检查点与产物，再停 2.5s 才退），
+// 这样 identity / close / waitForProcessExit 都走生产分支；故障由 faults 注入。
+function realUnitHooks({workspace,coordinator,faults={},waitResult}){
+ const worker=path.join(workspace,'worker.mjs');
+ const checkpointUrl=JSON.stringify(new URL('../scripts/core/checkpoint.mjs',import.meta.url).href);
+ fs.writeFileSync(worker,`import fs from 'node:fs';import path from 'node:path';import {recordCheckpoint} from ${checkpointUrl};
+const [attempt,rf,root]=process.argv.slice(2),a=JSON.parse(fs.readFileSync(attempt));
+while(!fs.existsSync(rf+'.go'))await new Promise(r=>setTimeout(r,20));
+for(const id of a.taskIds){recordCheckpoint(attempt,id,'started');fs.writeFileSync(path.join(root,'done.txt'),'artifact');recordCheckpoint(attempt,id,'completed');}
+fs.writeFileSync(rf,JSON.stringify({exitCode:0}));
+await new Promise(r=>setTimeout(r,2500));`);
+ const children=[];
+ const hooks={
+  plan:async()=>[{title:'solo',type:'parallel',tasks:[{prompt:'执行甲'}]}],
+  compact:p=>p,infer:()=>[],prompt:p=>p,
+  launcher:(key,prompt,suffix)=>{
+   const carrier=/开始前："([^" ]+checkpoint[.]cmd)"/.exec(prompt)[1];
+   const attemptFile=path.join(path.dirname(carrier),'attempt.json');
+   const pidf=path.join(workspace,'window-'+suffix+'.pid'),lp=path.join(workspace,'win-launch-'+suffix+'.ps1'),rf=path.join(workspace,suffix+'.result');
+   fs.writeFileSync(lp,'\ufeff'+`$PID | Set-Content -LiteralPath ${psLit(pidf)} -Encoding UTF8\n& ${psLit(process.execPath)} ${psLit(worker)} ${psLit(attemptFile)} ${psLit(rf)} ${psLit(workspace)}\nexit 0`);
+   return {pidf,lp,rf};
+  },
+  spawn:async lp=>{children.push(spawn(powershellExe(),['-NoProfile','-File',lp],{windowsHide:true,stdio:'ignore'}));return true;},
+  readPid:p=>{try{return fs.existsSync(p)?Number(fs.readFileSync(p,'utf8').replace(/^\uFEFF/,'')):0;}catch{return 0;}},
+  session:async()=>'controlled',
+  wait:async(_session,_timeout,rf)=>{fs.writeFileSync(rf+'.go','go');const end=Date.now()+20000;while(!fs.existsSync(rf)&&Date.now()<end)await pause(50);return waitResult||{done:fs.existsSync(rf),exitCode:0};},
+  exitCode:()=>0,
+  register:()=>{},commit:()=>{},
+  unregister:()=>{if(faults.unregister)throw new Error('unregister hook exploded');},
+  cleanup:()=>{if(faults.cleanup)throw new Error('cleanup hook exploded');},
+  close:async pid=>{
+   // 先等真实 launcher 退出（worker 自己会退），再按注入的故障决定 disposition。
+   const end=Date.now()+15000;while(Date.now()<end){try{process.kill(pid,0);}catch{break;}await pause(50);}
+   if(faults.leases){fs.mkdirSync(coordinator,{recursive:true});fs.writeFileSync(path.join(coordinator,'leases.json'),'{not json');}
+   if(faults.close)throw new Error('close hook exploded');
+  },
+ };
+ return {hooks,children};
+}
+async function runRealUnit({prefix,runId,faults,waitResult}){
+ fs.mkdirSync(family,{recursive:true});
+ const workspace=fs.mkdtempSync(path.join(family,prefix)),coordinator=path.join(workspace,'temp','coordinator');
+ const acceptance=path.join(workspace,'acceptance.json');
+ fs.writeFileSync(acceptance,JSON.stringify({T001:[{type:'file',path:'done.txt'}]}));
+ const {hooks,children}=realUnitHooks({workspace,coordinator,faults,waitResult});
+ let sum,error;
+ try{sum=await runner.runWindows('执行甲',hooks,{workspace,capacity:8,runId,acceptanceFile:acceptance,auth:'test',coordinator,maxAttempts:1});}
+ catch(e){error=e;}
+ return {workspace,coordinator,sum,error,dispose(){for(const c of children)if(c.exitCode===null)try{c.kill();}catch{};try{fs.rmSync(workspace,{recursive:true,force:true});}catch{}}};
+}
+
+test('a throwing close/unregister/cleanup still writes endedAt, rechecks evidence, and releases the lease',async()=>{
+ const run=await runRealUnit({prefix:'finalize-f1-',runId:'f1',faults:{close:true,unregister:true,cleanup:true}});
+ try{
+  assert.equal(run.error,undefined,String(run.error&&run.error.stack));
+  const sum=run.sum,e=sum.results.B1;
+  assert.equal(sum.success,true,JSON.stringify(sum.results));
+  assert.equal(e.status,'verified');
+  assert.ok(Number.isFinite(e.endedAt),'endedAt must be written even when close throws');
+  assert.match(String(e.closeError),/close hook exploded/);
+  assert.match(String(e.unregisterError),/unregister hook exploded/);
+  assert.match(String(e.cleanupError),/cleanup hook exploded/);
+  const onDisk=JSON.parse(fs.readFileSync(path.join(runner.runDirectory(run.workspace,'f1'),'summary.json'),'utf8'));
+  assert.equal(onDisk.results.B1.status,'verified');
+  assert.ok(Number.isFinite(onDisk.results.B1.endedAt),'the ledger on disk must carry endedAt');
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(run.coordinator,'leases.json'),'utf8')),[],'the unit lease must be released despite close throwing');
+ }finally{run.dispose();}
+});
+
+test('a failing unit lease release is recorded on the block and the ledger is still finalized',async()=>{
+ const run=await runRealUnit({prefix:'finalize-f1b-',runId:'f1b',faults:{close:true,leases:true}});
+ try{
+  // run 级 releaseRun 与单元级 release 共用同一份 coordinator 状态，所以注入损坏后 runWindows 也会在
+  // 最后一步抛错（同类的第五处，不在本次范围）；本用例只断言「单元级账本仍然完整落盘 + 失败被记名」。
+  assert.ok(run.error,/Invalid orchestration state/);
+  const onDisk=JSON.parse(fs.readFileSync(path.join(runner.runDirectory(run.workspace,'f1b'),'summary.json'),'utf8'));
+  assert.equal(onDisk.success,true,String(run.error));
+  assert.equal(onDisk.results.B1.status,'verified');
+  assert.ok(Number.isFinite(onDisk.results.B1.endedAt),'endedAt must survive a failing release');
+  assert.match(String(onDisk.results.B1.leaseReleaseError),/Invalid orchestration state/);
+ }finally{run.dispose();}
+});
+
+test('terminal marks write endedAt and never downgrade a never-attempted block',async()=>{
+ fs.mkdirSync(family,{recursive:true});
+ const workspace=fs.mkdtempSync(path.join(family,'finalize-f2-')),coordinator=path.join(workspace,'temp','coordinator');
+ const hooks={plan:async()=>[{title:'A',type:'parallel',tasks:[{prompt:'执行甲'}]},{title:'B',dependsOn:['A'],type:'parallel',tasks:[{prompt:'执行乙'}]}],
+  compact:p=>p,infer:()=>[],prompt:p=>p,launcher:()=>{throw new Error('launcher boom');},spawn:async()=>false,readPid:()=>0,
+  register:()=>{},unregister:()=>{},cleanup:()=>{}};
+ try{
+  const sum=await runner.runWindows('执行甲；执行乙',hooks,{workspace,capacity:8,runId:'f2',auth:'test',coordinator,maxAttempts:1});
+  assert.equal(sum.results.B1.status,'failed');
+  assert.ok(Number.isFinite(sum.results.B1.endedAt),'a failed mark must carry endedAt');
+  assert.equal(sum.results.B2.status,'blocked','a never-attempted block keeps its controller status');
+  assert.ok(Number.isFinite(sum.results.B2.endedAt),'a blocked mark must carry endedAt');
+  assert.match(String(sum.taskResults.T001.reason),/launcher boom/,'the controller reason must survive the evidence recheck');
+  assert.equal(sum.success,false);
+  const onDisk=JSON.parse(fs.readFileSync(path.join(runner.runDirectory(workspace,'f2'),'summary.json'),'utf8'));
+  assert.ok(Number.isFinite(onDisk.results.B2.endedAt));
+  assert.equal(onDisk.results.B2.status,'blocked');
+ }finally{fs.rmSync(workspace,{recursive:true,force:true});}
+});
+
+test('finalization recomputes from disk so an in-memory failed block can end verified',()=>{
+ const dir=fs.mkdtempSync(path.join(family,'finalize-f3-'));
+ try{
+  const runId='f3',token='tok';
+  const attempt={file:path.join(dir,'attempts','B1','1','attempt.json'),runId,token,number:1,taskIds:['T001'],createdAt:1};
+  fs.mkdirSync(path.dirname(attempt.file),{recursive:true});
+  fs.writeFileSync(attempt.file,JSON.stringify(attempt));
+  const cpFile=path.join(path.dirname(attempt.file),'checkpoints','T001.json');
+  fs.mkdirSync(path.dirname(cpFile),{recursive:true});
+  fs.writeFileSync(cpFile,JSON.stringify({id:'T001',runId,token,state:'completed',startedAt:1,updatedAt:2}));
+  fs.writeFileSync(path.join(dir,'done.txt'),'artifact');
+  const sum={runId,tasks:[{id:'T001'}],blocks:[{key:'B1',taskIds:['T001']}],
+   results:{B1:{status:'failed',reason:'Launcher still alive; lease retained',endedAt:1,attempts:[attempt]}},
+   taskResults:{T001:{status:'failed',reason:'Acceptance file missing'}}};
+  runner.finalizeRunLedger(sum,{T001:[{type:'file',path:'done.txt'}]},dir);
+  assert.equal(sum.results.B1.status,'verified','finalization must adopt the on-disk evidence');
+  assert.equal(sum.taskResults.T001.status,'verified');
+  assert.equal(sum.success,true);
+  assert.ok(Number.isFinite(sum.finishedAt));
+ }finally{fs.rmSync(dir,{recursive:true,force:true});}
+});
+
+test('an adapter terminal failure never overwrites a block already re-verified from disk',async()=>{
+ const run=await runRealUnit({prefix:'finalize-f4-',runId:'f4',waitResult:{done:true,exitCode:0,terminal:true,text:'Adapter preflight failed'}});
+ try{
+  assert.equal(run.error,undefined,String(run.error&&run.error.stack));
+  assert.equal(run.sum.results.B1.status,'verified','verified evidence must win over terminalFailure');
+  assert.equal(run.sum.success,true,JSON.stringify(run.sum.results));
+ }finally{run.dispose();}
 });

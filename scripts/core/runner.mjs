@@ -226,7 +226,10 @@ export function collectVerification(sum,checks,workspace) {
     //（2026-10-24 实测 runId 6f7b8f2e…：B2 status=failed、endedAt 缺失，而 checkpoint 已 completed、
     // 产物已落盘），于是 --verify-run 拿不到这块 ⇒ 整 run 假失败。
     if(!e.endedAt&&!e.attempts?.length)continue;
-    if(['blocked','popup-failed','preflight-failed','cancelled'].includes(e.status)&&!e.attempts?.length)continue;
+    // 从未尝试过的块（零 attempt）没有盘上证据可算：控制面给的终态必须原样保留。timeout 自 2026-10-24
+    // 起也会带 endedAt（账本可读），若不在这里挡住，就会被 blockStatus 降级成 failed —— 那等于把
+    // 「等窗口/等机器超时」和「跑了但失败」混成同一个真相。
+    if(['blocked','popup-failed','preflight-failed','cancelled','timeout'].includes(e.status)&&!e.attempts?.length)continue;
     const cps=blockCheckpoints(e,b,sum);
     for(const id of b.taskIds) {
       const cp=cps[id];if(!cp){sum.taskResults[id]={status:'failed',reason:'No durable task checkpoint'};continue;}
@@ -238,6 +241,28 @@ export function collectVerification(sum,checks,workspace) {
     e.status=blockStatus(b.taskIds,sum.taskResults);
   }
   return sum;
+}
+// 按盘上证据重算，但保留「结论没变」的任务原有 reason：证据决定 status；控制面当时给出的更具体判词
+// （"Safe recovery attempt budget exhausted" 等）不该被泛化原因（"No durable task checkpoint"）冲掉——
+// 后者会让账本丢掉「这块为什么停在这里」的唯一线索。status 变了则一律以盘上为准（含 evidence 给出的新 cause）。
+function reconcileWithEvidence(sum,checks,workspace){
+  const before=new Map();
+  for(const b of sum.blocks)for(const id of b.taskIds){
+    const r=sum.taskResults[id];
+    if(r&&r.status!=='verified'&&r.reason)before.set(id,{status:r.status,reason:r.reason});
+  }
+  collectVerification(sum,checks,workspace);
+  for(const [id,prev] of before){
+    const now=sum.taskResults[id];
+    if(now&&now.status===prev.status&&prev.status!=='verified')now.reason=prev.reason;
+  }
+}
+// 收尾定终态的统一入口（2026-10-24）：先按盘上证据重算，再定 finishedAt/success。
+// 自评与 --verify-run 必须同源——同一份 summary.json 不允许有两个真相（run 说 failed、verify 说
+// verified 的事故就是这条不变量被漏掉的后果）。抽成导出的纯函数，让这条不变量有直接回归测试。
+export function finalizeRunLedger(sum,checks,workspace){
+  try{reconcileWithEvidence(sum,checks,workspace);}catch{}
+  sum.finishedAt=Date.now();sum.success=summaryComplete(sum,true);return sum;
 }
 export function verifyRun(workspace,runId,acceptanceFile,stateDir) {
   const dir=runDirectory(workspace,runId,stateDir),file=path.join(dir,'summary.json');
@@ -321,7 +346,20 @@ export async function runWindows(request,hooks,options={}) {
     let lastBoardSig='';
     const emitBoard=()=>{try{const sig=boardSignature(sum);if(sig===lastBoardSig)return;lastBoardSig=sig;fs.appendFileSync(eventsFile,JSON.stringify(boardJson(sum))+'\n');console.log(boardSummaryLine(sum));}catch{/* board is best-effort; never fail the run */}};
     const persist=()=>{atomicJson(summaryFile,sum);emitBoard();};
-    const mark=(r,status,reason)=>{sum.results[r.key]={...sum.results[r.key],status,reason};for(const id of sum.blocks.find(b=>b.key===r.key).taskIds)if(sum.taskResults[id]?.status!=='verified')sum.taskResults[id]={...sum.taskResults[id],status,reason};persist();};
+    // 终态收口（2026-10-24）：414（预算耗尽）/429（窗口等待超时）/550（run deadline）三个出口原来只写
+    // status，不写 endedAt ⇒ 账本分不清「没跑」与「跑了没收尾」，且 --verify-run 会把它当成另一份真相。
+    // 现在：终态补 endedAt，并（仅当该块真有 attempt 时）按盘上证据重算一次 status——零 attempt 的块
+    // 没有证据可算，硬算只会把 timeout/blocked 的真实原因降级成 failed。
+    const mark=(r,status,reason)=>{
+      const prior=sum.results[r.key]||{},taskIds=sum.blocks.find(b=>b.key===r.key).taskIds;
+      sum.results[r.key]={...prior,status,reason};
+      for(const id of taskIds)if(sum.taskResults[id]?.status!=='verified')sum.taskResults[id]={...sum.taskResults[id],status,reason};
+      if(TERMINAL.has(status)){
+        if(sum.results[r.key].attempts?.length)try{reconcileWithEvidence(sum,checks,workspace);}catch{}
+        if(!sum.results[r.key].endedAt)sum.results[r.key].endedAt=Date.now();
+      }
+      persist();
+    };
     persist();console.log(`[run] runId=${runId} blocks=${sum.blocks.length} capacity=${capacity} generation=${sum.generation} summary=${summaryFile}`);
     // 环境监测行（2026-09-18）：run 起点与终点各打一行，测试/用户都能直接看到平台、Node、可用内存与准入容量。
     console.log(`[env] phase=start platform=${process.platform} node=${process.version} free=${Math.round(os.freemem()/1024**2)}MB total=${Math.round(os.totalmem()/1024**2)}MB capacity=${capacity}`);
@@ -520,28 +558,41 @@ export async function runWindows(request,hooks,options={}) {
           }
         }catch(error){e.status='failed';e.reason=error.message;}
         finally {
-          if(!identity&&la&&spawnConfirmed&&!fs.existsSync(la.rf))try{identity=await identityWithGrace(hooks,la,{graceMs:4000,intervalMs:300});}catch{identity=undefined;}
-          if(identity)await hooks.close(identity.ProcessId,identity);
-          if(identity&&!(await waitForProcessExit(identity))){
-            e.status='failed';e.reason='Launcher still alive; lease retained';
-            // launcher 未退 ≠ 单元没干完：满载下（2026-10-24 实测 runId 6f7b8f2e…，B2）checkpoint 已 completed、
-            // 产物已落盘，整块却停在这个分支且 endedAt 缺失 —— 缺 endedAt 的块会被 collectVerification 的
-            // `!endedAt` 守卫跳过，--verify-run 永远拿不到它，整 run 假失败。
-            // 这里补写 endedAt（镜像正常收尾路径；active 可能未定义/不可见时不动它）并当场按盘上证据重算 status。
-            e.endedAt=Date.now();if(active)active.endedAt=e.endedAt;
-            try{collectVerification(sum,checks,workspace);}catch{}
-            persist();return;
+          // 收尾的每一步必须彼此隔离（2026-10-24 事故：runId 6f7b8f2e / ea010891 都是收尾中断 ⇒ 账本停在
+          // running、lease 没释放 ⇒ 同键块永远 reserve 失败 ⇒ 426/429 级联到 run deadline）。约定：易抛步骤
+          // 逐个 try/catch，错误记到块上（e.*Error，不静默吞）；无论哪一步失败，内层 finally 都保证写
+          // endedAt、按盘上证据重算并落盘。
+          let launcherAlive=false;
+          try {
+            if(!identity&&la&&spawnConfirmed&&!fs.existsSync(la.rf))try{identity=await identityWithGrace(hooks,la,{graceMs:4000,intervalMs:300});}catch{identity=undefined;}
+            if(identity)try{await hooks.close(identity.ProcessId,identity);}catch(error){e.closeError=String(error?.message??error);}
+            if(identity){
+              // 探活本身失败 ≠ 进程已退：保守按「可能还活着」处理（保留 lease）。把「不知道」当「已死」会在
+              // 活窗还在改文件时放掉同键 lease ⇒ 两个单元同时写同一批文件（重复副作用，比占位更难恢复）；
+              // 保留的 lease 由协调器的 stale 回收（bootId/owner 失效）或 recover-stale 收口，不会永久占位。
+              try{launcherAlive=!(await waitForProcessExit(identity));}catch(error){launcherAlive=true;e.exitProbeError=String(error?.message??error);}
+            }
+            if(launcherAlive){
+              e.status='failed';
+              e.reason=e.exitProbeError?('Launcher liveness unknown ('+e.exitProbeError+'); lease retained'):'Launcher still alive; lease retained';
+              return;   // 内层 finally 仍会写 endedAt / 按盘上证据重算 / 落盘
+            }
+            try{await coordinate(()=>release(coordinator,e.leaseId||leaseId),Date.now()+30000);}catch(error){e.leaseReleaseError=String(error?.message??error);}
+            try{await recordUnitPeakIfReady(la, r.key, active?.token, options.agent || sum.agent || 'caller', peakSampled);}catch(error){e.peakRecordError=String(error?.message??error);}
+            try{hooks.unregister(e.leaseId||leaseId);}catch(error){e.unregisterError=String(error?.message??error);}
+            try{if(la)hooks.cleanup(la);}catch(error){e.cleanupError=String(error?.message??error);}
+            // 2026-09-19：单元收尾后扫残窗（含"launcher 已死、WT 面板赖着"的僵尸窗）——只扫本单位自己那一扇（stem 过滤），
+            // 绝不触碰并行中的其它窗：全域扫会在旁窗忙碌判定失败时误杀活窗。
+            try{await hooks.sweep?.(active?.token?String(active.token):'');}catch{}
+          } finally {
+            e.endedAt=Date.now();if(active){active.endedAt=e.endedAt;active.exitCode=e.exitCode;}
+            try{collectVerification(sum,checks,workspace);}catch(error){e.verificationError=String(error?.message??error);}
+            persist();
           }
-          await coordinate(()=>release(coordinator,e.leaseId||leaseId),Date.now()+30000);
-          await recordUnitPeakIfReady(la, r.key, active.token, options.agent || sum.agent || 'caller', peakSampled);
-          hooks.unregister(e.leaseId||leaseId);if(la)hooks.cleanup(la);
-          // 2026-09-19：单元收尾后扫残窗（含"launcher 已死、WT 面板赖着"的僵尸窗）——只扫本单位自己那一扇（stem 过滤），
-          // 绝不触碰并行中的其它窗：全域扫会在旁窗忙碌判定失败时误杀活窗。
-          try{await hooks.sweep?.(active.token?String(active.token):'');}catch{}
-          e.endedAt=Date.now();active.endedAt=e.endedAt;active.exitCode=e.exitCode;
-          collectVerification(sum,checks,workspace);persist();
         }
-        if(e.terminalFailure){mark(r,'failed',e.reason||'Adapter preflight failed');return;}
+        // 542 的 collectVerification 可能刚把这枚块按盘上证据改判成 verified —— 适配器的 terminal 结论
+        // 不能反过来把「证据已证明做完」的块再压成 failed（潜伏：当前仓内无 terminalFailure producer）。
+        if(e.terminalFailure&&e.status!=='verified'){mark(r,'failed',e.reason||'Adapter preflight failed');return;}
         if(e.status==='verified')return;
         // A launcher-start failure is recoverable. Let the normal attempt,
         // transient, and unproductive-retry budgets decide when to stop; an
@@ -561,7 +612,9 @@ export async function runWindows(request,hooks,options={}) {
       (r,failed)=>mark(r,'blocked','Predecessors not verified: '+failed.join(', ')),
       {priority:expectedMemory,onWave:onReadyWave});
     for(const r of sum.plan)if(!TERMINAL.has(sum.results[r.key]?.status))mark(r,'failed','No terminal result');
-    sum.finishedAt=Date.now();sum.success=summaryComplete(sum,true);persist();
+    // 整轮收尾再按盘上证据重算一次（mark 已按块算过，但保证所有块同一时刻、同一份口径），
+    // 让 run 自评与 --verify-run 读同一份 summary.json 得到同一个结论。
+    finalizeRunLedger(sum,checks,workspace);persist();
     console.log(`[run] finalized runId=${runId} success=${sum.success} summary=${summaryFile}`);
     console.log(`[env] phase=final platform=${process.platform} node=${process.version} free=${Math.round(os.freemem()/1024**2)}MB total=${Math.round(os.totalmem()/1024**2)}MB concluded=${sum.concluded?'yes':'no'}`);return sum;
   }finally{await coordinate(()=>releaseRun(coordinator,runKey,claim),Date.now()+30000);}
