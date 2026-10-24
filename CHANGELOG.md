@@ -1,5 +1,12 @@
 # Changelog
 
+## 未发布（本地）
+
+- **验收链假阴性修复**：`collectVerification` 旧实现见 `endedAt` 缺失就整块跳过 ⇒「launcher 未退 → 判 failed → 不写 endedAt → verify 拿不到 → run 假失败」。满载 4 块并发实测（runId `6f7b8f2e-…`，B2 `failed`/无 `endedAt`，而 checkpoint `completed`、`c2.txt` 198 B 已落盘）整 run 报 `success=false`。现在该分支补写 `endedAt` 并当场按盘上证据重算；入口守卫只排除「从未尝试」（无 attempts）的块。回归两条：failed + completed + 产物在 ⇒ verified；同一账本删产物 ⇒ 仍 failed（缺 `endedAt` 不构成免检通道）。
+- **门禁 L1 计数补 `cancelled`**：`measuredSuiteTotal` 只算 pass + fail + skipped，而满载机的 per-test timeout 会记入 `ℹ cancelled` ⇒ documented 547 vs measured 542 结构性假红（10-21 空闲轮 cancelled=0 时两者相等）。现四项相加，并把 `cancelled` 并入 `missing` 检测（异常 reporter 缺行仍按 unknown is failure 处理）。**未改文档**：547 是 `ℹ tests` 真值。
+- **测试侧写读竞态**：`test/force-window-identity.test.mjs` 只等 `existsSync` 就 `JSON.parse`，而 PowerShell `Set-Content` 先建空文件再落字节 ⇒ 满载下必抛 `Unexpected end of JSON input`（产品路径无恙）。改为等到内容可解析；顺带按实测（`processSnapshot` 单次 2–11 s，一次 `--status` 8.5–14.7 s）放宽 5 处测试预算。
+- 判据：recovery + recovery-runtime + orchestrator **93/93**；`gate.test.mjs` **9/9**；`force-window-identity` **4/4**（连续 4 轮）。全量门禁（90 文件）待机器空闲后复跑 —— 满载下 L1 仍会因超时红，属环境不属回归。
+
 ## 26.10.19-1 — 自改判定精度修复（独立实测轮）
 
 - **自改判定误拦修复（真缺陷）**：`isOrchestratorSelfMod` 旧实现是「全文出现自指词 × 全文出现修改词」——审计类请求（如「审计 build/80、禁止修改任何文件、禁止调用编排器」）因远距离的 `build`/`修改`/`编排器` 同时命中而被整轮退回（独立实测被拦 2 次），否定句与路径片段也计入；同时反向漏拦「升级 OTUI」类真自改。改为**紧邻窗口判定**：自指词与修改词须落在同一 ≤24 字符窗口内且窗口内无否定词；自指词表补 `OTUI`（独立词）与「编排逻辑」、去裸「编排」。明显「修改/升级 编排器」仍拦（窗依赖被改的 SDK，必须先就地改完）。
