@@ -364,9 +364,13 @@ export async function runWindows(request,hooks,options={}) {
     // 环境监测行（2026-09-18）：run 起点与终点各打一行，测试/用户都能直接看到平台、Node、可用内存与准入容量。
     console.log(`[env] phase=start platform=${process.platform} node=${process.version} free=${Math.round(os.freemem()/1024**2)}MB total=${Math.round(os.totalmem()/1024**2)}MB capacity=${capacity}`);
     // Auto-recovery: a detached guardian watches this controller and relaunches
-    // --resume-run if it dies before finalizing. Fresh runs only — a resumed run
-    // is already watched by the original guardian. Never let the guard fail a run.
-    if(!options.resume&&hooks.guardian)try{hooks.guardian({runId,workspace,stateDir:options.stateDir,coordinator,timeoutMs:options.timeoutMs||21600000,owner:claim.owner,dir});}catch(e){console.warn('[guardian] unavailable: '+e.message);}
+    // --resume-run if it dies before finalizing. 2026-10-25（F7）：resume 也要装——原注释
+    // 「resumed run 已被原 guardian 看着」不总成立：guardian 可能已 exhausted
+    // （run-guardian.mjs 的 finish('exhausted')）或被杀，此时账本会永停在「无 finishedAt」，
+    // verify 永远报 Run is not finalized（runId ea010891 的另一入口）。ensureRunGuardian
+    // 自带 already 幂等短路（见 guardianPid 活着且命令行含 runId 就返回 {already:true}），
+    // 原 guardian 仍在时这里是 no-op。Never let the guard fail a run.
+    if(hooks.guardian)try{hooks.guardian({runId,workspace,stateDir:options.stateDir,coordinator,timeoutMs:options.timeoutMs||21600000,owner:claim.owner,dir});}catch(e){console.warn('[guardian] unavailable: '+e.message);}
     // Optional spawn pacing (options.spawnStaggerMs, from ORCH_WINDOW_STAGGER_MS):
     // serializes window births within this run so a burst of first turns cannot
     // trip the agent account's per-minute rate limiter. 0 keeps the burst as-is.
