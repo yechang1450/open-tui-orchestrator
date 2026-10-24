@@ -25,12 +25,14 @@ async function waitUntil(predicate, timeoutMs = 15000, intervalMs = 100) {
 }
 
 function runForce(args, env) {
+  // A single --status/--verify costs 10-15 s here: processSnapshot() is one Get-CimInstance
+  // Win32_Process spawn (measured 2-11 s on this box). Keep the budget well above that.
   const result = spawnSync(process.execPath, [force, ...args], {
     cwd: repo,
     env,
     encoding: 'utf8',
     windowsHide: true,
-    timeout: 30000,
+    timeout: 120000,
   });
   return {...result, all: String(result.stdout || '') + String(result.stderr || '')};
 }
@@ -73,7 +75,7 @@ test('codex launcher returns a private sanction token, wires it, and does not pr
       env: {...process.env, ORCH_AGENT: 'codex', WORKSPACE_DIR: root, ORCH_STATE_DIR: state, ORCH_MAINTENANCE_LOCK: path.join(root, 'no-maintenance-lock.json')},
       encoding: 'utf8',
       windowsHide: true,
-      timeout: 30000,
+      timeout: 120000,
     });
     const output = String(child.stdout || '') + String(child.stderr || '');
     assert.equal(child.status, 0, output);
@@ -103,7 +105,7 @@ test('liveWindows rejects a command-only Start-Sleep process even with a copied 
     fs.writeFileSync(pidFile, String(fake.pid), 'utf8');
     await waitUntil(() => {
       try { return processSnapshot().has(fake.pid); } catch { return false; }
-    }, 10000, 100);
+    }, 60000, 200);
     const snapshot = processSnapshot();
     const identity = snapshot.get(fake.pid);
     assert.ok(identity, 'the fixture process must be observable before the registry is written');
@@ -141,7 +143,7 @@ test('sanctionedWindow fails closed when process identity snapshot is unknown', 
       env: {...baseEnv(root, state), ORCH_AGENT: 'codex'},
       encoding: 'utf8',
       windowsHide: true,
-      timeout: 30000,
+      timeout: 120000,
     });
     const output = String(result.stdout || '') + String(result.stderr || '');
     assert.equal(result.status, 0, output);
@@ -152,7 +154,7 @@ test('sanctionedWindow fails closed when process identity snapshot is unknown', 
   }
 });
 
-test('only the real launcher ancestor may use its token; outside verify is indeterminate and in-window verify passes', {skip: process.platform !== 'win32', timeout: 120000}, async () => {
+test('only the real launcher ancestor may use its token; outside verify is indeterminate and in-window verify passes', {skip: process.platform !== 'win32', timeout: 300000}, async () => {
   const root = fs.mkdtempSync(path.join(family, 'force-window-chain-'));
   const state = path.join(root, 'temp', 'state');
   const artifactDir = path.join(root, 'artifact');
@@ -186,15 +188,17 @@ test('only the real launcher ancestor may use its token; outside verify is indet
     child = spawn(ps7, ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', launcher], {cwd: root, env, windowsHide: true, stdio: 'ignore'});
     const pidReady = await waitUntil(() => {
       try { return Number(fs.readFileSync(pidFile, 'utf8').trim()) === child.pid; } catch { return false; }
-    }, 15000, 100);
+    }, 30000, 100);
     assert.equal(pidReady, true, 'the real launcher must publish its pid');
     let identity = null;
+    // Each predicate call is a blocking processSnapshot() (2-11 s), so the deadline must
+    // cover several rounds rather than one.
     const identityReady = await waitUntil(() => {
       try {
         identity = launcherIdentity(child.pid, pidFile, processSnapshot());
         return Boolean(identity);
       } catch { return false; }
-    }, 15000, 200);
+    }, 90000, 200);
     assert.equal(identityReady, true, 'the launcher must have an exact trusted identity before registration');
     writeJson(path.join(state, 'orchestrator-windows.json'), [{
       id: 'real-window',
@@ -214,9 +218,22 @@ test('only the real launcher ancestor may use its token; outside verify is indet
     assert.match(copied.all, /REFUSED/);
 
     fs.writeFileSync(ready, 'go', 'utf8');
-    const completed = await waitUntil(() => fs.existsSync(resultFile), 30000, 100);
-    assert.equal(completed, true, 'the real launcher child must finish both in-window checks');
-    const result = JSON.parse(fs.readFileSync(resultFile, 'utf8'));
+    let result = null;
+    let readError = null;
+    // The writer is PowerShell `Set-Content`: the file appears (empty) before its bytes land,
+    // so wait for a parseable payload instead of merely an existing path.
+    const completed = await waitUntil(() => {
+      try {
+        const text = fs.readFileSync(resultFile, 'utf8');
+        if (!text.trim()) return false;
+        result = JSON.parse(text);
+        return true;
+      } catch (error) {
+        readError = error;
+        return false;
+      }
+    }, 120000, 100);
+    assert.equal(completed, true, 'the real launcher child must finish both in-window checks' + (readError ? `: ${readError.message}` : ''));
     assert.equal(result.assertCode, 0, JSON.stringify(result));
     assert.equal(result.verifyCode, 0, JSON.stringify(result));
     assert.match(result.assertOutput, /sanctioned orchestration window/i);

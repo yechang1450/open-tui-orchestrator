@@ -144,6 +144,10 @@ test('gate: the measured suite total counts named host-absence skips', async () 
   assert.equal(measuredSuiteTotal(539, 0, 0), 539, 'no skips: unchanged');
   assert.equal(measuredSuiteTotal(537, 2, 0), 539, 'an environment-flake pass keeps its fail counted');
   assert.equal(measuredSuiteTotal(536, 2, 3), 541, 'all three classes add up');
+  // 2026-10-24 修：cancelled 也是套件成员。满载机上 per-test timeout 会把用例记入 `ℹ cancelled`，
+  // 它们同时仍在 reds 名单里（exit≠0，L1 照红），只是之前不计入求和 ⇒ documented 547 vs measured 542 结构性假红。
+  assert.equal(measuredSuiteTotal(516, 25, 1, 5), 547, 'cancelled are suite members too (loaded-box timeouts)');
+  assert.equal(measuredSuiteTotal(536, 0, 3, 5), 544, 'cancelled add on top of named skips');
 });
 
 // 进程快照预算钉给 gate 子进程（2026-10-06）：L1 以 --test-concurrency=3 真起进程，满载机器上

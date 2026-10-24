@@ -160,8 +160,8 @@ function suiteRedsLine(reds) {
 // 它们是被承认的套件成员（L1 的 unjustified / skipAccounting 两道门逐条验名验理由，不放松）；
 // 只数 pass 会让「文档声明总数 vs 实测总数」在宿主未装的机器上永远差着那几条（2026-10-15 实测：
 // 536 pass + 3 skip vs 文档 539 ⇒ L4 假红，并逼出「为无关用例装 CLI 或改文档数字」两种坏选择）。
-export function measuredSuiteTotal(pass, fail, skipped) {
-  return (pass || 0) + (fail || 0) + (skipped || 0);
+export function measuredSuiteTotal(pass, fail, skipped, cancelled) {
+  return (pass || 0) + (fail || 0) + (skipped || 0) + (cancelled || 0);
 }
 
 function suite() {
@@ -177,7 +177,7 @@ function suite() {
     return m ? Number(m[1]) : null;
   };
   const pass = num('pass'), fail = num('fail'), skipped = num('skipped'), cancelled = num('cancelled');
-  const missing = [['pass', pass], ['fail', fail], ['skipped', skipped]].filter(([, v]) => v === null).map(([k]) => k);
+  const missing = [['pass', pass], ['fail', fail], ['skipped', skipped], ['cancelled', cancelled]].filter(([, v]) => v === null).map(([k]) => k);
   // 跳过项必须逐条具名且理由正当（宿主 CLI 没装）。解析数与 reporter 的 skipped 对不上 = 红。
   const skips = suiteSkips(r.out);
   const unjustified = skips.filter((s) => !SKIP_REASON_ALLOWED.test(s.reason));
@@ -236,7 +236,7 @@ function suite() {
   check('L1', 'offline regression suite', ok, lines);
   if (redLine) console.log(redLine);
   if (missing.length) return undefined;                       // 被截断：不许放行，L4 也会对不上
-  return measuredSuiteTotal(pass, fail, skipped);             // 实测总数 = pass(+环境假红的 fail，隔离复跑已证绿) + 具名合法 skip
+  return measuredSuiteTotal(pass, fail, skipped, cancelled);  // 实测总数 = pass(+环境假红的 fail，隔离复跑已证绿) + 具名合法 skip + cancelled
 }
 
 export function canAutoPassEnvironmentFlake(reds, attributed, stillRed) {
