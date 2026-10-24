@@ -318,14 +318,19 @@ export async function runWindows(request,hooks,options={}) {
       sum.generation++;delete sum.finishedAt;sum.success=false;
     }else {
       if(fs.existsSync(dir))throw new Error('Run ID already exists; use --resume-run or --verify-run');
-      fs.mkdirSync(dir,{recursive:true});checks=loadChecks(options.acceptanceFile);
-      atomicJson(path.join(dir,'manifest.json'),{runId,workspace,request,tasks:requestTasks(request),startedAt:Date.now()});
       // The CLI may have already performed the deterministic preflight needed to
       // decide whether a visible window is warranted. Reuse that exact plan so
       // the policy decision and the launched plan cannot diverge after a second
       // model classification or cache lookup.
+      // 2026-10-25（F8）：所有会抛错的准备（读 acceptance、规划、切块）先做完，再落目录。
+      // 原顺序是 mkdir → 写 manifest → loadChecks → plan：任一步抛错都会留下「有 manifest.json、
+      // 无 summary.json」的目录 —— 同 runId 重跑报 `Run ID already exists`，而 --verify-run 报
+      // `Run not found`，runId 被烧掉且盘上没有任何账本可查。
+      checks=loadChecks(options.acceptanceFile);
       const candidate=options.plan||await hooks.plan(request,capacity);
       const {plan,tasks}=ledgerPlan(request,candidate,capacity,hooks.compact);
+      fs.mkdirSync(dir,{recursive:true});
+      atomicJson(path.join(dir,'manifest.json'),{runId,workspace,request,tasks:requestTasks(request),startedAt:Date.now()});
       const recs=plan.map((b,i)=>({key:`B${i+1}`,title:b.title,b,dependsOn:b.dependsOn||[],keys:[...new Set([...(b.conflictKeys||[]),...b.tasks.flatMap(t=>hooks.infer(t.prompt||''))].map(k=>canonicalKey(k,workspace)))]}));
       levelWaves(recs);
       sum={protocol:2,version:CORE_VERSION,agent:options.agent||'codex',runId,workspace,request,capacity,coordinator,generation:1,history:[],startedAt:Date.now(),bootId:bootId(),tasks,plan:recs,spawnMode:options.spawnMode||'window',

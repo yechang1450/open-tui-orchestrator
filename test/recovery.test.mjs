@@ -113,6 +113,34 @@ test('a block that was never attempted is still skipped when endedAt is missing'
  assert.equal('endedAt' in sum.results.B1,false);
 });
 
+// F8（2026-10-25）：规划失败不得留下半成品 run 目录。
+// 原顺序是 mkdir → 写 manifest → loadChecks → plan：plan 抛错就留下「有 manifest.json、
+// 无 summary.json」的目录，同 runId 重跑报 `Run ID already exists`，而 --verify-run 报
+// `Run not found` —— runId 被烧掉且盘上没有任何账本可查。
+test('a planning failure leaves no partial run directory and the runId stays reusable (F8)',async()=>{
+ fs.mkdirSync(family,{recursive:true});
+ const workspace=fs.mkdtempSync(path.join(family,'no-partial-')),coordinator=path.join(workspace,'temp','coordinator');
+ const acceptance=path.join(workspace,'acceptance.json');
+ fs.writeFileSync(acceptance,JSON.stringify({T001:[{type:'file',path:'done.txt'}]}));
+ const runDir=path.join(workspace,'temp','orchestrator','runs','never-created');
+ const {hooks,children}=realUnitHooks({workspace,coordinator});
+ let error;
+ try{
+  hooks.plan=async()=>{throw new Error('planner exploded');};
+  try{await runner.runWindows('执行甲',hooks,{workspace,capacity:8,runId:'never-created',acceptanceFile:acceptance,auth:'test',coordinator,maxAttempts:1});}
+  catch(e){error=e;}
+  assert.match(String(error&&error.message),/planner exploded/,'the planning error must propagate');
+  assert.equal(fs.existsSync(runDir),false,'a failed plan must not leave a half-built run directory');
+  // runId 仍可用：换回正常 plan 再跑一次，应当建账成功（这正是原来被烧掉的能力）。
+  hooks.plan=async()=>[{title:'solo',type:'parallel',tasks:[{prompt:'执行甲'}]}];
+  const sum=await runner.runWindows('执行甲',hooks,{workspace,capacity:8,runId:'never-created',acceptanceFile:acceptance,auth:'test',coordinator,maxAttempts:1});
+  assert.equal(sum.success,true,'the same runId must still be usable after a planning failure');
+ }finally{
+  for(const c of children)if(c.exitCode===null)try{c.kill();}catch{}
+  try{fs.rmSync(workspace,{recursive:true,force:true});}catch{}
+ }
+});
+
 // —— 状态收口回归（2026-10-24）：F1 收尾隔离 / F2 终态 endedAt / F3 收尾重算 / F4 verified 优先 ——
 const psLit=s=>"'" + String(s).replaceAll("'","''") + "'";
 // 真实路径的假单元：真 pwsh 起一个 worker（写 started/completed 检查点与产物，再停 2.5s 才退），
@@ -187,11 +215,13 @@ test('a throwing close/unregister/cleanup still writes endedAt, rechecks evidenc
 test('a failing unit lease release is recorded on the block and the ledger is still finalized',async()=>{
  const run=await runRealUnit({prefix:'finalize-f1b-',runId:'f1b',faults:{close:true,leases:true}});
  try{
-  // run 级 releaseRun 与单元级 release 共用同一份 coordinator 状态，所以注入损坏后 runWindows 也会在
-  // 最后一步抛错（同类的第五处，不在本次范围）；本用例只断言「单元级账本仍然完整落盘 + 失败被记名」。
-  assert.ok(run.error,/Invalid orchestration state/);
+  // run 级 releaseRun 与单元级 release 共用同一份 coordinator 状态，所以注入损坏后两者都会失败。
+  // 2026-10-25（F9）：run 级 releaseRun 失败现在只 warn、不向上抛 —— 断言 run.error 为 undefined，
+  // 并继续核对账本（这正是 F9 要保住的东西）。原写法把 RegExp 当 assert.ok 的 message 传，
+  // 会先抛 ERR_INVALID_ARG_TYPE（测试自身的 bug）。
+  assert.equal(run.error,undefined,'a run-claim release failure must not reject the run');
   const onDisk=JSON.parse(fs.readFileSync(path.join(runner.runDirectory(run.workspace,'f1b'),'summary.json'),'utf8'));
-  assert.equal(onDisk.success,true,String(run.error));
+  assert.equal(onDisk.success,true);
   assert.equal(onDisk.results.B1.status,'verified');
   assert.ok(Number.isFinite(onDisk.results.B1.endedAt),'endedAt must survive a failing release');
   assert.match(String(onDisk.results.B1.leaseReleaseError),/Invalid orchestration state/);
