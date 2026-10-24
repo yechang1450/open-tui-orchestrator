@@ -117,6 +117,9 @@ test('gate: the L1 suite budget stays tunable instead of hardcoded to 900s', asy
   const source = fs.readFileSync(path.join(root, 'scripts', 'gate.mjs'), 'utf8');
   assert.match(source, /ORCH_GATE_SUITE_TIMEOUT_MS/, 'gate must expose a tunable suite budget');
   assert.match(source, /Math\.max\(60000,/, 'the suite budget keeps its 60s floor');
+  // 2026-10-25：默认预算必须覆盖一次完整套件。并发 2 下实测 18–21 分钟；旧的 15 分钟线一到，
+  // spawnSync 就杀子进程，spec/TAP 双断流、零汇总 —— 与真实崩溃无法区分（L1 missing + L4 undefined）。
+  assert.match(source, /\|\| 2400000\)/, 'the default budget must cover an 18-21 minute suite');
 });
 
 // 跳过项必须具名且正当（2026-10-06 用户拍板方案 A）：宿主 CLI 未安装的 skip 放行，
@@ -148,6 +151,44 @@ test('gate: the measured suite total counts named host-absence skips', async () 
   // 它们同时仍在 reds 名单里（exit≠0，L1 照红），只是之前不计入求和 ⇒ documented 547 vs measured 542 结构性假红。
   assert.equal(measuredSuiteTotal(516, 25, 1, 5), 547, 'cancelled are suite members too (loaded-box timeouts)');
   assert.equal(measuredSuiteTotal(536, 0, 3, 5), 544, 'cancelled add on top of named skips');
+});
+
+// 2026-10-25：Windows 上 spec reporter 的输出经 stdout 管道会丢行（实测 90 文件并发 3：spawnSync
+// 只收到 49,894 B / 424 个 ✔，同趟 TAP 直写文件是 165,590 B / 553 pass），汇总行是最后打印的，
+// 一丢就让 L1 报 skip accounting mismatch、L4 报 measured suite undefined —— 两条都是假红。
+// 现在 gate 用双轨：spec 进 stdout 给人看，TAP 落文件作权威来源。这里钉住 TAP 解析。
+test('gate: TAP output is parsed for reds and skips (the stdout-safe source)', async () => {
+  const {suiteReds, suiteSkips} = await import(pathToFileURL(path.join(root, 'scripts', 'gate.mjs')).href);
+  const tap = [
+    'TAP version 13',
+    'ok 1 - alpha',
+    'not ok 2 - beta',
+    '  ---',
+    '  duration_ms: 12.5',
+    "  location: 'test/x.test.mjs:10:1'",
+    '  ...',
+    'ok 3 - gamma # SKIP CLI is not installed',
+    '# tests 3',
+    '# pass 1',
+    '# fail 1',
+    '# skipped 1',
+  ].join('\n');
+  assert.deepEqual(suiteReds(tap).map((r) => r.name), ['beta'], 'TAP not-ok lines are the reds');
+  assert.deepEqual(suiteSkips(tap), [{name: 'gamma', reason: 'CLI is not installed'}], 'TAP # SKIP lines are the skips');
+  // 缩进的子测试与带 # SKIP 的 not ok 都不能算顶层红（否则隔离复跑会跑错文件）。
+  const nested = ['ok 1 - outer', '    not ok 2 - inner', 'not ok 3 - delta # SKIP CLI is not installed', "# tests 0", '# pass 0', '# fail 0'].join('\n');
+  assert.deepEqual(suiteReds(nested).map((r) => r.name), [], 'indented subtests and skips are not top-level reds');
+  // TAP 的注释行（以 `# ` 开头）不能被 spec 正则误抓成 skip —— 实测踩过：`# [queue] B2: Waiting …
+  // (wait #1); …` 被当成未具名 skip，L1 报 `unjustified skips (2)` + `parsed 3 of 1 reported`。
+  const comments = ['# [queue] B2: Waiting for capacity — backing off (wait #1); waiting is normal', '# tests 3', '# pass 1'].join('\n');
+  assert.deepEqual(suiteSkips(comments), [], 'TAP comment lines are not skips');
+});
+
+test('gate: the suite default concurrency stays at 2 (3 kills the runner at 90 files)', () => {
+  // 2026-10-25 实测：并发 3 时 `node --test` 主进程跑到第 523 个用例后直接死掉，spec 与 TAP 同时断流，
+  // L1 永远拿不到汇总、L4 永远 measured undefined；并发 2 稳定跑完 556（1284 s）。钉住默认值防回退。
+  const source = fs.readFileSync(path.join(root, 'scripts', 'gate.mjs'), 'utf8');
+  assert.match(source, /ORCH_GATE_TEST_CONCURRENCY \|\| ''\)\.trim\(\) \|\| '2'/, 'the default suite concurrency must be 2');
 });
 
 // 进程快照预算钉给 gate 子进程（2026-10-06）：L1 以 --test-concurrency=3 真起进程，满载机器上

@@ -79,6 +79,15 @@ export function suiteReds(out) {
       reds.push({name, at});
     }
   };
+  // TAP 形态（2026-10-25 加）：顶层 `not ok N - <name>`；缩进的子测试与 `# SKIP` 行都不算红。
+  // 只在确实是 TAP 输出时才走这条，避免 spec 输出里偶发的 "not ok" 字面被误读。
+  if (/^# (?:tests|pass|fail) \d+$/m.test(text)) {
+    for (const raw of text.split(/\r?\n/)) {
+      const m = /^not ok \d+ - (.+?)$/.exec(raw.trimEnd());
+      if (m && !/# SKIP/.test(m[1])) push(m[1].trim(), '');
+    }
+    return reds;
+  }
   const NAME = /^✖\s+(.+?)\s*(?:\(\d+(?:\.\d+)?ms\))?\s*$/;
   const cut = text.lastIndexOf('✖ failing tests:');
   if (cut >= 0) {
@@ -116,18 +125,30 @@ export function suiteSkips(out) {
   const text = String(out || '');
   const skips = [];
   const seen = new Set();
-  // spec reporter 的跳过行：`<glyph> <name> (N.Nms) # <reason>`，glyph 非 ✔/✖/ℹ。
-  const SKIP = /^([^\s✔✖ℹ])\s+(.+?)\s*(?:\(\d+(?:\.\d+)?ms\))?\s*#\s*(.+)$/;
-  for (const raw of text.split(/\r?\n/)) {
-    const m = SKIP.exec(raw.trimEnd());
-    if (!m) continue;
-    const name = m[2].trim();
-    const reason = m[3].trim();
+  const push = (name, reason) => {
     const key = `${name}\u0000${reason}`;
     if (name && reason && !seen.has(key)) {
       seen.add(key);
       skips.push({name, reason});
     }
+  };
+  // spec reporter 的跳过行：`<glyph> <name> (N.Nms) # <reason>`，glyph 非 ✔/✖/ℹ。
+  // 2026-10-25：glyph 还必须排除 `#` —— TAP 的注释行（`# [queue] B2: Waiting … # …`）会被这条
+  // 正则误抓成 skip，进而把 L1 判成 `unjustified skips` / `parsed 3 of 1 reported`。
+  const SPEC_SKIP = /^([^\s✔✖ℹ#])\s+(.+?)\s*(?:\(\d+(?:\.\d+)?ms\))?\s*#\s*(.+)$/;
+  // TAP 的跳过行（2026-10-25 加）：`ok N - <name> # SKIP <reason>`。TAP 约定用大写 SKIP；
+  // 顶层测试才计入 —— 与 SPEC_SKIP 的「行首无缩进」等价，这里靠 ^ok/^not ok 保证。
+  const TAP_SKIP = /^(?:not )?ok \d+ - (.+?)\s+# SKIP\s*(.+)$/;
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.trimEnd();
+    const tapM = TAP_SKIP.exec(line);
+    if (tapM) {
+      push(tapM[1].trim(), tapM[2].trim());
+      continue;
+    }
+    const m = SPEC_SKIP.exec(line);
+    if (!m) continue;
+    push(m[2].trim(), m[3].trim());
   }
   return skips;
 }
@@ -168,18 +189,40 @@ function suite() {
   const files = fs.readdirSync(path.join(REPO, 'test')).filter((n) => n.endsWith('.test.mjs')).sort().map((n) => path.join('test', n));
   const env = {...process.env, ORCH_AGENT: process.env.ORCH_AGENT || AGENT};
   console.error(`  [gate] running ${files.length} test files (this takes minutes)…`);
-  // 并发可调（ORCH_GATE_TEST_CONCURRENCY，默认 3）：机器忙/内存紧时降到 1 能显著减少容量敏感用例的假红
-  // （2026-09-18 用户令：别等内存，能跑就跑）。
-  const suiteTimeout = Math.max(60000, Number(String(process.env.ORCH_GATE_SUITE_TIMEOUT_MS || '').trim() || '') || 900000);
-  const r = node(['--test', '--test-concurrency=' + (String(process.env.ORCH_GATE_TEST_CONCURRENCY || '').trim() || '3'), ...files], {env, timeout: suiteTimeout});
+  // 并发可调（ORCH_GATE_TEST_CONCURRENCY，默认 **2**）：机器忙/内存紧时降到 1 能显著减少容量敏感用例的假红。
+  // 2026-10-25 实测：默认 3 在 90 个测试文件的规模下会让 `node --test` 主进程跑到第 523 个用例时直接死掉
+  // （spec 与 TAP 同时断在同一处，退出后没有任何汇总行），并发 2 稳定跑完 556（1284 s）。速度换不来真值：
+  // 门禁宁可跑 21 分钟，也不接受「读不到汇总」。
+  // 2026-10-25：默认预算 900000（15 分钟）→ 2400000（40 分钟）。并发 2 下完整套件实测
+  // 1284 s / 1079 s（21 / 18 分钟），已经贴着 15 分钟线；一旦超时，spawnSync 会杀掉子进程，
+  // spec 与 TAP **同时**停在半截、没有任何汇总 —— 表现与「运行器崩溃」完全一样（L1 missing 四项
+  // + L4 measured undefined），极难与真实回归区分。40 分钟给的是「跑完 + 一次隔离复跑」的余量；
+  // 仍可用 ORCH_GATE_SUITE_TIMEOUT_MS 覆盖，下限 60 s 不变。
+  const suiteTimeout = Math.max(60000, Number(String(process.env.ORCH_GATE_SUITE_TIMEOUT_MS || '').trim() || '') || 2400000);
+  // 2026-10-25：spec reporter 的输出**绝不能写 stdout**。实测三种形态（90 文件，并发 2）：
+  //   ① spec→stdout + tap→文件：跑到第 8 分钟主进程死，两边同时断流、无汇总；
+  //   ② spec→文件 + tap→文件：完整跑完 557，18 分钟；
+  //   ③ 单 tap→文件：完整跑完，21 分钟。
+  // 结论：往 stdout 写 spec 就是崩溃源（PTY 或管道都一样）。两个 reporter 都写文件，
+  // stdout 只保留 gate 自己的进度行。
+  const stampNow = stamp();
+  const tapPath = path.join(REPO, 'temp', `gate-suite-${stampNow}.tap`);
+  const specPath = path.join(REPO, 'temp', `gate-suite-${stampNow}.log`);
+  try { fs.mkdirSync(path.dirname(tapPath), {recursive: true}); } catch {}
+  const r = node(['--test', '--test-concurrency=' + (String(process.env.ORCH_GATE_TEST_CONCURRENCY || '').trim() || '2'),
+    '--test-reporter=spec', '--test-reporter-destination=' + specPath,
+    '--test-reporter=tap', '--test-reporter-destination=' + tapPath, ...files], {env, timeout: suiteTimeout});
+  let tap = '';
+  try { tap = fs.readFileSync(tapPath, 'utf8'); } catch {}
   const num = (key) => {
-    const m = r.out.match(new RegExp('^ℹ ' + key + ' (\\d+)$', 'm'));
+    // TAP 的汇总行是 `# pass 553`，spec 的是 `ℹ pass 553`。TAP 优先（它不经过 stdout 管道）。
+    const m = tap.match(new RegExp('^# ' + key + ' (\\d+)$', 'm')) || r.out.match(new RegExp('^ℹ ' + key + ' (\\d+)$', 'm'));
     return m ? Number(m[1]) : null;
   };
   const pass = num('pass'), fail = num('fail'), skipped = num('skipped'), cancelled = num('cancelled');
   const missing = [['pass', pass], ['fail', fail], ['skipped', skipped], ['cancelled', cancelled]].filter(([, v]) => v === null).map(([k]) => k);
   // 跳过项必须逐条具名且理由正当（宿主 CLI 没装）。解析数与 reporter 的 skipped 对不上 = 红。
-  const skips = suiteSkips(r.out);
+  const skips = suiteSkips(tap || r.out);
   const unjustified = skips.filter((s) => !SKIP_REASON_ALLOWED.test(s.reason));
   const skipAccountingOk = skipped !== null && skips.length === skipped;
   let ok = !missing.length && pass > 0 && fail === 0 && r.status === 0 && unjustified.length === 0 && skipAccountingOk;
@@ -195,7 +238,7 @@ function suite() {
   if (!skipAccountingOk) lines.push(`skip accounting mismatch: parsed ${skips.length} of ${skipped === null ? 'unknown' : skipped} reported ⇒ FAIL`);
   let redLine = '';
   if (!ok) {
-    const reds = suiteReds(r.out);
+    const reds = suiteReds(tap || r.out);
     if (reds.length) {
       lines.push(`failing tests (${reds.length}):`);
       for (const red of reds.slice(0, 15)) lines.push(`  ✖ ${red.name}${red.at ? ' — ' + red.at : ''}`);
@@ -229,7 +272,7 @@ function suite() {
         redLine = `  [gate] L1 environment flake recorded: ${reds.length} red title[s] green in isolated re-runs (${[...byFile.keys()].join(', ')}); suite summary observed pass=${pass} fail=${fail}`;
       }
     }
-    const dump = dumpSuiteOutput(r.out);
+    const dump = fs.existsSync(specPath) ? path.relative(REPO, specPath) : dumpSuiteOutput(r.out);
     lines.push(dump ? `full suite output: ${dump}` : `full suite output could not be written (see the captured gate log)`);
     if (!redLine) redLine = suiteRedsLine(reds);
   }

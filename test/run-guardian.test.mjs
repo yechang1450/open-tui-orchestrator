@@ -225,7 +225,7 @@ test('ensureRunGuardian is disabled by env and adopts a live guardian',()=>{
  }finally{fs.rmSync(workspace,{recursive:true,force:true});}
 });
 
-test('runWindows arms the guardian on fresh runs only, and guardian failure never fails the run',async()=>{
+test('runWindows arms the guardian on fresh runs and again on resume, and guardian failure never fails the run',async()=>{
  fs.mkdirSync(family,{recursive:true});
  const workspace=fs.mkdtempSync(path.join(family,'guardian-runner-'));
  const calls=[];let spawnCalls=0;
@@ -246,7 +246,12 @@ test('runWindows arms the guardian on fresh runs only, and guardian failure neve
   assert.equal(calls[0].timeoutMs,90000);assert.ok(calls[0].owner?.ProcessId>0);
   const resumed=await runWindows('',hooks,{workspace,capacity:8,runId:'guarded',auth:'test',coordinator:path.join(workspace,'temp','coordinator'),resume:true,agent:'codex',maxAttempts:2});
   assert.equal(resumed.generation,2);
-  assert.equal(calls.length,1); // resumed runs stay under the original guardian
+  // 2026-10-25（F7）：resume 也调 guardian —— 原写法假设「原 guardian 还在看」，但它可能已 exhausted
+  // 或被杀，那样账本会永停在「无 finishedAt」，--verify-run 永远报 Run is not finalized（run
+  // ea010891 就是这么卡住的）。ensureRunGuardian 自带 already 幂等短路，原 guardian 在时是 no-op。
+  assert.equal(calls.length,2,'resume must re-arm the guardian (idempotent inside ensureRunGuardian)');
+  assert.equal(calls[1].runId,'guarded');
+  assert.equal(calls[1].workspace,path.resolve(workspace));
   if(previousUnproductive===undefined)delete process.env.ORCH_UNPRODUCTIVE_RETRIES;else process.env.ORCH_UNPRODUCTIVE_RETRIES=previousUnproductive;
  }finally{await new Promise(r=>setTimeout(r,500));fs.rmSync(workspace,{recursive:true,force:true});}
 });

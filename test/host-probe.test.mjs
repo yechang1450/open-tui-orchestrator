@@ -78,7 +78,11 @@ test('probeCli gives timeoutMs=0 an explicit default-timeout meaning',()=>{
 });
 
 test('kimi resolution survives a transient probe timeout (fake CLI)',()=>{
- const {fake,env,cleanup}=setup('flaky',{FAKE_SLEEP_MS:'8000',ORCH_HOST_PROBE_TIMEOUT_MS:'3000'});
+ // 钉死 attempts=2：probeCli 的 rawAttempts 读 env.ORCH_HOST_PROBE_ATTEMPTS（host-probe.mjs:20），
+ // 而 setup() 继承 process.env —— 调用方为了缩短探测预算设成 1 时，这条「超时后重试」的用例就会
+ // 必红（2026-10-25 实测：门禁带 ORCH_HOST_PROBE_ATTEMPTS=1 时红，去掉即绿）。用例的自变量不应
+ // 由外部环境决定。
+ const {fake,env,cleanup}=setup('flaky',{FAKE_SLEEP_MS:'8000',ORCH_HOST_PROBE_TIMEOUT_MS:'3000',ORCH_HOST_PROBE_ATTEMPTS:'2'});
  try{
   const host=resolveHost({env:{...env,ORCH_AGENT:'kimi',ORCH_CLI:fake}});
   assert.equal(host.agent,'kimi');
