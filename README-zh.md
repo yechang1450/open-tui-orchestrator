@@ -22,6 +22,7 @@
 
 - **要证据，不要口头声明。** 每个窗口为它的块打印完整 TODO 清单，写 `started`/`completed` 检查点与 token 专属的 `__ORCH_DONE__` 标记；看护进程加上父级的验收条件，核实真实文件、命令输出、进程关闭与租约释放。**每个任务都 `verified` 时，整轮才算成功。**
 - **可恢复，但不盲目重放。** 中断的运行会按 PID / 创建时间 / 可执行文件 / 命令行认领存活的窗口；已开始但副作用无法证明的任务会变成 `needs-reconciliation`（交给人核实真实状态），而不是被盲目重放。停滞单元（证据停止推进超过 `ORCH_UNIT_STALL_MS`，默认 600000 ms）会被关闭并在块的尝试预算内重试；`ORCH_UNIT_TIMEOUT_MS`（默认 2700000 ms）限制单个单元的最长寿命。窗口按 `ORCH_WINDOW_STAGGER_MS`（默认 5000 ms）错峰拉起，避免首回合突发打满宿主每分钟限流；设 `0` 可同起。
+- **进程快照预算。** 身份校验要经 PowerShell/CIM 枚举整张进程表，满载机上一次就要几秒。`ORCH_PS_TIMEOUT_MS` 调这个预算（默认 15000 ms，上限 120000）；慢机或忙碌主机上调大——门禁自己的子进程已用 120000。超时会连同耗时与原因一起报出，不会只给一句「cannot verify」。
 - **七种宿主、一套契约。** Codex、pi、opencode、Kimi Code、Claude Code、OpenClaw、Hermes Agent 的适配器在共享契约之下分别实现参数构造、会话/结果读取、完成检测与关闭。宿主由 `--agent`/`ORCH_AGENT`、宿主环境标记、或从 Windows 祖先进程链推断发起方选定。适配器细节：[Claude Code](https://github.com/yechang1450/open-tui-orchestrator/blob/master/docs/claude-adapter.md)、[OpenClaw](https://github.com/yechang1450/open-tui-orchestrator/blob/master/docs/openclaw-adapter.md)、[pi](https://github.com/yechang1450/open-tui-orchestrator/blob/master/docs/pi-adapter.md)。未知宿主、未验证 CLI、可执行文件缺失都会给出诊断——**不自动安装、不静默回退到其它 Agent。**
 
 运行状态（启动器、锁、结果、账本）在你工作区的 `temp/orchestrator` 下；你的 Agent 自己的配置、会话与凭据仍在原位置。编排器只会转交调用者已有的权限，绝不充当提权层。

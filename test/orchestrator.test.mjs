@@ -963,6 +963,10 @@ while($true){Start-Sleep -Seconds 600}`);
     const exitCode = await Promise.race([launcherExit, sleep(20000).then(() => 'timeout')]);
     assert.notEqual(exitCode, 'timeout', 'launcher must exit on its own (no permanently-alive codex window)');
     assert.equal(exitCode, 0, 'launcher must end with exit 0 so the Windows Terminal pane auto-closes');
+    // 2026-10-25：进程退出是异步的——launcher 退出 ≠ 孙进程已从内核表消失。负载高时
+    // pidAliveCheck 会短暂返回 true（本机全量并发时该用例间歇性红、单跑必绿；CIM 快照单次 2-11s
+    // 让窗口更宽）。给一个宽限期再断言，把「回收慢」与「没回收」分开。
+    await waitFor(() => !pidAliveCheck(agentPid) && !pidAliveCheck(grandPid), 10000);
     assert.equal(pidAliveCheck(agentPid), false, 'codex process must be killed even when a stale result pre-exists');
     assert.equal(pidAliveCheck(grandPid), false, 'codex grandchild must be reaped');
     assert.equal(fs.existsSync(rf), true, 'result file must be written (Write-Result ran)');
