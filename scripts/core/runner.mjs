@@ -220,7 +220,12 @@ function blockStatus(ids,results) {
 }
 export function collectVerification(sum,checks,workspace) {
   for(const b of sum.blocks) {
-    const e=sum.results[b.key];if(!e?.endedAt)continue;
+    const e=sum.results[b.key];if(!e)continue;
+    // 缺 endedAt 只排除「从未尝试过」的块：有过 attempt 的块仍要按盘上证据重算。
+    // 旧写法 `if(!e?.endedAt)continue` 会把「launcher 未退」分支留下的无 endedAt 块永久跳过
+    //（2026-10-24 实测 runId 6f7b8f2e…：B2 status=failed、endedAt 缺失，而 checkpoint 已 completed、
+    // 产物已落盘），于是 --verify-run 拿不到这块 ⇒ 整 run 假失败。
+    if(!e.endedAt&&!e.attempts?.length)continue;
     if(['blocked','popup-failed','preflight-failed','cancelled'].includes(e.status)&&!e.attempts?.length)continue;
     const cps=blockCheckpoints(e,b,sum);
     for(const id of b.taskIds) {
@@ -517,7 +522,16 @@ export async function runWindows(request,hooks,options={}) {
         finally {
           if(!identity&&la&&spawnConfirmed&&!fs.existsSync(la.rf))try{identity=await identityWithGrace(hooks,la,{graceMs:4000,intervalMs:300});}catch{identity=undefined;}
           if(identity)await hooks.close(identity.ProcessId,identity);
-          if(identity&&!(await waitForProcessExit(identity))){e.status='failed';e.reason='Launcher still alive; lease retained';persist();return;}
+          if(identity&&!(await waitForProcessExit(identity))){
+            e.status='failed';e.reason='Launcher still alive; lease retained';
+            // launcher 未退 ≠ 单元没干完：满载下（2026-10-24 实测 runId 6f7b8f2e…，B2）checkpoint 已 completed、
+            // 产物已落盘，整块却停在这个分支且 endedAt 缺失 —— 缺 endedAt 的块会被 collectVerification 的
+            // `!endedAt` 守卫跳过，--verify-run 永远拿不到它，整 run 假失败。
+            // 这里补写 endedAt（镜像正常收尾路径；active 可能未定义/不可见时不动它）并当场按盘上证据重算 status。
+            e.endedAt=Date.now();if(active)active.endedAt=e.endedAt;
+            try{collectVerification(sum,checks,workspace);}catch{}
+            persist();return;
+          }
           await coordinate(()=>release(coordinator,e.leaseId||leaseId),Date.now()+30000);
           await recordUnitPeakIfReady(la, r.key, active.token, options.agent || sum.agent || 'caller', peakSampled);
           hooks.unregister(e.leaseId||leaseId);if(la)hooks.cleanup(la);

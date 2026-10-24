@@ -77,3 +77,37 @@ test('failed rechecks preserve execution evidence so a later resume cannot repea
   assert.deepEqual(recovery.pending,[]);assert.deepEqual(recovery.uncertain,['T1']);
  }finally{fs.rmSync(dir,{recursive:true,force:true});}
 });
+
+// 满载假阴性回归（2026-10-24 实测 runId 6f7b8f2e…）：launcher 未退时块被记为 failed 且不写 endedAt，
+// 而 checkpoint 已是 completed、产物已落盘。旧口径按 `!endedAt` 整块跳过 ⇒ --verify-run 永远拿不到它。
+test('a failed block without endedAt is verified from its attempt checkpoint and artifact',()=>{
+ const dir=fs.mkdtempSync(path.join(family,'launcher-alive-'));
+ try{
+  const runId='run-launcher-alive',token='tok-B2-a1';
+  const attempt={file:path.join(dir,'attempts','B2','1','attempt.json'),runId,token,number:1,taskIds:['T2'],createdAt:1};
+  fs.mkdirSync(path.dirname(attempt.file),{recursive:true});
+  fs.writeFileSync(attempt.file,JSON.stringify(attempt));
+  const cpFile=path.join(path.dirname(attempt.file),'checkpoints','T2.json');
+  fs.mkdirSync(path.dirname(cpFile),{recursive:true});
+  fs.writeFileSync(cpFile,JSON.stringify({id:'T2',runId,token,state:'completed',startedAt:1,updatedAt:2}));
+  fs.writeFileSync(path.join(dir,'c2.txt'),'artifact');
+  const checks={T2:[{type:'file',path:'c2.txt'}]};
+  const sum={runId,blocks:[{key:'B2',taskIds:['T2']}],results:{B2:{status:'failed',reason:'Launcher still alive; lease retained',attempts:[attempt]}},taskResults:{T2:{status:'pending'}}};
+  runner.collectVerification(sum,checks,dir);
+  assert.equal(sum.taskResults.T2.status,'verified');
+  assert.equal(sum.results.B2.status,'verified');
+  // 同样的账本、产物缺失 ⇒ 盘上证据不足，仍判 failed（不能让缺 endedAt 变成免检通道）。
+  fs.rmSync(path.join(dir,'c2.txt'));
+  runner.collectVerification(sum,checks,dir);
+  assert.equal(sum.results.B2.status,'failed');
+  assert.match(String(sum.taskResults.T2.reason),/Acceptance file missing/);
+ }finally{fs.rmSync(dir,{recursive:true,force:true});}
+});
+
+test('a block that was never attempted is still skipped when endedAt is missing',()=>{
+ const sum={runId:'r',blocks:[{key:'B1',taskIds:['T1']}],results:{B1:{status:'failed',attempts:[]}},taskResults:{T1:{status:'pending'}}};
+ runner.collectVerification(sum,{T1:[{type:'file',path:'missing'}]},process.cwd());
+ assert.equal(sum.results.B1.status,'failed');
+ assert.equal(sum.taskResults.T1.status,'pending');
+ assert.equal('endedAt' in sum.results.B1,false);
+});
