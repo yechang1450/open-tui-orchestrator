@@ -25,7 +25,6 @@
     "README-zh.md",
     "INSTALL.md",
     "INSTALL-zh.md",
-    "LICENSE",
     "scripts",
     "!scripts/node_modules",
     "!scripts/gate.mjs",
@@ -52,7 +51,7 @@
     "automation"
   ],
   "author": "Yang Wenchàng (yechang1450)",
-  "license": "MIT",
+  "license": "UNLICENSED",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/yechang1450/open-tui-orchestrator.git"

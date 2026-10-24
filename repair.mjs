@@ -3,7 +3,7 @@
  * repair.mjs - per-skill publish / integrity entry.
  *
  * The CLI package is self-contained and publishable when it carries its
- * executable entrypoint, package metadata, release seal, README and license.
+ * executable entrypoint, package metadata, release seal and README.
  * Runtime state and developer metadata never enter a published copy.
  *
  * Runtime debris (use-and-discard, never bundled, safe to remove):
@@ -28,7 +28,7 @@ import { lockedForMaintenance, acquireMaintenanceLock, releaseMaintenanceLock } 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SKILL = path.basename(__dirname);
 
-const REQUIRED_FILES = ['cli.mjs', 'package.json', 'release.json', 'README.md', 'LICENSE'];
+const REQUIRED_FILES = ['cli.mjs', 'package.json', 'release.json', 'README.md'];
 const OPTIONAL_FILES = ['README-zh.md', 'CHANGELOG.md'];
 
 const DEBRIS_DIRS = new Set([
