@@ -621,5 +621,8 @@ export async function runWindows(request,hooks,options={}) {
     finalizeRunLedger(sum,checks,workspace);persist();
     console.log(`[run] finalized runId=${runId} success=${sum.success} summary=${summaryFile}`);
     console.log(`[env] phase=final platform=${process.platform} node=${process.version} free=${Math.round(os.freemem()/1024**2)}MB total=${Math.round(os.totalmem()/1024**2)}MB concluded=${sum.concluded?'yes':'no'}`);return sum;
-  }finally{await coordinate(()=>releaseRun(coordinator,runKey,claim),Date.now()+30000);}
+  // 2026-10-25（F9）：run 级 claim 清扫失败不得覆盖已经落盘的结论。claim 自身带 pid/bootId
+  // 自动回收（leases.mjs），释放失败只意味着「下次多一道 stale 回收」，而把 success=true 的
+  // 结果变成 reject 会让调用方（orchestrate-sdk 的 process.exitCode）读出完全相反的结论。
+  }finally{try{await coordinate(()=>releaseRun(coordinator,runKey,claim),Date.now()+30000);}catch(error){console.warn('[orchestrator] run-claim release failed: '+(error&&error.message||error));}}
 }
