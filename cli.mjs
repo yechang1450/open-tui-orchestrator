@@ -22,10 +22,22 @@ function isDirectory(target) {
 const args = process.argv.slice(2);
 // 只读版本面：纯元数据，不解析 agent CLI、不落任何状态（发行副本验收的版本痕迹检查用）。
 if (args.includes('--version')) {
-  const pkg = JSON.parse(fs.readFileSync(fileURLToPath(new URL('./package.json', import.meta.url)), 'utf8'));
-  const core = /CORE_VERSION\s*=\s*'([^']+)'/.exec(fs.readFileSync(fileURLToPath(new URL('./scripts/core/contracts.mjs', import.meta.url)), 'utf8'))?.[1] ?? 'unknown';
-  console.log(`open-tui-orchestrator ${pkg.version} (core ${core})`);
-  process.exit(0);
+  // 2026-10-26：整段包进 try/catch —— `npm i -g` 正在替换包文件时（Windows 先删后写），
+  // readFileSync 会撞 ENOENT/EBUSY，原写法直接甩 Node 原始栈 + rc 1，而本文件开头承诺
+  // 机器可调用失败只回一行 `[orchestrator] FATAL: <原因>`；而 --version 正是发行验收查版本痕迹的入口，
+  // 读到栈的人会误判整包损坏。core 读不到时降级成 unknown，不让版本面整体失败。
+  try {
+    const pkg = JSON.parse(fs.readFileSync(fileURLToPath(new URL('./package.json', import.meta.url)), 'utf8'));
+    let core = 'unknown';
+    try {
+      core = /CORE_VERSION\s*=\s*'([^']+)'/.exec(fs.readFileSync(fileURLToPath(new URL('./scripts/core/contracts.mjs', import.meta.url)), 'utf8'))?.[1] ?? 'unknown';
+    } catch { /* core 不可读不影响版本面 */ }
+    console.log(`open-tui-orchestrator ${pkg.version} (core ${core})`);
+    process.exit(0);
+  } catch (error) {
+    console.error(`[orchestrator] FATAL: version probe failed: ${error?.message || String(error)}`);
+    process.exit(1);
+  }
 }
 // Windows-only 承诺在入口强制（见 scripts/platform-guard.mjs）：拒绝要发生在解析宿主、调用模型、落任何状态之前。
 if (enforceWindowsOnly(args)) process.exit(1);

@@ -543,9 +543,15 @@ function auxAdmissionLimit(auxCap) {
 function readSavedBlockCount() {
   try {
     const p = path.join(STATE_DIR, 'runs', String(process.env.ORCH_RUN_ID || ''), 'summary.json');
-    const n = JSON.parse(fs.readFileSync(p, 'utf8'))?.blocks?.length;
+    // 2026-10-26：原写法是 `fs.readFileSync(...)`，但本模块只从 node:fs 具名导入了 readFileSync，
+    // 没有 `fs` 绑定 ⇒ 每次调用必抛 ReferenceError，被同一行的 `catch {}` 吞掉 ⇒ 本函数 100% 走兜底，
+    // resume 的 capacity 永远 = max(1, ORCH_MAX_WINDOWS||4)，还会把它谎报成 free-memory capacity。
+    // 同时把 catch 收窄：只吞「文件不存在」，解析失败/程序错误一律响亮抛出。
+    const n = JSON.parse(readFileSync(p, 'utf8'))?.blocks?.length;
     if (Number.isInteger(n) && n > 0) return n;
-  } catch {}
+  } catch (error) {
+    if (error?.code !== 'ENOENT') throw error;
+  }
   return Math.max(1, Number(process.env.ORCH_MAX_WINDOWS || 0) || 4);
 }
 async function decomposeSafely(request) {
@@ -2026,7 +2032,19 @@ function withRegistryLock(fn) {
   const acquire = () => {
     for (let i = 0; i < 100; i++) {
       let fd;
-      try { fd = openSync(REG_LOCK, 'wx'); writeFileSync(fd, JSON.stringify({ pid: process.pid, at: Date.now() })); closeSync(fd); return true; } catch { sleepSync(20); }
+      // 2026-10-26：writeFileSync 抛错时原写法不会 closeSync ⇒ fd 泄漏 + 0 字节锁文件留在盘上，
+      // 后续 100 次 acquire 全 EEXIST（2s 空转）、60s 内不可回收，最后在「无互斥」下读写 registry。
+      // 现在无论成败都在 finally 关 fd；失败时把锁文件一并删掉，让下一次 acquire 从干净状态开始。
+      try {
+        fd = openSync(REG_LOCK, 'wx');
+        writeFileSync(fd, JSON.stringify({ pid: process.pid, at: Date.now() }));
+        closeSync(fd);
+        return true;
+      } catch {
+        if (fd !== undefined) { try { closeSync(fd); } catch { /* already closed */ } }
+        try { rmSync(REG_LOCK, { force: true }); } catch { /* ignore */ }
+        sleepSync(20);
+      }
     }
     return false;
   };
@@ -2323,13 +2341,29 @@ async function classifyExecutionMode(request) {
 }
 export async function main() {
   if (ORCH_ARG_ERROR) throw new Error(ORCH_ARG_ERROR);
-  for(const [flag,key] of [["--run-id","ORCH_RUN_ID"],["--acceptance-file","ORCH_ACCEPTANCE_FILE"],["--acceptance","ORCH_ACCEPTANCE_FILE"]]){const index=process.argv.indexOf(flag);if(index>=0){if(!process.argv[index+1])throw new Error(flag+" needs a value");process.env[key]=process.argv[index+1];process.argv.splice(index,2);}}
-  const modeArgIndex=process.argv.indexOf("--mode");if(modeArgIndex>=0){if(!process.argv[modeArgIndex+1])throw new Error("--mode needs a value");process.env.ORCH_SPAWN_MODE=process.argv[modeArgIndex+1];process.argv.splice(modeArgIndex,2);}
+  // 2026-10-26：取值时也必须拒绝「下一个就是另一个 flag」。原写法只判 `!value`，拼错时
+  // （如 `--acceptance-file --plan-file p.json "req"`）会把 flag 本身吃成值并 splice 掉；若被吃掉的
+  // 正是入口（`--run-windows`），mode 就变成请求文本 ⇒ 落到 Usage 分支打印帮助、rc 0、一个字没跑。
+  // 同文件 129 行的 plan-file 解析与 cli.mjs:36 都做了这个校验，唯独这里漏 —— 收成一个 helper。
+  const takeValue = (flag) => {
+    const i = process.argv.indexOf(flag);
+    if (i < 0) return null;
+    const v = process.argv[i + 1];
+    if (!v || v.startsWith('--')) throw new Error(flag + ' needs a value');
+    process.argv.splice(i, 2);
+    return v;
+  };
+  for(const [flag,key] of [["--run-id","ORCH_RUN_ID"],["--acceptance-file","ORCH_ACCEPTANCE_FILE"],["--acceptance","ORCH_ACCEPTANCE_FILE"]]){const v=takeValue(flag);if(v!==null)process.env[key]=v;}
+  {const v=takeValue("--mode");if(v!==null)process.env.ORCH_SPAWN_MODE=v;}
   const forceIdx=process.argv.indexOf("--force-exec");if(forceIdx>=0){process.env.ORCH_FORCE_EXECUTE='1';process.argv.splice(forceIdx,1);}
   const mode = process.argv[2];
   // 维护锁：上锁期间一切动作模式（--run-windows/--spawn/--resume-run/--run/--exec/--plan/
   // --selftest-close 等）只回固定话术，发起 agent 本轮跳过编排器直接执行；只读模式不受影响。
   const MAINTENANCE_BYPASS = new Set([undefined, "--doctor", "--status", "--watch", "--verify-run", "--clear-cache", "--tasks", "--install-deps"]);
+  // 维护锁是「提示 + 本轮跳过」，不是失败：docs/maintenance-lock.md 第 13 行明确规定
+  // 「every action entry point prints exactly one line and exits 0, so the initiating agent skips
+  // the orchestrator and executes directly for that round」，test/maintenance-lock.test.mjs 也钉着
+  // rc 0（第 148/151 行）。2026-10-26 审查曾建议改成非零退出码，按文档判定为误报，保持 0。
   if (lockedForMaintenance() && !MAINTENANCE_BYPASS.has(mode)) {
     console.log(MAINTENANCE_MESSAGE);
     return;
