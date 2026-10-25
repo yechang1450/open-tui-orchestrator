@@ -199,18 +199,28 @@ function checksHash(checks){return crypto.createHash('sha256').update(JSON.strin
 function blockCheckpoints(entry,block,sum) {
   const out={};
   for(const a of entry?.attempts||[]) {
-    try{Object.assign(out,readCheckpoints(a.file,{...a,runId:sum.runId}));}catch{for(const id of a.taskIds)out[id]={state:'invalid'};}
+    try{Object.assign(out,readCheckpoints(a.file,{...a,runId:sum.runId}));}
+    // 审查 B 第 4 条（2026-10-25 第四轮）：invalid 有两类完全不同的成因，混成一句话等于让人无从排查。
+    // ENOENT = 账本记了 attempt、盘上却读不到证据（补跑可救）；其余 = JSON 损坏或身份不相符（必须人看）。
+    // why 只作为 reason 的选词依据，判定强度不变（两类都还是 needs-reconciliation）。
+    catch(error){const why=error?.code==='ENOENT'?'missing':'tampered';for(const id of a.taskIds)out[id]={state:'invalid',why};}
   }
   // Preserve read-only verification of historical protocol-1 runs.
   if(!entry?.attempts&&entry?.receiptFile) {
-    try{for(const r of JSON.parse(fs.readFileSync(entry.receiptFile,'utf8')).tasks||[]){if(block.taskIds.includes(r.id))out[r.id]=r.runId===sum.runId&&r.token===entry.token&&r.status==='completed'?{state:'completed'}:{state:'invalid'};}}catch{}
+    try{for(const r of JSON.parse(fs.readFileSync(entry.receiptFile,'utf8')).tasks||[]){if(block.taskIds.includes(r.id))out[r.id]=r.runId===sum.runId&&r.token===entry.token&&r.status==='completed'?{state:'completed'}:{state:'invalid',why:'tampered'};}}catch{}
   }
   for(const id of block.taskIds) {
     if(!out[id]&&sum.taskResults[id]?.checkpoint)out[id]=sum.taskResults[id].checkpoint;
-    if(!out[id]&&sum.taskResults[id]?.status==='verified')out[id]={state:'invalid'};
+    if(!out[id]&&sum.taskResults[id]?.status==='verified')out[id]={state:'invalid',why:'tampered'};
+    // readCheckpoints 逐项判的 invalid（checkpoint 的 id/runId/token 不符，或读取抛非 ENOENT 错误）
+    // 没有自带 why：按身份不符归类，别让它们退回那句笼统的 reason。
+    if(out[id]?.state==='invalid'&&!out[id].why)out[id]={...out[id],why:'tampered'};
   }
   return out;
 }
+// 控制面的基础设施状态：说的是「机器没给到机会」，不是「跑了但失败」。重算时这类块只有在真的产出
+// 终态检查点时才按盘上证据改写（审查 B 第 8 条）。
+const INFRASTRUCTURE_STATUS=new Set(['blocked','popup-failed','preflight-failed','cancelled','timeout']);
 function blockStatus(ids,results) {
   const statuses=ids.map(id=>results[id]?.status);
   if(statuses.every(s=>s==='verified'))return 'verified';
@@ -237,15 +247,24 @@ export function collectVerification(sum,checks,workspace) {
     // 旧写法 `if(!e?.endedAt)continue` 会把「launcher 未退」分支留下的无 endedAt 块永久跳过
     //（2026-10-24 实测 runId 6f7b8f2e…：B2 status=failed、endedAt 缺失，而 checkpoint 已 completed、
     // 产物已落盘），于是 --verify-run 拿不到这块 ⇒ 整 run 假失败。
-    if(!e.endedAt&&!e.attempts?.length)continue;
-    // 从未尝试过的块（零 attempt）没有盘上证据可算：控制面给的终态必须原样保留。timeout 自 2026-10-24
-    // 起也会带 endedAt（账本可读），若不在这里挡住，就会被 blockStatus 降级成 failed —— 那等于把
-    // 「等窗口/等机器超时」和「跑了但失败」混成同一个真相。
-    if(['blocked','popup-failed','preflight-failed','cancelled','timeout'].includes(e.status)&&!e.attempts?.length)continue;
+    // 跳过要留痕（审查 B 第 9 条）：只写 pending 的话调用方分不清「没跑」与「在跑」。
+    // 只补字段，不改 status、不改 success 判定。
+    if(!e.endedAt&&!e.attempts?.length){if(e.status==='pending')e.skippedReason='not started (no attempt, no endedAt)';continue;}
     const cps=blockCheckpoints(e,b,sum);
+    // 基础设施状态不被重算覆盖（审查 B 第 8 条）：timeout / popup-failed / preflight-failed / blocked /
+    // cancelled 说的是「机器没给到机会」（等窗口超时、弹窗失败、前检失败、被挡、取消），与「跑了但失败」
+    // 不是同一个真相。零 attempt 的块本就没有盘上证据（原逻辑已保留终态）；有 attempt 但没有任何一项
+    // 产出终态检查点时同样没有可重算的证据 —— 此时必须保留控制面的 status 与 reason，
+    // 原逻辑会无条件 e.status=blockStatus(...) 把 timeout 改写成 failed、reason 换成
+    // 'No durable task checkpoint'，排查时看不出是「等不到窗口」还是「跑了没做成」。
+    if(INFRASTRUCTURE_STATUS.has(e.status)&&(!e.attempts?.length||!b.taskIds.some(id=>cps[id]?.state==='completed')))continue;
     for(const id of b.taskIds) {
       const cp=cps[id];if(!cp){sum.taskResults[id]={status:'failed',reason:'No durable task checkpoint'};continue;}
-      if(cp.state==='invalid'){sum.taskResults[id]={status:'needs-reconciliation',reason:'Invalid checkpoint',checkpoint:cp};continue;}
+      // invalid 分两类写 reason（审查 B 第 4 条）：证据读不到 vs 被篡改/身份不符。判定强度不变。
+      if(cp.state==='invalid'){
+        const reason=cp.why==='missing'?'Checkpoint evidence missing (attempt file unreadable)':'Checkpoint tampered or mismatched';
+        sum.taskResults[id]={status:'needs-reconciliation',reason,checkpoint:cp};continue;
+      }
       const checksFor=taskPolicy(checks[id]).checks;
       const check=verifyChecks(checksFor,workspace);
       // 2026-10-25（审查 B 第 3 条，产品语义定版）：checkpoint 停在 started 说明这项任务没有走到

@@ -166,3 +166,66 @@ test('command checks do not execute a workspace-shadowed bare binary', {skip: pr
     fs.rmSync(parent, {recursive: true, force: true});
   }
 });
+
+// 审查 B 第 6 条（2026-10-25 第四轮）：验收强度不受控。file 只验存在性时，0 字节桩文件也能通过；
+// minBytes 是可选收紧——不写就保持旧语义（已落地的 acceptance 不能一夜全红），写了就真比大小。
+// 收紧类判据必须带对照：坏输入要红，正常输入仍要 verified（否则「全都失败」也能骗过这条测试）。
+test('file checks honour minBytes and keep existence-only semantics when it is unset', () => {
+  const parent = fs.mkdtempSync(path.join(evidenceRoot, 'acceptance-minbytes-'));
+  const workspace = path.join(parent, 'workspace');
+  fs.mkdirSync(workspace);
+  fs.writeFileSync(path.join(workspace, 'empty.txt'), '', 'utf8');
+  fs.writeFileSync(path.join(workspace, 'ok.txt'), 'x'.repeat(8), 'utf8');
+  try {
+    assert.equal(verifyChecks([{type: 'file', path: 'empty.txt'}], workspace).status, 'verified', 'without minBytes the old existence-only semantics stay (backward compatible)');
+    const tiny = verifyChecks([{type: 'file', path: 'empty.txt', minBytes: 1}], workspace);
+    assert.equal(tiny.status, 'failed', 'a 0-byte stub must not satisfy a minBytes check');
+    assert.match(tiny.reason, /too small|minBytes/i);
+    assert.equal(verifyChecks([{type: 'file', path: 'ok.txt', minBytes: 8}], workspace).status, 'verified', 'a file of exactly minBytes still verifies');
+    const short = verifyChecks([{type: 'file', path: 'ok.txt', minBytes: 9}], workspace);
+    assert.equal(short.status, 'failed');
+    assert.match(short.reason, /too small|minBytes/i);
+    assert.equal(verifyChecks([{type: 'file', path: 'ok.txt', minBytes: 'many'}], workspace).status, 'failed', 'a malformed minBytes is a contract error, never silently ignored');
+  } finally {
+    fs.rmSync(parent, {recursive: true, force: true});
+  }
+});
+
+// 目录也能通过 existsSync：验收必须显式拒绝，别让「建了个同名目录」算交付。
+test('file checks reject a directory even though the path exists', () => {
+  const parent = fs.mkdtempSync(path.join(evidenceRoot, 'acceptance-directory-'));
+  const workspace = path.join(parent, 'workspace');
+  fs.mkdirSync(path.join(workspace, 'artifact.txt'), {recursive: true});
+  try {
+    const result = verifyChecks([{type: 'file', path: 'artifact.txt'}], workspace);
+    assert.equal(result.status, 'failed');
+    assert.match(result.reason, /not a file|directory/i);
+    assert.equal(verifyChecks([{type: 'file', path: 'artifact.txt'}], parent).status, 'failed', 'a directory outside the shape still fails the same way');
+    fs.writeFileSync(path.join(workspace, 'real.txt'), 'x', 'utf8');
+    assert.equal(verifyChecks([{type: 'file', path: 'real.txt'}], workspace).status, 'verified', 'a real file still verifies (control)');
+  } finally {
+    fs.rmSync(parent, {recursive: true, force: true});
+  }
+});
+
+// equals 只比列出来的 key，桩文件（只写那一个键）照样能过；requireKeys 补的是「这些 key 必须在」，
+// 值不比——用来钉住产物结构，同时不绑定具体数值。
+test('json checks can require keys without comparing their values', () => {
+  const parent = fs.mkdtempSync(path.join(evidenceRoot, 'acceptance-requirekeys-'));
+  const workspace = path.join(parent, 'workspace');
+  fs.mkdirSync(workspace);
+  fs.writeFileSync(path.join(workspace, 'report.json'), JSON.stringify({status: 'ok', count: 3, extra: true}), 'utf8');
+  try {
+    assert.equal(verifyChecks([{type: 'json', path: 'report.json', equals: {status: 'ok'}, requireKeys: ['status', 'count']}], workspace).status, 'verified', 'present keys pass and equals still applies');
+    const missing = verifyChecks([{type: 'json', path: 'report.json', requireKeys: ['status', 'summary']}], workspace);
+    assert.equal(missing.status, 'failed', 'a missing required key must fail even when equals is empty');
+    assert.match(missing.reason, /JSON field missing.*summary/i);
+    fs.writeFileSync(path.join(workspace, 'nullable.json'), JSON.stringify({summary: null}), 'utf8');
+    assert.equal(verifyChecks([{type: 'json', path: 'nullable.json', requireKeys: ['summary']}], workspace).status, 'verified', 'a null value still counts as present (existence only)');
+    fs.writeFileSync(path.join(workspace, 'scalar.json'), '"just a string"', 'utf8');
+    assert.equal(verifyChecks([{type: 'json', path: 'scalar.json', requireKeys: ['summary']}], workspace).status, 'failed', 'a non-object JSON value must fail closed');
+    assert.equal(verifyChecks([{type: 'json', path: 'report.json', requireKeys: 'status'}], workspace).status, 'failed', 'a malformed requireKeys is a contract error');
+  } finally {
+    fs.rmSync(parent, {recursive: true, force: true});
+  }
+});

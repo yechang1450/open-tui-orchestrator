@@ -321,3 +321,82 @@ test('a launcher failure is charged to the attempt budget instead of throwing th
   try{fs.rmSync(workspace,{recursive:true,force:true});}catch{}
  }
 });
+
+// 审查 B 第 4 条（2026-10-25 第四轮）：invalid 检查点原来一律写 'Invalid checkpoint'，把两类完全不同的
+// 成因压成一句话 —— 读不到 attempt 文件（证据缺失，补跑可救）与身份不符 / JSON 损坏（被篡改，必须人看）。
+// 判定强度不变（两类都还是 needs-reconciliation），只把 reason 分开，便于人排查。
+test('an invalid checkpoint names its class: missing evidence vs tampered identity',()=>{
+ const dir=fs.mkdtempSync(path.join(family,'invalid-class-'));
+ try{
+  const runId='run-invalid-class',token='tok-B1-a1';
+  const attempt={file:path.join(dir,'attempts','B1','1','attempt.json'),runId,token,number:1,taskIds:['T1']};
+  const build=()=>({runId,blocks:[{key:'B1',taskIds:['T1']}],results:{B1:{status:'failed',endedAt:1,attempts:[attempt]}},taskResults:{T1:{status:'pending'}}});
+  // 1) attempt 文件根本不在盘上 ⇒ 证据缺失
+  const missing=build();
+  runner.collectVerification(missing,{T1:[{type:'file',path:'done.txt'}]},dir);
+  assert.equal(missing.taskResults.T1.status,'needs-reconciliation');
+  assert.match(String(missing.taskResults.T1.reason),/evidence missing \(attempt file unreadable\)/i);
+  // 2) attempt 文件在，但 runId 与账本不符 ⇒ 篡改 / 身份不符
+  fs.mkdirSync(path.dirname(attempt.file),{recursive:true});
+  fs.writeFileSync(attempt.file,JSON.stringify({...attempt,runId:'another-run'}));
+  const mismatched=build();
+  runner.collectVerification(mismatched,{T1:[{type:'file',path:'done.txt'}]},dir);
+  assert.equal(mismatched.taskResults.T1.status,'needs-reconciliation');
+  assert.match(String(mismatched.taskResults.T1.reason),/tampered or mismatched/i);
+  // 3) attempt 文件损坏（JSON 解析失败）也归篡改，而不是「证据缺失」
+  fs.writeFileSync(attempt.file,'{not json');
+  const corrupt=build();
+  runner.collectVerification(corrupt,{T1:[{type:'file',path:'done.txt'}]},dir);
+  assert.equal(corrupt.taskResults.T1.status,'needs-reconciliation');
+  assert.match(String(corrupt.taskResults.T1.reason),/tampered or mismatched/i);
+ }finally{fs.rmSync(dir,{recursive:true,force:true});}
+});
+
+// 审查 B 第 8 条：块级结论被重算覆盖。timeout / popup-failed / blocked 这类是「机器没给到机会」的基础设施
+// 状态，与「跑了但失败」不是同一个真相；只要没有任何一项产出终态检查点，盘上就没有可重算的证据，控制面的
+// status/reason 必须原样保留（原逻辑无条件重算，把它们改写成 failed + 'No durable task checkpoint'）。
+test('an infrastructure block status survives the recheck when no attempt reached a terminal checkpoint',()=>{
+ const dir=fs.mkdtempSync(path.join(family,'infra-status-'));
+ try{
+  const runId='run-infra',token='tok-B2-a1';
+  const attempt={file:path.join(dir,'attempts','B2','1','attempt.json'),runId,token,number:1,taskIds:['T2']};
+  fs.mkdirSync(path.dirname(attempt.file),{recursive:true});
+  fs.writeFileSync(attempt.file,JSON.stringify(attempt));
+  const build=status=>({runId,blocks:[{key:'B2',taskIds:['T2']}],results:{B2:{status,reason:'controller says '+status,endedAt:1,attempts:[attempt]}},taskResults:{T2:{status:'pending'}}});
+  for(const status of ['timeout','popup-failed','preflight-failed','blocked','cancelled']){
+   const sum=build(status);
+   runner.collectVerification(sum,{T2:[{type:'file',path:'done.txt'}]},dir);
+   assert.equal(sum.results.B2.status,status,'a control-plane '+status+' must not be rewritten as failed');
+   assert.equal(sum.results.B2.reason,'controller says '+status);
+   assert.equal(sum.taskResults.T2.status,'pending','nothing is judged when the attempt left no terminal checkpoint');
+  }
+  // 对照：一旦真的产出 completed 检查点，必须照旧按盘上证据重算 —— 保护不等于免检。
+  const cpFile=path.join(path.dirname(attempt.file),'checkpoints','T2.json');
+  fs.mkdirSync(path.dirname(cpFile),{recursive:true});
+  fs.writeFileSync(cpFile,JSON.stringify({id:'T2',runId,token,state:'completed',startedAt:1,updatedAt:2}));
+  fs.writeFileSync(path.join(dir,'done.txt'),'artifact');
+  const real=build('timeout');
+  runner.collectVerification(real,{T2:[{type:'file',path:'done.txt'}]},dir);
+  assert.equal(real.results.B2.status,'verified','a completed checkpoint must still be re-judged from disk');
+  // 同样的终态证据 + 缺产物 ⇒ 仍然 failed（保护不会把失败藏起来）
+  fs.rmSync(path.join(dir,'done.txt'));
+  const bad=build('timeout');
+  runner.collectVerification(bad,{T2:[{type:'file',path:'done.txt'}]},dir);
+  assert.equal(bad.results.B2.status,'failed');
+  assert.match(String(bad.taskResults.T2.reason),/Acceptance file missing/);
+ }finally{fs.rmSync(dir,{recursive:true,force:true});}
+});
+
+// 审查 B 第 9 条：跳过的块原来静默 continue，调用方只看到 pending，分不清「没跑」与「在跑」。
+// 只补一个 skippedReason 留痕，status / success 判定一律不动。
+test('a block that was never started records why the recheck skipped it',()=>{
+ const sum={runId:'r',blocks:[{key:'B1',taskIds:['T1']}],results:{B1:{status:'pending'}},taskResults:{T1:{status:'pending'}}};
+ runner.collectVerification(sum,{T1:[{type:'file',path:'missing'}]},process.cwd());
+ assert.equal(sum.results.B1.status,'pending','skipping must not change the verdict');
+ assert.equal(sum.taskResults.T1.status,'pending');
+ assert.equal(sum.results.B1.skippedReason,'not started (no attempt, no endedAt)');
+ // 对照：真的有过 attempt 的块不留这个痕迹（它被算过，不是「没跑」）
+ const ran={runId:'r',blocks:[{key:'B2',taskIds:['T2']}],results:{B2:{status:'failed',endedAt:1,attempts:[]}},taskResults:{T2:{status:'pending'}}};
+ runner.collectVerification(ran,{T2:[{type:'file',path:'missing'}]},process.cwd());
+ assert.equal('skippedReason' in ran.results.B2,false);
+});

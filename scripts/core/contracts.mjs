@@ -267,10 +267,27 @@ export function verifyChecks(checks,workspace) {
       const file=resolveCheckedPath(check.path);
       if(check.type==='file') {
         if(!fs.existsSync(file))throw new Error('Acceptance file missing: '+file+(String(check.path)!==file?' (check.path="'+check.path+'")':''));
-        const real=realCheckedPath(file);if(!fs.statSync(real).isFile())throw new Error('Not a file: '+file);if(check.sha256&&sha256(real)!==check.sha256)throw new Error('Hash mismatch: '+file);}
+        const real=realCheckedPath(file),stat=fs.statSync(real);
+        // 目录同样能通过 existsSync：显式拒绝，别让「建了个同名目录」算交付。
+        if(stat.isDirectory())throw new Error('Not a file (path is a directory): '+file);
+        if(!stat.isFile())throw new Error('Not a file: '+file);
+        // 验收强度（2026-10-25 审查 B 第 6 条）：只验存在性时 0 字节桩文件也能通过。minBytes 是可选收紧——
+        // 不写就保持旧语义（已落地的 acceptance 不能一夜全红），写了就真比大小；写法不合契约则 fail-closed。
+        if(check.minBytes!==undefined){
+          if(typeof check.minBytes!=='number'||!Number.isFinite(check.minBytes)||check.minBytes<0)throw new Error('Acceptance minBytes must be a non-negative number: '+file);
+          if(stat.size<check.minBytes)throw new Error('Acceptance file too small: '+file+' (size='+stat.size+' minBytes='+check.minBytes+')');
+        }
+        if(check.sha256&&sha256(real)!==check.sha256)throw new Error('Hash mismatch: '+file);}
       else if(check.type==='json') {
         if(!fs.existsSync(file))throw new Error('Acceptance file missing: '+file+(String(check.path)!==file?' (check.path="'+check.path+'")':''));
         const real=realCheckedPath(file);let value;try{value=JSON.parse(fs.readFileSync(real,'utf8').replace(/^\uFEFF/,''));}catch(e){throw new Error('Acceptance JSON parse failed: '+file+': '+e.message);}
+        // requireKeys（同一条审查）：equals 只比列出来的 key，桩文件写一个键就能过；requireKeys 只要求
+        // 「这些 key 必须在」，值不比——钉住产物结构，又不绑定具体数值。非对象值明确失败，不拿 `in` 抛 TypeError。
+        if(check.requireKeys!==undefined){
+          if(!Array.isArray(check.requireKeys)||check.requireKeys.some(key=>typeof key!=='string'))throw new Error('Acceptance requireKeys must be an array of strings: '+file);
+          if(!value||typeof value!=='object'||Array.isArray(value))throw new Error('JSON value is not an object: '+file);
+          for(const key of check.requireKeys)if(!Object.hasOwn(value,key))throw new Error('JSON field missing: '+file+' key="'+key+'" (required by requireKeys)');
+        }
         for(const [key,expected] of Object.entries(check.equals||{})){
           if(!(key in value))throw new Error('JSON field missing: '+file+' key="'+key+'" expected='+JSON.stringify(expected));
           if(JSON.stringify(value[key])!==JSON.stringify(expected))throw new Error('JSON mismatch: '+file+' key="'+key+'" expected='+JSON.stringify(expected)+' actual='+JSON.stringify(value[key]));}}
