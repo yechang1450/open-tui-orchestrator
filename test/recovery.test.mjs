@@ -5,7 +5,7 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {spawn, spawnSync} from 'node:child_process';
 import {recordCheckpoint} from '../scripts/core/checkpoint.mjs';
-import {powershellExe} from '../scripts/core/contracts.mjs';
+import {powershellExe,bootId} from '../scripts/core/contracts.mjs';
 import {CODEX_CLI_SKIP} from './helpers/external.mjs';
 const runner=await import('../scripts/core/runner.mjs');
 const family=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../temp');
@@ -399,4 +399,35 @@ test('a block that was never started records why the recheck skipped it',()=>{
  const ran={runId:'r',blocks:[{key:'B2',taskIds:['T2']}],results:{B2:{status:'failed',endedAt:1,attempts:[]}},taskResults:{T2:{status:'pending'}}};
  runner.collectVerification(ran,{T2:[{type:'file',path:'missing'}]},process.cwd());
  assert.equal('skippedReason' in ran.results.B2,false);
+});
+
+
+// 2026-10-26（H1）：bootId 必须是「同一次开机内恒定」的，不能每次现算。
+// 原实现 `floor((Date.now()-uptime*1000)/1000)` 被当跨进程常量用 `!==` 比对，
+// 墙钟一被校正（w32time 步进/休眠唤醒）就变 ⇒ 活租约被判「上次开机」而回收（释放别人的锁）。
+test('bootId stays constant across a wall-clock jump (the artifact, not the formula, is the source of truth)',()=>{
+ const before=bootId();
+ assert.equal(bootId(),before,'two calls in one process must agree');
+ const realNow=Date.now;
+ try{
+  Date.now=()=>realNow()+30000;   // 模拟墙钟向前跳 30s
+  assert.equal(bootId(),before,'a 30s wall-clock jump must NOT change bootId');
+  Date.now=()=>realNow()-30000;   // 再向后跳
+  assert.equal(bootId(),before,'a backward jump must NOT change bootId either');
+ }finally{Date.now=realNow;}
+ assert.equal(bootId(),before,'and it is still the same after restoring the clock');
+});
+
+// 同一开机的不同进程必须算出同一个值（租约/claim 是跨进程比对的）。
+test('bootId is identical across processes in the same boot',()=>{
+ const one=bootId();
+ const r=spawnSync(process.execPath,['--input-type=module','-e',
+  "const m = await import('" + new URL('../scripts/core/contracts.mjs',import.meta.url).href + "'); console.log(m.bootId());"
+ ],{encoding:'utf8',windowsHide:true,timeout:30000});
+ assert.equal(r.status,0,'child failed: '+(r.stderr||r.stdout||'(no output)'));
+ // 子进程的 stdout 可能混入别的东西：只取最后一行非空内容里的数字。
+ const got=Number((r.stdout||'').trim().split(/\r?\n/).filter(Boolean).pop());
+ assert.equal(got,one,'a child process must read the same bootId — parent=' + JSON.stringify(one) + ' child=' + JSON.stringify(got)
+   + ' stdout=' + JSON.stringify((r.stdout||'').slice(-200)) + ' stderr=' + JSON.stringify((r.stderr||'').slice(-200))
+   + ' LOCALAPPDATA=' + JSON.stringify(process.env.LOCALAPPDATA||null));
 });

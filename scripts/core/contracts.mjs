@@ -21,13 +21,67 @@ export const TERMINAL = new Set(['verified','failed','blocked','cancelled','awai
 // 它把别人已经占住的内存也算作自己的余量。为可测试而独立成函数。
 // fresh 规划与 --resume-run 的恢复校验共用同一容量（contracts 放置以避免 recovery↔sdk 循环依赖）。
 // 注意：恢复校验里的"块数上界"用**总内存**推，保持可复算稳定（见 recovery.mjs）。
-// 开机标识（2026-09-18 断电恢复 P0）：用 uptime 反推开机时刻，秒级取整——同一次开机的所有进程算出
-// 同一个值，跨重启必变。PID 跨重启会重用，时间戳会被改，只有它能确定性判定“这条记录来自上一次开机”。
-export function bootId() { return Math.floor((Date.now() - os.uptime() * 1000) / 1000); }
+// 开机标识（2026-09-18 断电恢复 P0；2026-10-26 文件化重写）：
+// 原实现是 `Math.floor((Date.now() - os.uptime()*1000)/1000)` —— 每次现算。
+// 它被当成「跨进程稳定的常量」用 `!==` 精确比对（leases.mjs:220/257），可是**墙钟一被校正**
+// （w32time 相位步进 / 休眠唤醒 / 长时 slew）这个值就变 ⇒ 活租约与活 claim 被判成「上次开机」而回收。
+// 失效方向不是拒绝服务，而是**释放别人的锁**：容量双计、同键块双开、同一 run 两个 controller。
+//
+// 现在：首次需要时原子创建 `<LOCALAPPDATA>/hermes-orchestrator/boot-id.txt`（内容 `{id, uptimeSec, wallMs}`），
+// 之后所有进程只读文件 ⇒ 同一次开机恒等、跨重启必变。
+// 注意：**不能**放在 workspace 的 state 目录里 —— bootId 必须跨 workspace 一致，否则同一个开机下
+// 不同工作区的租约互相对不上，等于没修。
+// 文件失效判据：当前 os.uptime() **小于**记录值（重启过），或与推导值相差超过 24h（文件是旧的）。
+const BOOT_ID_DRIFT_LIMIT_MS = 24 * 3600 * 1000;
+function bootIdFile() {
+  const base = process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local');
+  return path.join(base, 'hermes-orchestrator', 'boot-id.txt');
+}
+export function bootId() {
+  const derived = Math.floor((Date.now() - os.uptime() * 1000) / 1000);
+  const file = bootIdFile();
+  const readRecord = () => {
+    try {
+      const rec = JSON.parse(fs.readFileSync(file, 'utf8'));
+      if (!Number.isInteger(rec?.id) || !Number.isFinite(rec?.uptimeSec)) return null;
+      // 重启过：当前 uptime 比记录值还小（同一次开机 uptime 只会增大）。
+      if (os.uptime() + 1 < rec.uptimeSec) return null;
+      // 文件太旧（跨了重启但没被覆盖，或文件被拷来）：与当前推导值相差过大。
+      if (Math.abs(rec.id - derived) * 1000 > BOOT_ID_DRIFT_LIMIT_MS) return null;
+      return rec.id;
+    } catch { return null; }
+  };
+  const existing = readRecord();
+  if (existing !== null) return existing;
+  // 创建：'wx' 保证只有一个进程写成功；已存在或写失败就再读一次（对方可能刚写完）。
+  try {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    const fd = fs.openSync(file, 'wx');
+    try { fs.writeFileSync(fd, JSON.stringify({ id: derived, uptimeSec: os.uptime(), wallMs: Date.now() })); }
+    finally { try { fs.closeSync(fd); } catch { /* already closed */ } }
+    return derived;
+  } catch {
+    const again = readRecord();
+    return again !== null ? again : derived;
+  }
+}
 export function computeMaxWindows(availableMemoryMb) {
   const mb = Number(availableMemoryMb);
   if (!Number.isFinite(mb) || mb <= 0) return 1;
   return Math.max(1, Math.floor(mb / 1000) * 2);
+}
+// 验收产物是否早于本次尝试的开始（旧产物 ⇒ 不能作为「这次做完了」的证据）。
+// 只对 file 类判据生效：json/command 的"新鲜度"没有可靠口径，宁可漏判也不误伤。
+// 2026-10-26：从 runner.mjs 移到 contracts，让 recovery.mjs 也能用同一条判据 ——
+// 否则 recoveryTasks（resume 路径）与 collectVerification（收尾路径）会对同一份账本给出两个真相。
+export function staleEvidence(checks, workspace, since) {
+  const stale = [];
+  if (!Number.isFinite(since) || since <= 0) return stale;
+  for (const c of checks || []) {
+    if (c.type !== 'file') continue;
+    try { if (fs.statSync(path.resolve(workspace, c.path)).mtimeMs < since) stale.push(c.path); } catch { /* missing files are not "stale" */ }
+  }
+  return stale;
 }
 
 export function summaryComplete(sum, strict = true) {

@@ -1,4 +1,4 @@
-import {levelWaves,verifyChecks,requestTasks,computeMaxWindows} from './contracts.mjs';
+import {levelWaves,verifyChecks,requestTasks,computeMaxWindows,staleEvidence} from './contracts.mjs';
 import os from 'node:os';
 import path from 'node:path';
 import {realpathWithMissing,containedBy} from './path-security.mjs';
@@ -95,7 +95,13 @@ export function recoveryTasks(tasks,checkpoints,checks,workspace) {
     if(!cp){result.pending.push(task.id);continue;}
     if(cp.state==='invalid'){result.uncertain.push(task.id);result.results[task.id]={status:'needs-reconciliation',reason:'Invalid checkpoint',checkpoint:cp};continue;}
     const verification=verifyChecks(policy.checks,workspace);
-    if(verification.status==='verified'){result.verified.push(task.id);result.results[task.id]={...verification,checkpoint:cp};}
+    // 2026-10-26（M5）：与 collectVerification 共用同一条新鲜度判据 —— checkpoint 停在 started 而
+    // 验收通过的产物早于本次 startedAt 时，那是「上一代留下的旧产物」，不能算本次完成。
+    // 不同步的后果（审查实测指出）：resume 把任务判 verified 直接跳过 → runner 的等待循环据此收窗 →
+    // **杀掉还在写文件的单元**；收尾时同一账本又被 collectVerification 判 needs-reconciliation → run 假失败。
+    const stale=(verification.status==='verified'&&cp.state==='started')?staleEvidence(policy.checks,workspace,cp.startedAt):[];
+    if(verification.status==='verified'&&stale.length===0){result.verified.push(task.id);result.results[task.id]={...verification,checkpoint:cp};}
+    else if(stale.length){result.uncertain.push(task.id);result.results[task.id]={status:'needs-reconciliation',reason:'Task started but evidence predates this attempt: '+stale.join(', '),verification,checkpoint:cp};}
     else if(policy.retrySafe){result.pending.push(task.id);}
     else {result.uncertain.push(task.id);result.results[task.id]={status:'needs-reconciliation',reason:'Started task has no proven result and is not declared safe to retry',hint:'Declare {"checks":[...],"retrySafe":true} for this task if it is idempotent so the engine auto-retries instead of reporting; otherwise inspect the workspace for the product (it may exist outside the checked path) and the checkpoint under attempts/<block>/<n>/checkpoints/.',verification,checkpoint:cp};}
   }

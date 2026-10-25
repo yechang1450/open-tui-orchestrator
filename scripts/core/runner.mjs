@@ -3,7 +3,10 @@ import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import {fileURLToPath} from 'node:url';
-import {CORE_VERSION,ledgerPlan,levelWaves,verifyChecks,summaryComplete,TERMINAL,canonicalKey,requestTasks,acceptanceKeyDiff,bootId,powershellExe} from './contracts.mjs';
+import {CORE_VERSION,ledgerPlan,levelWaves,verifyChecks,summaryComplete,TERMINAL,canonicalKey,requestTasks,acceptanceKeyDiff,bootId,powershellExe,staleEvidence} from './contracts.mjs';
+// 2026-10-26：staleEvidence 已移到 contracts.mjs（recoveryTasks 要用同一条判据，直接 import runner 会循环依赖）。
+// 这里 re-export，保证既有调用方与 test/recovery.test.mjs 的 runner.staleEvidence 仍然可用。
+export {staleEvidence};
 import {coordinatorDir,reserve,bind,release,prepare,atomicJson,launcherIdentity,processSnapshot,sameProcess,claimRun,releaseRun,waitBackoffMs} from './leases.mjs';
 import {scheduleReady,recoveryTasks,taskPolicy,validateRecoverySummary} from './recovery.mjs';
 import {readCheckpoints} from './checkpoint.mjs';
@@ -227,18 +230,6 @@ function blockStatus(ids,results) {
   if(statuses.includes('needs-reconciliation'))return 'needs-reconciliation';
   if(statuses.includes('awaiting-verification'))return 'awaiting-verification';
   return 'failed';
-}
-// 验收产物是否早于本次尝试的开始（旧产物 ⇒ 不能作为「这次做完了」的证据）。
-// 只对 file 类判据生效：json/command 的"新鲜度"没有可靠口径，宁可漏判也不误伤。
-// 导出以便直接回归（collectVerification 走真实 checkpoint 文件，测这条语义太重）。
-export function staleEvidence(checks,workspace,since){
-  const stale=[];
-  if(!Number.isFinite(since)||since<=0)return stale;
-  for(const c of checks||[]){
-    if(c.type!=='file')continue;
-    try{if(fs.statSync(path.resolve(workspace,c.path)).mtimeMs<since)stale.push(c.path);}catch{}
-  }
-  return stale;
 }
 export function collectVerification(sum,checks,workspace) {
   for(const b of sum.blocks) {

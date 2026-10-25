@@ -550,7 +550,12 @@ function readSavedBlockCount() {
     const n = JSON.parse(readFileSync(p, 'utf8'))?.blocks?.length;
     if (Number.isInteger(n) && n > 0) return n;
   } catch (error) {
-    if (error?.code !== 'ENOENT') throw error;
+    // 只对 ENOENT 静默（首次运行 / 无存档）。
+    // 2026-10-26：这里**不能抛** —— 半截 JSON 抛的是 SyntaxError，一抛就绕过了 --verify-run /
+    // --resume-run 统一的 `Invalid run ledger: …summary.json` 话术，变成裸异常（实测把
+    // boundaries-robustness 的 half-ledger 用例弄红）。账本损坏由调用方的账本校验负责报，
+    // 这里只留一条 stderr 提示，然后走兜底值。
+    if (error?.code !== 'ENOENT') console.warn('[orchestrator] saved block count unreadable: ' + (error?.message || String(error)));
   }
   return Math.max(1, Number(process.env.ORCH_MAX_WINDOWS || 0) || 4);
 }
