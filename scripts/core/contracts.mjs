@@ -356,3 +356,38 @@ export function verifyChecks(checks,workspace) {
     return {status:'verified',evidence};
   } catch(e){return {status:'failed',reason:e.message};}
 }
+
+// collect EVERY descendant, and kill each PID individually (no reliance on taskkill /T reaching the
+// whole tree). The launcher itself is never in the walk's kill set; $PID (the watchdog's own job
+// process) is always excluded; when the list is empty (codex already exited on its own) nothing is
+// killed, which preserves the "never force-kill launcher / skip if codex exited" safety boundaries.
+export function psKillDescendantsLines() {
+  return [
+    "$ErrorActionPreference = 'SilentlyContinue'",
+    "$known=@{}; $cutoff=@{}; $total=0; $victims=New-Object 'System.Collections.Generic.List[int]'; $victimSeen=@{}",
+    "for($pass=0;$pass -lt 3;$pass++) {",
+    "$all = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue",
+    "if(-not $known.ContainsKey($root)){$known[$root]=$all|Where-Object ProcessId -eq $root}",
+    "$queue = New-Object 'System.Collections.Generic.Queue[int]'",
+    "$seen = @{}",
+    "$seen[$root] = $true",
+    "foreach($k in @($known.Keys)){$queue.Enqueue([int]$k)}",
+    "while ($queue.Count -gt 0) {",
+    "  $cur = $queue.Dequeue()",
+    "  foreach ($pr in $all) {",
+    "    if ($pr.ProcessId -ne $PID -and $pr.ParentProcessId -eq $cur -and -not $seen.ContainsKey($pr.ProcessId) -and $known[$cur] -and $pr.CreationDate -ge $known[$cur].CreationDate -and (-not $cutoff.ContainsKey($cur) -or $pr.CreationDate.ToUniversalTime() -le $cutoff[$cur])) {",
+    "      $seen[$pr.ProcessId] = $true",
+    "      $known[[int]$pr.ProcessId]=$pr",
+    "      if(-not $victimSeen.ContainsKey($pr.ProcessId)){$victimSeen[$pr.ProcessId]=$true;$victims.Add($pr.ProcessId)|Out-Null}",
+    "      $queue.Enqueue($pr.ProcessId)",
+    "    }",
+    "  }",
+    "}",
+    "if($pass -lt 2){Start-Sleep -Milliseconds 150;continue}",
+    "$victims.Reverse()",
+    "foreach ($v in $victims) { $before=$all | Where-Object ProcessId -eq $v; $now=Get-CimInstance Win32_Process -Filter ('ProcessId='+$v); if($now -and $now.CreationDate -eq $before.CreationDate -and $now.CommandLine -eq $before.CommandLine -and $now.Name -eq $before.Name){$cutoff[[int]$v]=[DateTime]::UtcNow;taskkill /PID $v /F 2>$null | Out-Null} }",
+    "$total += $victims.Count",
+    "}",
+    "Write-Output $total",
+  ];
+}

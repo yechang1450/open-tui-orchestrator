@@ -2,10 +2,11 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import {spawn} from 'node:child_process';
+import {spawn,spawnSync} from 'node:child_process';
 import {StringDecoder} from 'node:string_decoder';
 import {expandUnitArgs} from './unit-command.mjs';
 import {nativeArgumentLines} from './native-argv.mjs';
+import {psKillDescendantsLines,powershellExe} from './contracts.mjs';
 
 // 调用方自助通道（caller-driven）第二半：单元运行时。
 // 与 print-class 画像同构的启动器契约（tee 日志 + token 行抓取 + result 文件 + self-closed 标记），
@@ -14,6 +15,22 @@ import {nativeArgumentLines} from './native-argv.mjs';
 
 const quote = (s) => "'" + String(s).replaceAll("'", "''") + "'";
 const TOKEN_RE = /【本块唯一标识】\s*([A-Za-z0-9][A-Za-z0-9_-]*)/;
+
+// 2026-10-26（P1）：超时只 child.kill() 在 Windows 上等于 TerminateProcess 直接子进程。planner 的
+// unit.bin 若自身带子进程（MCP server / shell 工具 / node 壳），孙进程会成孤儿继续写 workspace；
+// 下一次 attempt 再起一个 planner ⇒ 两个 planner 同改一批文件，而对外只报「超时」。
+// 复用 orchestrate-sdk 那套「按 ParentProcessId 树逐个 taskkill」的走法（已下沉到 contracts.mjs）：
+// 它不依赖 taskkill /T（/T 会连带杀掉不相干的重用 pid），并用 CreationDate/CommandLine 复核防 pid 复用。
+function killProcessTree(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return 0;
+  try {
+    const script = ['$root=' + pid, ...psKillDescendantsLines()].join('\r\n');
+    const r = spawnSync(powershellExe(), ['-NoProfile', '-NonInteractive', '-Command', script],
+      {windowsHide: true, encoding: 'utf8', timeout: 20000});
+    const n = Number(String(r.stdout || '').trim().split(/\r?\n/).filter(Boolean).pop());
+    return Number.isFinite(n) ? n : 0;
+  } catch { return 0; }
+}
 
 export async function runUnitPlanner(config, prompt, cwd) {
   const unit = config?.unit || config;   // 宿主 config 里画像挂在 unit 下；直连测试可直接传画像
@@ -46,8 +63,11 @@ export async function runUnitPlanner(config, prompt, cwd) {
       timer = setTimeout(() => {
         if (child.exitCode !== null || child.signalCode !== null) return;
         timedOut = true;
+        // 先温柔一次，再连整棵树一起收（P1）。
         try { child.kill(); } catch { /* already gone */ }
         killTimer = setTimeout(() => {
+          const reaped = killProcessTree(child.pid);
+          if (reaped > 0) errorText += '[runtime] reaped ' + reaped + ' descendant process(es) of planner ' + child.pid + '\n';
           try { child.kill('SIGKILL'); } catch { /* already gone */ }
           killTimer = setTimeout(() => finish(exitCode), 5000);
         }, 5000);
@@ -93,7 +113,7 @@ export function writeUnitLauncher(config, { key, prompt, suffix, workspace, temp
     : `& ${quote(unit.bin)} @agentArgs 2>&1 | ForEach-Object { if ($_ -is [System.Management.Automation.ErrorRecord]) { $_.TargetObject } else { $_ } } | Tee-Object -FilePath $log`;
   const body = [
     "$ErrorActionPreference = 'Continue'",
-    'trap { exit 0 }',
+    'trap { try { Write-Result 3 $_.Exception.Message } catch { }; exit 0 }',
     `$PID | Set-Content -LiteralPath ${quote(pidf)} -Encoding UTF8`,
     '[Console]::OutputEncoding = [System.Text.Encoding]::UTF8',
     '$OutputEncoding = [System.Text.Encoding]::UTF8',
@@ -122,7 +142,9 @@ export function writeUnitLauncher(config, { key, prompt, suffix, workspace, temp
     "$agentArgs = @(" + args.map(quote).join(',') + ')',
     ...nativeArgumentLines(),
     invoke,
-    '$code = $LASTEXITCODE',
+    // 2026-10-26（P2）：& <bad bin> 在 Continue 下只是非终止错误，$LASTEXITCODE 仍是 $null，
+    // 而 param([int]$code) 会把它化成 0 —— 于是"bin 不存在"被写成 __EXIT__:0 的成功结果。
+    '$code = $LASTEXITCODE; if ($null -eq $code) { $code = -1 }',
     "$report = ''",
     "if (Test-Path -LiteralPath $log) {",
     "  $lines = Get-Content -LiteralPath $log -Encoding UTF8 -ErrorAction SilentlyContinue",

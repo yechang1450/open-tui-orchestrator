@@ -128,7 +128,17 @@ export function readBoard(workspace, runId, stateDir) {
 // 机器可调用契约：未知 run 不许无限挂起。首次读到看板前有一个上界（graceMs /
 // ORCH_WATCH_GRACE_MS，默认 60s——覆盖「--run-windows 先规划、后建 run 目录」的竞态），
 // 超时即 fail-closed 一行诊断；已读到的运行中途丢 summary.json（超过瞬时重写容忍窗）报错，不静默停摆。
-export async function watchRun({ workspace, runId, stateDir, intervalMs = 800, jsonl = false, out = process.stdout, graceMs = Number(process.env.ORCH_WATCH_GRACE_MS ?? 60000), missToleranceMs = Number(process.env.ORCH_WATCH_MISS_TOLERANCE_MS ?? 6000) }) {
+// 2026-10-26（P3）：`Number(process.env.X ?? 默认)` 有个坑 —— 变量**存在但为空串**时 `Number('')===0`，
+// 能通过 `>=0` 校验，于是「未设置」被当成 0。实测后果：grace=0 让 --watch 对「先规划、后建 run 目录」
+// 的竞态立刻抛 Run not found；missTolerance=0 让 atomicJson 的 rm+rename 窗口里一次读空就终止监视
+// （而那个窗口正是为该容差存在的）。空串一律视为未设置。
+function envNumber(name, fallback) {
+  const raw = process.env[name];
+  if (raw === undefined || String(raw).trim() === '') return fallback;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : fallback;
+}
+export async function watchRun({ workspace, runId, stateDir, intervalMs = 800, jsonl = false, out = process.stdout, graceMs = envNumber('ORCH_WATCH_GRACE_MS', 60000), missToleranceMs = envNumber('ORCH_WATCH_MISS_TOLERANCE_MS', 6000) }) {
   const write = s => out.write(s);
   const tty = !!out.isTTY && !jsonl;
   const dir = runDirectory(workspace, runId, stateDir);

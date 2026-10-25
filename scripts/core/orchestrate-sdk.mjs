@@ -75,6 +75,7 @@ import {runClaudePlanner,writeClaudeLauncher,waitClaudeResult} from './claude-ru
 import {runOpenClawPlanner,writeOpenClawLauncher,waitOpenClawResult} from './openclaw-runtime.mjs';
 import {runProfilePlanner,writeProfileLauncher,waitProfileResult} from './print-runtime.mjs';
 import {runUnitPlanner,writeUnitLauncher} from './unit-runtime.mjs';
+import {psKillDescendantsLines} from './contracts.mjs';
 import {spawnInactiveWindow} from './inactive-window.mjs';
 import {ensureRunGuardian} from './run-guardian.mjs';
 import {lockedForMaintenance,readMaintenanceLock,MAINTENANCE_MESSAGE} from './maintenance-lock.mjs';
@@ -1224,42 +1225,9 @@ async function spawnHeadlessWithRetry(lp, title, pidf, maxRetry = 3, token, rese
 
 // Shared PowerShell descendant-kill routine used by BOTH the launcher watchdog and closeWindowByPid:
 // snapshot Win32_Process once, then walk the ParentProcessId chain starting at the launcher ($root) to
-// collect EVERY descendant, and kill each PID individually (no reliance on taskkill /T reaching the
-// whole tree). The launcher itself is never in the walk's kill set; $PID (the watchdog's own job
-// process) is always excluded; when the list is empty (codex already exited on its own) nothing is
-// killed, which preserves the "never force-kill launcher / skip if codex exited" safety boundaries.
-function psKillDescendantsLines() {
-  return [
-    "$ErrorActionPreference = 'SilentlyContinue'",
-    "$known=@{}; $cutoff=@{}; $total=0; $victims=New-Object 'System.Collections.Generic.List[int]'; $victimSeen=@{}",
-    "for($pass=0;$pass -lt 3;$pass++) {",
-    "$all = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue",
-    "if(-not $known.ContainsKey($root)){$known[$root]=$all|Where-Object ProcessId -eq $root}",
-    "$queue = New-Object 'System.Collections.Generic.Queue[int]'",
-    "$seen = @{}",
-    "$seen[$root] = $true",
-    "foreach($k in @($known.Keys)){$queue.Enqueue([int]$k)}",
-    "while ($queue.Count -gt 0) {",
-    "  $cur = $queue.Dequeue()",
-    "  foreach ($pr in $all) {",
-    "    if ($pr.ProcessId -ne $PID -and $pr.ParentProcessId -eq $cur -and -not $seen.ContainsKey($pr.ProcessId) -and $known[$cur] -and $pr.CreationDate -ge $known[$cur].CreationDate -and (-not $cutoff.ContainsKey($cur) -or $pr.CreationDate.ToUniversalTime() -le $cutoff[$cur])) {",
-    "      $seen[$pr.ProcessId] = $true",
-    "      $known[[int]$pr.ProcessId]=$pr",
-    "      if(-not $victimSeen.ContainsKey($pr.ProcessId)){$victimSeen[$pr.ProcessId]=$true;$victims.Add($pr.ProcessId)|Out-Null}",
-    "      $queue.Enqueue($pr.ProcessId)",
-    "    }",
-    "  }",
-    "}",
-    "if($pass -lt 2){Start-Sleep -Milliseconds 150;continue}",
-    "$victims.Reverse()",
-    "foreach ($v in $victims) { $before=$all | Where-Object ProcessId -eq $v; $now=Get-CimInstance Win32_Process -Filter ('ProcessId='+$v); if($now -and $now.CreationDate -eq $before.CreationDate -and $now.CommandLine -eq $before.CommandLine -and $now.Name -eq $before.Name){$cutoff[[int]$v]=[DateTime]::UtcNow;taskkill /PID $v /F 2>$null | Out-Null} }",
-    "$total += $victims.Count",
-    "}",
-    "Write-Output $total",
-  ];
-}
 
-// computeMaxWindows 已下沉至 contracts.mjs（fresh 规划与 resume 校验共用），此处经 import 复用。
+// psKillDescendantsLines 与 computeMaxWindows 已下沉至 contracts.mjs（unit-runtime 也要用，
+// 而 orchestrate-sdk 已 import unit-runtime —— 反向 import 会成环）。
 
 // Capacity is a planning constraint, not a queue of extra windows.
 export function capPlanBlocks(input, capacity) {
