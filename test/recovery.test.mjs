@@ -278,3 +278,46 @@ test('an adapter terminal failure never overwrites a block already re-verified f
   assert.equal(run.sum.success,true,JSON.stringify(run.sum.results));
  }finally{run.dispose();}
 });
+
+
+// 2026-10-25（审查 B 第 3 条，产品语义定版）：checkpoint 停在 started 时，「验收通过」不能直接采信 ——
+// 很可能是上一次尝试留下的旧产物。要求 file 类产物的 mtime 晚于本次 checkpoint.startedAt，
+// 否则降级为 needs-reconciliation（交给人看），而不是假 verified。
+test('stale evidence predating the attempt is not accepted as this attempt\'s result',()=>{
+ const ws=fs.mkdtempSync(path.join(family,'stale-'));
+ try{
+  assert.equal(typeof runner.staleEvidence,'function','staleEvidence must be exported for direct regression');
+  const fresh=path.join(ws,'fresh.txt'),old=path.join(ws,'old.txt');
+  fs.writeFileSync(fresh,'new');fs.writeFileSync(old,'old');
+  const t0=Date.now();
+  fs.utimesSync(old,new Date(t0-60000),new Date(t0-60000));
+  const checks=[{type:'file',path:'fresh.txt'},{type:'file',path:'old.txt'},{type:'json',path:'fresh.txt',equals:{}}];
+  assert.deepEqual(runner.staleEvidence(checks,ws,t0-1000),['old.txt'],'only the pre-existing file counts as stale');
+  assert.deepEqual(runner.staleEvidence(checks,ws,0),[],'without a start time nothing is downgraded (never over-reject)');
+  assert.deepEqual(runner.staleEvidence([{type:'file',path:'missing.txt'}],ws,t0),[],'a missing file is not "stale" (verifyChecks already fails it)');
+ }finally{fs.rmSync(ws,{recursive:true,force:true});}
+});
+
+
+// 2026-10-25（F5 翻案）：launcher 构造失败必须计入 attempt 预算，而不是把整块直接 throw 掉。
+// 第一次抛「disk full」，第二次用真实 launcher —— 期望重试成功、两条 attempt 都在账本上、第一条带 error。
+test('a launcher failure is charged to the attempt budget instead of throwing the run away (F5)',async()=>{
+ fs.mkdirSync(family,{recursive:true});
+ const workspace=fs.mkdtempSync(path.join(family,'launcher-fail-')),coordinator=path.join(workspace,'temp','coordinator');
+ const acceptance=path.join(workspace,'acceptance.json');
+ fs.writeFileSync(acceptance,JSON.stringify({T001:[{type:'file',path:'done.txt'}]}));
+ const {hooks,children}=realUnitHooks({workspace,coordinator});
+ const realLauncher=hooks.launcher;let calls=0;
+ hooks.launcher=(...args)=>{if(++calls===1)throw new Error('disk full');return realLauncher(...args);};
+ try{
+  const sum=await runner.runWindows('执行甲',hooks,{workspace,capacity:8,runId:'launcher-fail',acceptanceFile:acceptance,auth:'test',coordinator,maxAttempts:2});
+  assert.equal(calls,2,'the launcher must be retried once within the attempt budget');
+  assert.equal(sum.success,true,'the retried attempt must succeed');
+  assert.equal(sum.results.B1.attempts.length,2,'both attempts stay on the ledger');
+  assert.match(String(sum.results.B1.attempts[0].error),/disk full/,'the failed attempt names its cause');
+  assert.ok(Number.isFinite(sum.results.B1.endedAt),'the block still gets endedAt');
+ }finally{
+  for(const c of children)if(c.exitCode===null)try{c.kill();}catch{}
+  try{fs.rmSync(workspace,{recursive:true,force:true});}catch{}
+ }
+});

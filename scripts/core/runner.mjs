@@ -218,6 +218,18 @@ function blockStatus(ids,results) {
   if(statuses.includes('awaiting-verification'))return 'awaiting-verification';
   return 'failed';
 }
+// 验收产物是否早于本次尝试的开始（旧产物 ⇒ 不能作为「这次做完了」的证据）。
+// 只对 file 类判据生效：json/command 的"新鲜度"没有可靠口径，宁可漏判也不误伤。
+// 导出以便直接回归（collectVerification 走真实 checkpoint 文件，测这条语义太重）。
+export function staleEvidence(checks,workspace,since){
+  const stale=[];
+  if(!Number.isFinite(since)||since<=0)return stale;
+  for(const c of checks||[]){
+    if(c.type!=='file')continue;
+    try{if(fs.statSync(path.resolve(workspace,c.path)).mtimeMs<since)stale.push(c.path);}catch{}
+  }
+  return stale;
+}
 export function collectVerification(sum,checks,workspace) {
   for(const b of sum.blocks) {
     const e=sum.results[b.key];if(!e)continue;
@@ -234,7 +246,20 @@ export function collectVerification(sum,checks,workspace) {
     for(const id of b.taskIds) {
       const cp=cps[id];if(!cp){sum.taskResults[id]={status:'failed',reason:'No durable task checkpoint'};continue;}
       if(cp.state==='invalid'){sum.taskResults[id]={status:'needs-reconciliation',reason:'Invalid checkpoint',checkpoint:cp};continue;}
-      const check=verifyChecks(taskPolicy(checks[id]).checks,workspace);
+      const checksFor=taskPolicy(checks[id]).checks;
+      const check=verifyChecks(checksFor,workspace);
+      // 2026-10-25（审查 B 第 3 条，产品语义定版）：checkpoint 停在 started 说明这项任务没有走到
+      // completed —— 此时「验收通过」很可能来自上一次尝试留下的旧产物或部分交付。原逻辑直接采信
+      // verified，等于让「没写完但文件在」通过。现在要求 file 类产物的 mtime 晚于本次 checkpoint 的
+      // startedAt；不满足就降级为 needs-reconciliation（交给人看，而不是假 verified）。
+      // 拿不到 startedAt（老账本/异常）时不降级：宁可漏判也不误伤。
+      if(check.status==='verified'&&cp.state==='started'){
+        const stale=staleEvidence(checksFor,workspace,cp.startedAt);
+        if(stale.length){
+          sum.taskResults[id]={status:'needs-reconciliation',reason:'Task started but evidence predates this attempt: '+stale.join(', '),verification:check,checkpoint:cp};
+          continue;
+        }
+      }
       sum.taskResults[id]=check.status==='verified'?{...check,checkpoint:cp}:
         cp.state==='started'?{status:'needs-reconciliation',reason:'Task started but result is unproven',verification:check,checkpoint:cp}:{...check,checkpoint:cp};
     }
@@ -498,7 +523,21 @@ export async function runWindows(request,hooks,options={}) {
             recovery.pending.map(id=>`任务 ${id}\n开始前：${command(id,'started')}\n原始任务：${tasks.find(t=>t.id===id).prompt}\n完成自验后：${command(id,'completed')}`).join('\n\n')+
             '\n全部待办完成后，最后仅输出 __ORCH_DONE__ '+token;
           try{la=hooks.launcher(r.key,hooks.prompt(body,token),runId+'-a'+number);}
-          catch(error){await coordinate(()=>release(coordinator,leaseId),deadline);throw error;}
+          catch(error){
+            // 2026-10-25（F5，翻案）：launcher 构造失败（磁盘满、模板写不出、pid 文件被占）原先直接
+            // throw，绕过 attempt/transient 预算 —— 整块判死，调用方收到一个「失败」却不知道本来可重试。
+            // OTUI 是给 Agent 用的通用工具，这个代价比我原先估的高。现在：attempt 已记账（上面 push 过），
+            // 把错误写进该 attempt、释放租约，然后按既有预算走循环 —— 预算够就重试，不够才判死（判死走
+            // mark()，带 endedAt）。不递减 attemptsThisController：launcher 失败也算一次尝试，避免死循环。
+            const msg='launcher: '+(error&&error.message?error.message:String(error));
+            active.error=msg;active.failedAt=Date.now();
+            try{atomicJson(attemptFile,active);}catch{}
+            await coordinate(()=>release(coordinator,leaseId),deadline);
+            if(attemptsThisController>=limit){mark(r,'failed','Launcher failed: '+msg);return;}
+            console.warn('[run] '+r.key+' launcher failed ('+msg+'); retrying within the attempt budget ('+attemptsThisController+'/'+limit+')');
+            await pause(Math.min(2000*attemptsThisController,Math.max(0,deadline-Date.now())));
+            continue;
+          }
           e={...e,status:'launching',leaseId,token,launcherFiles:la,launcher:null,endedAt:null,startedAt:Date.now()};sum.results[r.key]=e;persist();
           try {
             hooks.register({id:leaseId,runId,title:r.title,keys:r.keys,pidFile:la.pidf,pid:0,pending:true,sanctionToken:la.sanctionToken,reservedAt:Date.now()});
