@@ -121,7 +121,7 @@ function acquireCoordinatorMutex(dir,owner,waitMs,script){
   const ready=fs.existsSync(ticket+'.ready');
   const release=()=>{try{fs.writeFileSync(ticket+'.release','release');}catch{}};
   const discard=()=>{for(const suffix of ['.ready','.release','.status'])try{fs.rmSync(ticket+suffix,{force:true});}catch{}};
-  return {ready,release,discard,reason:ready?'':reason};
+  return {ready,release,discard,reason:ready?'':reason,ticket,readStatus};
 }
 export function atomicJson(file,value){
   fs.mkdirSync(path.dirname(file),{recursive:true});
@@ -180,11 +180,12 @@ export function transaction(dir,fn,snapshot=processSnapshot,options={}) {
   // A kernel mutex is released by Windows on a crash. Unlike a stale lockfile,
   // it cannot be reclaimed by two contenders or strand an empty lock forever.
   let unlock=()=>{};
+  // 2026-10-26（H2）：held 必须在 if 块外声明 —— 提交前的状态票重检在 try 里用它。
+  let held=null;
   if(snapshot===processSnapshot) {
     sweepStaleMutexTickets(dir);
     const waitMs=mutexWaitMs(),tries=mutexRetries();
     const script=fileURLToPath(new URL('./lease-lock.ps1',import.meta.url));
-    let held=null;
     for(let attempt=0;;attempt++) {
       const candidate=acquireCoordinatorMutex(dir,owner,waitMs,script);
       if(candidate.ready){held=candidate;break;}
@@ -222,6 +223,11 @@ export function transaction(dir,fn,snapshot=processSnapshot,options={}) {
       if(l.pidFile){let pid=0;try{pid=Number(fs.readFileSync(l.pidFile,'utf8').replace(/^\uFEFF/,''));}catch{};const found=launcherIdentity(pid,l.pidFile,processes);if(found){l.launcher=found;return true;}}
       return sameProcess(l.owner,processes.get(l.owner.ProcessId))||Date.now()-(l.reservedAt||0)<90000;
     });
+    // 2026-10-26（H2）：持锁期间 PS 侧到 hold-ceiling 会主动 ReleaseMutex 并写 <ticket>.status，
+    // 而 JS 侧原先零重检 —— 两个进程可能同时在临界区，原子写互相覆盖（无声丢租约、同 run 双 controller）。
+    // 落盘前同步读一次状态票（一次小文件读，不引入新的进程快照），非空即放弃本次写入并响亮失败，
+    // 与 lease-lock.ps1:33-39 对 abandoned-mutex 的 fail-closed 处理同构。
+    if(held){const early=held.readStatus();if(early)throw new Error('Coordinator mutex lost before commit ('+early+'); refusing to write the ledger — retry the operation');}
     const result=fn(leases,owner,processes);atomicJson(file,leases);return result;
   }finally{unlock();}
 }

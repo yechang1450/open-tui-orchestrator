@@ -76,7 +76,7 @@ An unknown host, missing CLI or invalid explicit path fails with a diagnostic.
 
 ## Validation status
 
-The current generic core is 0.9.24-1, with 565/565 offline tests passing. In the repository, the release judge is `node scripts/gate.mjs --all` — L1 offline suite, L2 host resolution plus a must-fail canary (the criteria themselves can still go red), L3 clean unknown-run failure, L4 version / seal / docs / suite-total cross-check. Every core or runtime change requires a fresh `release-integrity --seal`. Details and evidence: [docs/release-policy.md](https://github.com/yechang1450/open-tui-orchestrator/blob/master/docs/release-policy.md).
+The current generic core is 0.9.24-1, with 567/567 offline tests passing. In the repository, the release judge is `node scripts/gate.mjs --all` — L1 offline suite, L2 host resolution plus a must-fail canary (the criteria themselves can still go red), L3 clean unknown-run failure, L4 version / seal / docs / suite-total cross-check. Every core or runtime change requires a fresh `release-integrity --seal`. Details and evidence: [docs/release-policy.md](https://github.com/yechang1450/open-tui-orchestrator/blob/master/docs/release-policy.md).
 
 Known limitations and open issues — security Low items, adapter boundaries, verification gaps — are collected with in-repo sources in [docs/known-issues.md](https://github.com/yechang1450/open-tui-orchestrator/blob/master/docs/known-issues.md).
 
