@@ -2450,7 +2450,12 @@ export async function main() {
     const summaryPath = path.join(TMP, "win-summary.json");
     let summary = {};
     try { summary = JSON.parse(readFileSync(summaryPath, "utf8")); } catch {}
-    summary["spawn-" + rid] = { title, status: res.done ? "done" : "timeout", exitCode: res.exitCode ?? null, result: (res.text || "(no result captured)").trim().slice(0, 2000) };
+    // 2026-10-26：`res.done` 只表示「launcher 已结束」，不表示「任务成功」—— waitTaskComplete 在
+    // launcher 非 0 退出、从未抓到 task_complete 时同样返回 done:true。原来写 status:"done" 会让按
+    // status 过滤的调用方把失败算成完成（引擎其它地方一律用 verified/failed/awaiting-verification）。
+    // 改为三态：没结束=timeout；结束了但退出码非 0=failed；其余才是 done。
+    const outcome = !res.done ? "timeout" : (Number.isInteger(res.exitCode) && res.exitCode !== 0 ? "failed" : "done");
+    summary["spawn-" + rid] = { title, status: outcome, exitCode: res.exitCode ?? null, result: (res.text || "(no result captured)").trim().slice(0, 2000) };
     writeFileSync(summaryPath, JSON.stringify(summary, null, 2), "utf8");
     console.log("=== spawn result ===");
     console.log("done=" + res.done);
