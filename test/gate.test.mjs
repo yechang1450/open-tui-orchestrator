@@ -117,9 +117,10 @@ test('gate: the L1 suite budget stays tunable instead of hardcoded to 900s', asy
   const source = fs.readFileSync(path.join(root, 'scripts', 'gate.mjs'), 'utf8');
   assert.match(source, /ORCH_GATE_SUITE_TIMEOUT_MS/, 'gate must expose a tunable suite budget');
   assert.match(source, /Math\.max\(60000,/, 'the suite budget keeps its 60s floor');
-  // 2026-10-25：默认预算必须覆盖一次完整套件。并发 2 下实测 18–21 分钟；旧的 15 分钟线一到，
-  // spawnSync 就杀子进程，spec/TAP 双断流、零汇总 —— 与真实崩溃无法区分（L1 missing + L4 undefined）。
-  assert.match(source, /\|\| 2400000\)/, 'the default budget must cover an 18-21 minute suite');
+  // 2026-10-25：默认预算必须覆盖一次完整套件。空闲机 15.6–21 分钟；忙机（CPU 100%、内存 5.7 GiB）
+  // 实测 40 分钟只跑到 511/559（4.7 s/用例 ⇒ 完整约 44 分钟）。预算一到 spawnSync 就杀子进程，
+  // spec/TAP 双断流、零汇总 —— 与真实崩溃无法区分（L1 missing + L4 undefined）。
+  assert.match(source, /\|\| 3600000\)/, 'the default budget must cover a busy-machine run (≈44 min measured)');
 });
 
 // 跳过项必须具名且正当（2026-10-06 用户拍板方案 A）：宿主 CLI 未安装的 skip 放行，

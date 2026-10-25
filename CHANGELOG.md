@@ -12,10 +12,13 @@
   - **F4** `terminalFailure` 无条件覆写，可能把刚被证据改判成 verified 的块压回 failed。加 `&&e.status!=='verified'` 守卫。
   - **F7** `resume` 不装 guardian（原注释假设「原 guardian 还在看」）——若它已 exhausted 或被杀，账本永停在「无 finishedAt」，`--verify-run` 永远报 `Run is not finalized`。改为 resume 也调 `ensureRunGuardian`（它自带 `already` 幂等短路，原 guardian 在时是 no-op）。
 - **规划失败不再烧掉 runId（F8）**：原顺序 `mkdir → manifest → loadChecks → plan` 在 plan 抛错时留下「有 manifest.json、无 summary.json」的目录 ⇒ 同 runId 重跑报 `Run ID already exists`、`--verify-run` 报 `Run not found`，runId 被烧掉。改为 `loadChecks → plan → ledgerPlan → mkdir → manifest`。
+- **launcher 构造失败计入 attempt 预算（F5，翻案）**：原写法 `catch{release; throw}` 绕过 attempt/transient 预算——整块判死，调用方收到「失败」却不知道本来可重试。现在把错误写进该 attempt（`error` 字段）、释放租约、按既有预算重试；耗尽才 `mark(failed)`（带 `endedAt`）。不递减 attempt 计数，避免 launcher 每次必抛时死循环。
+- **started 证据新鲜度绑定（审查 B 第 3 条）**：`checkpoint` 停在 `started` 时，验收通过很可能来自上次尝试的旧产物。现在要求 file 类产物 mtime 晚于 `checkpoint.startedAt`，否则降级 `needs-reconciliation`；拿不到 `startedAt` 不降级（宁可漏判不误伤）。新增导出 `staleEvidence()`。
+- **`cp=missing + acc=P → failed` 语义钉住（审查 B 第 1 条）**：行为不变（无 checkpoint 无法证明做过），用负向验证锁死，防止以后被顺手放松。
 - **run 级 claim 释放失败不再覆盖结论（F9）**：`finally{await releaseRun(...)}` 抛错会把已 `success=true` 的 run 变成 reject（调用方按 `result.success` 定退出码）。改为 try/catch + warn —— claim 自身带 pid/bootId 自动回收，释放失败只是多走一道 stale 回收。
 - **门禁 L1 计数补 `cancelled` 的落地**：见上条（`measuredSuiteTotal` 四项相加）。
-- 判据：`test/recovery.test.mjs` **14/14**；recovery + recovery-runtime + orchestrator 三文件 **97/98**（唯一红是 `runtime: watchdog self-close reaps codex…`，单跑 1/1 绿，属并发负载下 CIM 快照竞态）；`gate.test.mjs` **9/9**；`force-window-identity` **4/4**（连续 4 轮）。全量门禁（90 文件）待机器空闲后复跑 —— 满载下 L1 仍会因超时红，属环境不属回归。
-- **未修（审查列出、判定不动）**：F5 launcher 创建异常绕过 attempt/transient 预算（要改控制流，且当前是安全失败）、审查 B 的判定矩阵第 1/3 条（cp=missing+acc=P→failed、cp=started+acc=P→verified，都属产品语义，需 owner 决策）、其余 8 条矩阵疑点（记录在 `docs`/`temp` 的审查报告里）。
+- 判据（2026-10-25 第二轮）：`test/recovery.test.mjs` **16/16**；`gate.test.mjs` **12/12**；负向验证 `temp/e2e-negative-20261025/negative.mjs` **5/5**；端到端真派发 `e2e-fixcheck-20261025` **2/2 verified**。全量门禁数字以 `docs/release-policy.md` 为准（559/559，并发 2、60 分钟预算）。
+- **判定不动（第二轮后）**：审查 B 其余 8 条矩阵疑点（逐条记在 `temp/otui-checkup-20261024/CODE-REVIEW-20261025.md`）—— 多为设计语义或改动面大于收益。**F5 与审查 B 第 1/3 条已在第二轮处理**（见上三条）。
 
 ## 26.10.19-1 — 自改判定精度修复（独立实测轮）
 
