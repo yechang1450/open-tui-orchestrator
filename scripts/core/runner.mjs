@@ -343,6 +343,22 @@ function reconcileWithEvidence(sum,checks,workspace){
 // verified 的事故就是这条不变量被漏掉的后果）。抽成导出的纯函数，让这条不变量有直接回归测试。
 export function finalizeRunLedger(sum,checks,workspace){
   try{reconcileWithEvidence(sum,checks,workspace);}catch{}
+  // v4 自我观测（2026-10-26）：**这里是唯一的 run 收尾漏斗**（verifyRun 只在 --verify-run 时跑）。
+  // 只在 ORCH_TUNE=1 时写；默认关时一个新键都不加。两个字段只记录事实、不参与任何判定。
+  if (process.env.ORCH_TUNE) {
+    try {
+      if (Number.isFinite(RUN_LAST_ESTIMATE_MB) && RUN_PEAK_MB > 0) {
+        sum.memFit = {
+          estimatedMb: Math.round(RUN_LAST_ESTIMATE_MB),
+          observedPeakMb: Math.round(RUN_PEAK_MB),
+          errorPct: Math.round(((RUN_PEAK_MB - RUN_LAST_ESTIMATE_MB) / RUN_LAST_ESTIMATE_MB) * 100),
+        };
+      }
+      if (RUN_MEM_SAMPLES.length) {
+        sum.memPressure = {samples: RUN_MEM_SAMPLES.length, minFreeMb: Math.min(...RUN_MEM_SAMPLES)};
+      }
+    } catch { /* 观测失败绝不影响 run 结论 */ }
+  }
   sum.finishedAt=Date.now();sum.success=summaryComplete(sum,true);return sum;
 }
 export function verifyRun(workspace,runId,acceptanceFile,stateDir) {
@@ -362,23 +378,6 @@ export function verifyRun(workspace,runId,acceptanceFile,stateDir) {
       if(keyDiff?.missing.length)console.warn('[orchestrator] acceptance has no checks for task(s): '+keyDiff.missing.join(', ')+'；这些任务将停在 awaiting-verification');
     }
     collectVerification(sum,checks,workspace);
-    // v4 自我观测（2026-10-26）：只在 ORCH_TUNE=1 时写，默认关时一个新键都不加（验收 #1）。
-    // 这两个字段只记录事实，不参与任何判定：memFit 回答「估得准不准」（这个从没人问过），
-    // memPressure 回答「运行中内存到底掉到多少」（原来只有起止两行）。
-    if (process.env.ORCH_TUNE) {
-      try {
-        if (Number.isFinite(RUN_LAST_ESTIMATE_MB) && RUN_PEAK_MB > 0) {
-          sum.memFit = {
-            estimatedMb: Math.round(RUN_LAST_ESTIMATE_MB),
-            observedPeakMb: Math.round(RUN_PEAK_MB),
-            errorPct: Math.round(((RUN_PEAK_MB - RUN_LAST_ESTIMATE_MB) / RUN_LAST_ESTIMATE_MB) * 100),
-          };
-        }
-        if (RUN_MEM_SAMPLES.length) {
-          sum.memPressure = {samples: RUN_MEM_SAMPLES.length, minFreeMb: Math.min(...RUN_MEM_SAMPLES)};
-        }
-      } catch { /* 观测失败绝不影响 run 结论 */ }
-    }
     sum.success=summaryComplete(sum,true);atomicJson(file,sum);return sum.success;
   }  finally{releaseRun(sum.coordinator||coordinatorDir(workspace),'run:'+path.resolve(dir).toLowerCase(),claim);}
 }
