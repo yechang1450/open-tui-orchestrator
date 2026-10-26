@@ -104,13 +104,52 @@ export async function main(argv=process.argv.slice(2),hooks={}) {
   let engine=state.engines.at(-1).owner;
   const guardianDeadline=state.createdAt+state.timeoutMs+600000;
   while(now()<guardianDeadline) {
+    // 2026-10-26（P6）：上一轮 resume 的引擎没在 5s 宽限里进快照时，state.engines 里没有它，
+    // engine 仍停在旧死 pid 上 —— 下一轮必然再判 'engine gone' → 再 spawn 一个，两个引擎
+    // 同操作一个 run（账本互覆、同一批任务重复放行），而 maxRestarts 只限次数、不限同时存活数。
+    // 这里按 pid 追它：宽限期内不重复 spawn，确认不到 60s 后才放弃。
+    if(state.pendingEnginePid){
+      const pid=Number(state.pendingEnginePid);
+      let found=null;
+      try{found=snapshot().get(pid)||null;}catch{found=null;}
+      if(found){
+        engine=found;state.engines.push({owner:found,startedAt:Date.now(),by:'guardian'});
+        delete state.pendingEnginePid;delete state.pendingSince;writeState(state);
+        log('[guardian] tracked the previously unconfirmed engine pid='+pid);
+      } else if(now()-Number(state.pendingSince||0)>60000){
+        delete state.pendingEnginePid;delete state.pendingSince;writeState(state);
+        log('[guardian] unconfirmed engine pid='+pid+' never appeared within 60s; dropping it');
+      } else {
+        // 2026-10-26（P6 修正）：宽限期内按 pid 追它，但**预算不能因此延后**。restart 预算已经用完时
+        // 没有任何东西可等 —— 直接按 fail-closed 收口。这一步必须先于 deadline 判：主循环里
+        // deadline 在前是因为「时间到了就该停」，而这里是「我们已经超预算了，pending 只是空转」，
+        // 原样空转 60s 会把本应 exhausted 的用例拖成 deadline（run-guardian.test 的 fail-closed 用例
+        // timeoutMs=60000 正是这个形态）。
+        if(state.restarts>=state.maxRestarts){finish('exhausted',1);return;}
+        if(now()>state.createdAt+state.timeoutMs){finish('deadline',1);return;}
+        await sleep(state.intervalMs);continue;
+      }
+    }
     const sum=load();
     // 三态读法：missing＝引擎还在跑、summary 尚未落盘（正常等待，不是错误）；
     //          broken＝文件在但读不动/解析不了（真错误，必须带原因 fail-closed）。
     if(sum.kind==='broken'){finish('error',2,sum.why);return;}
     if(sum.kind==='ok'&&sum.value&&sum.value.finishedAt){finish('done',0);return;}
     let snap=null;
-    try{snap=snapshot();}catch{/* identity unverifiable: never respawn blind */}
+    // 2026-10-26（P5）：快照失败原先只 catch{} 后 continue —— 满载时 WMI/CIM 持续超时会让守护
+    // 静默空转，而 guardian.json 仍是 watching，用户和 --status 都以为有人看着，直到
+    // createdAt+timeout+10min（默认 6h10m）才 finish('deadline')。连续 N 次取不到身份要 fail-loud：
+    // 落日志 + 状态标 degraded，让 --status 一眼看出「这个守护现在靠不住」。
+    try{snap=snapshot();state.snapshotFails=0;if(state.degraded&&state.degraded.startsWith('identity'))delete state.degraded;}
+    catch(error){
+      state.snapshotFails=(state.snapshotFails||0)+1;
+      if(state.snapshotFails>=3&&!state.degraded){
+        state.degraded='identity unverifiable: '+state.snapshotFails+' consecutive process-snapshot failures ('+String(error&&error.message||error).slice(0,120)+') — the guardian cannot confirm the engine is alive and will never respawn it blind';
+        log('[guardian] DEGRADED: '+state.degraded);
+        writeState(state);
+      }
+      snap=null; /* identity unverifiable: never respawn blind */
+    }
     if(snap===null){await sleep(state.intervalMs);continue;}
     if(sameProcess(engine,snap.get(Number(engine.ProcessId)))){await sleep(state.intervalMs);continue;}
     // Engine is gone but the run is not finalized: abnormal interruption.
@@ -145,8 +184,13 @@ export async function main(argv=process.argv.slice(2),hooks={}) {
     }
     state.restarts++;
     if(identity){state.engines.push({owner:identity,startedAt:Date.now(),by:'guardian'});engine=identity;}
+    else if(child&&child.pid){
+      // 2026-10-26（P6）：没确认到身份就必须把它登记为 pending —— 否则 engine 停在旧死 pid 上，
+      // 下一轮又 spawn 一个，两个引擎同操作一个 run。
+      state.pendingEnginePid=child.pid;state.pendingSince=Date.now();
+    }
     writeState(state);
-    if(!identity){log('[guardian] resumed engine vanished immediately; will re-evaluate');await sleep(state.intervalMs);}
+    if(!identity){log('[guardian] resumed engine pid='+((child&&child.pid)||'?')+' not visible in the snapshot yet; tracking it instead of spawning another');await sleep(state.intervalMs);}
   }
   finish('deadline',1);
 }

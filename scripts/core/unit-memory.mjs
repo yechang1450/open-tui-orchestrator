@@ -74,16 +74,31 @@ export function loadUnitMemory(file) {
 }
 
 // 原子写（tmp → rename），失败不抛（学习数据不值得让运行失败）。
+// 2026-10-26（P8）：原来一次写不成直接 return false 且完全静默 —— 而 renameSync 被并发读或
+// 杀软扫描占住时是 EPERM/EBUSY 这类**瞬态**错误，单次失败就丢掉一整条峰值样本。样本丢了永远到
+// 不了 minSamples，unitMb 就一直停在默认 640MB（同源宿主实测 995/1528MB）⇒ 内存拟合低估 ⇒ 过并发。
+// 现在退避重试 3 次（50/100ms 同步睡），仍失败才落一行 stderr —— 尽力而为但不装死。
+// 刻意不加跨进程锁：这是低价值可再生的学习数据，加锁的延迟代价远大于丢一条样本（minSamples 会随
+// 样本累积自然收敛），而临界区只有毫秒级。
 export function saveUnitMemory(file, store) {
-  try {
-    fs.mkdirSync(path.dirname(file), {recursive: true});
-    const tmp = `${file}.tmp`;
-    fs.writeFileSync(tmp, JSON.stringify(store, null, 2));
-    fs.renameSync(tmp, file);
-    return true;
-  } catch {
-    return false;
+  const tmp = `${file}.tmp-${process.pid}-${Date.now()}`;
+  let lastError = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      fs.mkdirSync(path.dirname(file), {recursive: true});
+      fs.writeFileSync(tmp, JSON.stringify(store, null, 2));
+      fs.renameSync(tmp, file);
+      return true;
+    } catch (error) {
+      lastError = error;
+      if (attempt < 2) {
+        try { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50 * (attempt + 1)); } catch { /* no Atomics on this host */ }
+      }
+    }
   }
+  try { fs.rmSync(tmp, {force: true}); } catch { /* best effort */ }
+  try { process.stderr.write('[unit-memory] save failed after 3 attempts (' + String(lastError && lastError.message || lastError) + '); the peak sample for this run is lost\n'); } catch { /* nothing left */ }
+  return false;
 }
 
 export function percentile(nums, p) {

@@ -118,7 +118,11 @@ export async function waitWithStallWatchdog(hooks,la,session,active,timeoutMs){
   const firstCheckpointMs=rawFirst===undefined?1200000:Math.max(0,Number(rawFirst)||0);
   const base=path.dirname(String(la.rf||la.pidf||'.'));
   const stem=path.basename(String(la.lp||'')).replace(/\.ps1$/,'');
-  const paths=[active.file,la.rf,la.pidf,path.join(base,stem+'.out.log'),path.join(base,stem+'.pty.log')];
+  // 2026-10-26（P4）：.pty.log 不能当进度源 —— ConPTY 每帧重绘都在刷它的 mtime（光标闪烁、
+  // spinner、计时器都算），于是 `now-last>stallMs` 永不成立，10 分钟停滞看门狗对 pty 单元静默失效，
+  // 僵死单元只能一路烧到 45 分钟上限。改用 checkpoints 目录的 mtime：每写一个检查点就新建文件，
+  // 目录 mtime 必然前进，那是真进度。（.out.log 保留 —— 它只记 stdout 行，不是全屏重绘。）
+  const paths=[active.file,la.rf,la.pidf,path.join(base,stem+'.out.log'),path.join(path.dirname(active.file),'checkpoints')];
   if(typeof session==='string')paths.push(session);else if(session&&typeof session==='object'&&session.file)paths.push(session.file);
   const started=Date.now(),baseline=Number(active?.createdAt)||started;let last=progressStamp(paths)||baseline;let iv=null;
   const watchdog=new Promise(resolve=>{iv=setInterval(()=>{const now=Date.now(),s=progressStamp(paths);
@@ -508,7 +512,21 @@ export async function runWindows(request,hooks,options={}) {
             if(!cur||cur.status!=='waiting'||cur.reason!==waitMsg){mark(r,'waiting',waitMsg);console.log(`[queue] ${r.key}: ${waitMsg} — backing off (wait #${waitAttempt+1}); waiting is normal under machine-level contention, not a hang`);}
             await pause(Math.min(waitBackoffMs(waitAttempt++,WAIT_BACKOFF),Math.max(0,deadline-Date.now())));
           }
-          if(!reserved){const mins=Math.round((Date.now()-waitStart)/60000);mark(r,'timeout',`Window capacity/resource wait timed out after ~${mins}min (last reason: ${lastReason||'unknown'}). Another run holds the window slots or the same files; this is a machine-level wait, not a unit failure — retry when the machine is quieter, or reduce concurrent runs.`);return;}
+          // 2026-10-26：区分两种「没拿到槽位」——
+          // (a) 真的等容量等到了 run 级 deadline（waitedMs 明显 > 0，lastReason 有具体原因）
+          // (b) run 级 deadline 在进入等待循环前就已到点（waitedMs ≈ 0，一次 reserve 都没发生）
+          // 旧实现把 (b) 也写成「另一个 run 占着窗口槽位」，把排障引向容量子系统。实测踩过：
+          // caller-driven 用例 120s 预算下 deadline 到点，报 capacity wait ~0min，真因却是预算不够。
+          if(!reserved){
+            const waitedMs=Date.now()-waitStart;
+            if(waitedMs<2000&&!lastReason){
+              mark(r,'timeout','Run deadline exhausted before this unit could reserve a window slot (no reservation was attempted — the run-level deadline had already passed). Raise ORCH_MAX_POLL_MS / ORCH_TIMEOUT_MS if the run legitimately needs more time.');
+            }else{
+              const mins=Math.round(waitedMs/60000);
+              mark(r,'timeout',`Window capacity/resource wait timed out after ~${mins}min (last reason: ${lastReason||'unknown'}). Another run holds the window slots or the same files; this is a machine-level wait, not a unit failure — retry when the machine is quieter, or reduce concurrent runs.`);
+            }
+            return;
+          }
           attemptsThisController++;
           const number=e.attempts.length+1,token=runId+'-'+r.key+'-a'+number+'-'+crypto.randomBytes(6).toString('hex');
           const attemptFile=path.join(dir,'attempts',r.key,String(number),'attempt.json');

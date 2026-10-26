@@ -80,7 +80,17 @@ export async function runUnitPlanner(config, prompt, cwd) {
         if (!oversized && outputBytes > MAX_OUTPUT_BYTES) { oversized = true; try { child.kill(); } catch { /* already gone */ } }
       });
       child.stdout.on('end', () => { raw += decoder.end(); });
-      child.stderr.on('data', (b) => { errorText += b; });
+      // 2026-10-26（P7）：stderr 原来只 `errorText += b` —— 逐块隐式 toString('utf8')，中文诊断
+      // 跨块会被切碎成乱码，而且完全没有上限（8MB 的闸只加在 stdout 上）。planner 大量写 stderr
+      // （node 弃用告警、MCP 日志刷屏）时引擎内存无界增长，最后 OOM；而这段正是唯一回给调用方的失败文本。
+      // 改用独立 StringDecoder + 只保留尾部 64KB（错误信息在末尾，前面多半是刷屏噪音）。
+      const errDecoder = new StringDecoder('utf8');
+      const ERR_MAX_CHARS = 65536;
+      child.stderr.on('data', (b) => {
+        errorText += errDecoder.write(b);
+        if (errorText.length > ERR_MAX_CHARS) errorText = errorText.slice(-ERR_MAX_CHARS);
+      });
+      child.stderr.on('end', () => { errorText += errDecoder.end(); });
       child.on('error', (e) => { if (settled) return; settled = true; clearTimeout(timer); if (killTimer) clearTimeout(killTimer); if (graceTimer) clearTimeout(graceTimer); reject(e); });
       child.on('exit', (code) => {
         exitCode = code;
