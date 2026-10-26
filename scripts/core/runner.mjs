@@ -677,14 +677,28 @@ export async function runWindows(request,hooks,options={}) {
               const cpDir=path.join(path.dirname(active.file),'checkpoints');
               const cpDirMtime=()=>{try{return fs.statSync(cpDir).mtimeMs;}catch{return 0;}};
               const waitStarted=Date.now(),waitBaseline=Number(active?.createdAt)||waitStarted;
+              // 2026-10-26（补真缺口）：这条无 session 路径（--unit-cmd / --plan-file caller-driven）
+              // 原先只有两道闸 —— 首检查点 20 分钟、总超时 45 分钟 —— **没有"无进展"检测**。
+              // 有 session 的路径有 waitWithStallWatchdog（10 分钟无进展即重试），这里补齐同源判据：
+              // 单元写完 started 检查点后卡死（等 stdin、等锁、卡在不可见提示上）不该吊满 45 分钟。
+              // 进度戳用与 waitWithStallWatchdog 同一套证据文件（attempt/result/pid/checkpoints 目录），
+              // 刻意不含 .pty.log —— 屏幕动画会刷活它，那正是 P4 修掉的假进展。
+              const stallPaths=[active.file,la.rf,la.pidf,cpDir];
+              let lastProgress=progressStamp(stallPaths)||waitStarted;
               let stall=null;
               while(Date.now()<endAt){
                 if(fs.existsSync(la.rf)){done=true;exitCode=hooks.exitCode(la.rf);break;}
                 const cps=blockCheckpoints(e,b,sum);
                 const rec=recoveryTasks(tasks,cps,checks,workspace);
                 if(rec.verified.length===tasks.length){done=true;exitCode=0;break;}
+                const nowStamp=progressStamp(stallPaths);
+                if(nowStamp>lastProgress)lastProgress=nowStamp;
                 if(firstCheckpointTimedOut({firstCheckpointMs,now:Date.now(),baseline:waitBaseline,checkpointMtime:cpDirMtime()})){
                   stall='unproductive: no task checkpoint within '+Math.round(firstCheckpointMs/1000)+'s (the unit never started its first task; a hidden TUI can be sitting on a prompt that needs a human); retrying within the attempt budget';
+                  break;
+                }
+                if(Date.now()-lastProgress>UNIT_STALL_MS){
+                  stall='stalled: no unit progress for '+Math.round((Date.now()-lastProgress)/1000)+'s on the no-session wait path (the unit is alive but produced no checkpoint/result/log change); retrying within the attempt budget';
                   break;
                 }
                 await pause(10000);
