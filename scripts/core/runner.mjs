@@ -79,13 +79,16 @@ export function startUnitSampler(la, key, token, rootPid, rootStarted) {
 // 只记录，不参与任何判定。ORCH_TUNE 未设时这些变量恒为初值，finalize 一个字段都不写。
 // 放在模块级是因为 finalizeRunLedger(sum, checks, workspace) 的签名拿不到 execute 的局部状态；
 // 同一进程内 execute 一次只跑一条 run，不存在并发覆盖。
-let RUN_PEAK_MB = 0;
+let RUN_PEAK_MB = 0;       // 单块最大峰值（per-unit 学习表用）
+let RUN_PEAK_SUM_MB = 0;   // 全部单元峰值之和（与 estMb 同口径 —— estMb 是「N 块同时跑的总量」，
+                           // 拿单块 max 去比总量会凭空多报 75% 的误差，v4 首版即栽在这）
 let RUN_MEM_SAMPLES = [];
 let RUN_LAST_ESTIMATE_MB = null;
 let RUN_MEM_IV = null;
 
 export function resetRunObservation() {
   RUN_PEAK_MB = 0;
+  RUN_PEAK_SUM_MB = 0;
   RUN_MEM_SAMPLES = [];
   RUN_LAST_ESTIMATE_MB = null;
   if (RUN_MEM_IV) { try { clearInterval(RUN_MEM_IV); } catch {} RUN_MEM_IV = null; }
@@ -118,6 +121,7 @@ async function recordUnitPeakIfReady(la, key, token, agent, waitForSample, tasks
     if (process.env.ORCH_TUNE && Number.isFinite(peak) && peak > 0) {
       try {
         if (RUN_PEAK_MB < peak) RUN_PEAK_MB = peak;
+        RUN_PEAK_SUM_MB += peak;
         const v2File = unitMemoryStorePathV2(process.env);
         const v2Store = loadUnitMemoryV2(v2File);
         recordUnitPeakV2(v2Store, agent, peak, tasks, process.env.ORCH_SPAWN_MODE || 'headless');
@@ -348,10 +352,13 @@ export function finalizeRunLedger(sum,checks,workspace){
   if (process.env.ORCH_TUNE) {
     try {
       if (Number.isFinite(RUN_LAST_ESTIMATE_MB) && RUN_PEAK_MB > 0) {
+        // 2026-10-26：estMb 是「N 块同时跑的总量」，所以对照必须用所有块峰值之和。
+        // 用单块 max 去比总量会凭空多报 ~75% 的误差（v4 首版实测 -75%/-83%，同口径实为 -30%）。
         sum.memFit = {
           estimatedMb: Math.round(RUN_LAST_ESTIMATE_MB),
-          observedPeakMb: Math.round(RUN_PEAK_MB),
-          errorPct: Math.round(((RUN_PEAK_MB - RUN_LAST_ESTIMATE_MB) / RUN_LAST_ESTIMATE_MB) * 100),
+          observedPeakMb: Math.round(RUN_PEAK_MB),      // 单块最大（per-unit 用途）
+          observedSumMb: Math.round(RUN_PEAK_SUM_MB),   // 全部块之和（与 estimatedMb 同口径）
+          errorPct: Math.round(((RUN_PEAK_SUM_MB - RUN_LAST_ESTIMATE_MB) / RUN_LAST_ESTIMATE_MB) * 100),
         };
       }
       if (RUN_MEM_SAMPLES.length) {
