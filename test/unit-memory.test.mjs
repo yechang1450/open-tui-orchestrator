@@ -9,6 +9,7 @@ import path from 'node:path';
 import {
   MEM_DEFAULTS, memConfig, emptyStore, loadUnitMemory, saveUnitMemory, percentile,
   recordUnitPeak, unitEstimateMb, admitCount, fitBlocks, describeFit,
+  unitMemoryStorePathV2, loadUnitMemoryV2, recordUnitPeakV2,
 } from '../scripts/core/unit-memory.mjs';
 
 const blk = (title, tasks = 1, dependsOn = [], hints = []) => ({
@@ -175,4 +176,58 @@ test('fit: the default floor of 1000MB is reported verbatim in the log line', ()
   const cfg = memConfig({});
   const r = fitBlocks([blk('A'), blk('B'), blk('C')], 2000, 100, cfg);
   assert.match(describeFit(r), /floorMb=1000 /);
+});
+
+// ===== v4 自我观测（2026-10-26）=====
+// 守「只记录、不消费」：v2 表能读写、畸形样本被拒、旧表一字节不动、路径从 v1 派生。
+
+test('v4: the v2 observation store round-trips through save/load', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'memv2-'));
+  const file = path.join(dir, 'unit-memory-v2.json');
+  let store = loadUnitMemoryV2(file);
+  assert.equal(store.schema, 2);
+  assert.deepEqual(store.agents, {});
+  store = recordUnitPeakV2(store, 'unit-a', 512.4, 3, 'headless');
+  store = recordUnitPeakV2(store, 'unit-a', 700, null, 'window');
+  saveUnitMemory(file, store);
+  const back = loadUnitMemoryV2(file);
+  const peaks = back.agents['unit-a'].peaks;
+  assert.equal(peaks.length, 2);
+  assert.deepEqual(peaks.map(p => p.mb), [512, 700]);
+  assert.deepEqual(peaks.map(p => p.tasks), [3, null]);
+  assert.deepEqual(peaks.map(p => p.mode), ['headless', 'window']);
+  assert.ok(peaks.every(p => Number.isFinite(p.at)));
+});
+
+test('v4: the v2 store rejects malformed samples instead of trusting them', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'memv2bad-'));
+  const file = path.join(dir, 'unit-memory-v2.json');
+  fs.writeFileSync(file, JSON.stringify({schema: 2, agents: {
+    good: {peaks: [{mb: 100, tasks: 1, mode: 'pty', at: 1}]},
+    bad:  {peaks: [{mb: 'x', at: 1}, {mb: -5, at: 1}, {mb: 200}, null, 42]},
+  }}));
+  const store = loadUnitMemoryV2(file);
+  assert.equal(store.agents.good.peaks.length, 1);
+  assert.equal(store.agents.bad, undefined, '整行被过滤（200 缺 at、42 不是对象）');
+});
+
+test('v4: recording into the v2 store never touches the legacy v1 file', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'memv2iso-'));
+  const v1 = path.join(dir, 'unit-memory.json');
+  const v2 = path.join(dir, 'unit-memory-v2.json');
+  saveUnitMemory(v1, {schema: 1, agents: {unit: {peaks: [111, 222]}}});
+  const before = fs.readFileSync(v1, 'utf8');
+  let store = loadUnitMemoryV2(v2);
+  store = recordUnitPeakV2(store, 'unit', 999, 2, 'headless');
+  saveUnitMemory(v2, store);
+  assert.equal(fs.readFileSync(v1, 'utf8'), before, 'v1 表必须一字节不动');
+  assert.equal(loadUnitMemory(v1).agents.unit.peaks.length, 2);
+  assert.equal(loadUnitMemoryV2(v2).agents.unit.peaks.length, 1);
+});
+
+test('v4: unitMemoryStorePathV2 derives from ORCH_UNIT_MEM_STORE (test isolation survives)', () => {
+  const override = path.join(os.tmpdir(), 'somewhere', 'custom.json');
+  const derived = unitMemoryStorePathV2({ORCH_UNIT_MEM_STORE: override});
+  assert.equal(derived, path.join(path.dirname(override), 'unit-memory-v2.json'),
+    'v2 表必须与 v1 同目录 —— 否则 boundaries/caller-driven/cli-surface 三处隔离失效');
 });

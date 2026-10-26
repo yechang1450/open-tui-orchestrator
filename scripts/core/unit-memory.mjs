@@ -108,6 +108,60 @@ export function percentile(nums, p) {
   return list[idx];
 }
 
+// ===== 自我观测（v4 / 2026-10-26）=====
+// 设计边界（三轮审核后收窄）：这里**只记录，不消费**。
+// - 不改 unitEstimateMb 口径（现有 236 条样本里带 tasks 的有 0 条，归一化首日全部回退默认值，收益为 0）
+// - 不改 admitCount 语义（它是「每窗口」的量；改成「每任务」会让 plannerBlockCeiling 从 7 变 35，
+//   并发准入直接放开过度）
+// - 不改 blockGrowth（同宿主 spread 实测 8.3x/9.2x，g=0.15 最多只能解释 2.65x ⇒ 主因是运行载体
+//   不是题数，必须靠 mode 字段先分层，而不是先回归）
+// 目的：让「按 tasks × mode 分层统计」这条假设**可被验证**——先攒 30 条带 tasks 且覆盖 ≥2 种 mode
+// 的样本，再谈算法。模板：unitEstimateMb 的注释与判据保持原样。
+const MEM_STORE_SCHEMA_V2 = 2;
+
+// v2 表路径必须从 ORCH_UNIT_MEM_STORE **派生**，不能另起环境变量。
+// 理由：boundaries.test:37 / caller-driven.test:76 / cli-surface.test:36 三处靠 ORCH_UNIT_MEM_STORE
+// 做测试隔离；另起变量会让 v2 表落到机器级共用位置，测试互相污染（现表里已混入
+// fakeunit / drillunit / fakeprint 三个测试宿主的样本）。
+export function unitMemoryStorePathV2(env = process.env) {
+  return path.join(path.dirname(unitMemoryStorePath(env)), 'unit-memory-v2.json');
+}
+
+function emptyStoreV2() { return {schema: MEM_STORE_SCHEMA_V2, agents: {}}; }
+
+export function loadUnitMemoryV2(file) {
+  try {
+    const raw = JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, ''));
+    if (!raw || raw.schema !== MEM_STORE_SCHEMA_V2 || !raw.agents || typeof raw.agents !== 'object') return emptyStoreV2();
+    const agents = {};
+    for (const [id, row] of Object.entries(raw.agents)) {
+      // 只留形状正确的样本：mb 必须正数、at 必须有限。tasks/mode 允许 null/unknown（观测期容忍）。
+      const peaks = Array.isArray(row?.peaks) ? row.peaks.filter(p =>
+        p && Number.isFinite(p.mb) && p.mb > 0 && Number.isFinite(p.at)
+      ) : [];
+      if (peaks.length) agents[id] = {peaks};
+    }
+    return {schema: MEM_STORE_SCHEMA_V2, agents};
+  } catch { return emptyStoreV2(); }
+}
+
+// 只写不读。mode 是关键维度：审核实测同宿主内 spread 8.3x/9.2x，载体（window/pty/headless）
+// 差异远大于题数差异，不记 mode 就没法分层。
+export function recordUnitPeakV2(store, agent, peakMb, tasks, mode) {
+  const key = String(agent || 'unknown');
+  if (!Number.isFinite(peakMb) || peakMb <= 0) return store;
+  if (!store || store.schema !== MEM_STORE_SCHEMA_V2) return store;
+  const row = store.agents[key] || {peaks: []};
+  row.peaks = [...row.peaks, {
+    mb: Math.round(peakMb),
+    tasks: Number.isInteger(tasks) && tasks >= 1 ? tasks : null,
+    mode: (mode && String(mode)) || 'unknown',
+    at: Date.now(),
+  }].slice(-MEM_DEFAULTS.maxSamples);
+  store.agents[key] = row;
+  return store;
+}
+
 export function recordUnitPeak(store, agent, peakMb) {
   const key = String(agent || 'unknown');
   if (!Number.isFinite(peakMb) || peakMb <= 0) return store;

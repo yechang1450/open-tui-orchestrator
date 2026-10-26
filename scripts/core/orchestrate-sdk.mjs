@@ -2598,7 +2598,7 @@ export async function main() {
       sweep:(stem)=>sweepLeftoverRunWindows(stem),
       guardian:g=>ensureRunGuardian({...g,agent:AGENT.agent,env:process.env}),
       cleanup:la=>{const wsRoot=(()=>{const r=path.resolve(WORKSPACE);return r.endsWith(path.sep)?r:r+path.sep;})();for(const f of [la.lp,la.pf,la.pidf,la.rf,la.pidf+'.self-closed',la.rf+'.self-closed',String(la.lp||'').replace(/\.ps1$/,'.pty.log')])try{const resolved=path.resolve(String(f||''));if(resolved.startsWith(wsRoot))rmSync(resolved,{force:true});}catch{}}
-    },{workspace:WORKSPACE,stateDir:STATE_DIR,capacity,resume,agent:AGENT.agent,unitProfile:AGENT.config.unit||null,modelPlan:MODEL_PLAN,runId:process.env.ORCH_RUN_ID,acceptanceFile:process.env.ORCH_ACCEPTANCE_FILE,timeoutMs:POLL_TIMEOUT_MS,auth:readAuthPrompt(),plan:preflightPlan,spawnMode:SPAWN_MODE,spawnStaggerMs:resolveSpawnStaggerMs(),windowCap:Math.max(0,Number(process.env.ORCH_MAX_WINDOWS||0)||0)||undefined});
+    },{workspace:WORKSPACE,stateDir:STATE_DIR,capacity,resume,agent:AGENT.agent,unitProfile:AGENT.config.unit||null,modelPlan:MODEL_PLAN,runId:process.env.ORCH_RUN_ID,acceptanceFile:process.env.ORCH_ACCEPTANCE_FILE,timeoutMs:POLL_TIMEOUT_MS,auth:readAuthPrompt(),plan:preflightPlan,spawnMode:SPAWN_MODE,spawnStaggerMs:resolveSpawnStaggerMs(),windowCap:Math.max(0,Number(process.env.ORCH_MAX_WINDOWS||0)||0)||undefined,estimatedBlockMb:(LAST_MEM_FIT&&Number.isFinite(LAST_MEM_FIT.estMb))?LAST_MEM_FIT.estMb:undefined});
     // 收窗补丁（2026-09-15/0.9.15）：run 结束后再扫一次——跑完/被杀留下的尸体窗（单元已退出、无活进程引用）
     // 在此关掉，不让用户看到残留面板（pi 电池实测：成功跑完的 pi 窗也不会自动退）。判据同开跑前那次。
     await sweepLeftoverRunWindows();

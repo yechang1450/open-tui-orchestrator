@@ -12,7 +12,7 @@ import {scheduleReady,recoveryTasks,taskPolicy,validateRecoverySummary} from './
 import {readCheckpoints} from './checkpoint.mjs';
 import {boardSignature,boardJson,boardSummaryLine} from './run-board.mjs';
 import {runDirectory} from './runtime-context.mjs';
-import {memConfig, loadUnitMemory, saveUnitMemory, recordUnitPeak, unitMemoryStorePath, unitEstimateMb, estimateBlockMemoryMb} from './unit-memory.mjs';
+import {memConfig, loadUnitMemory, saveUnitMemory, recordUnitPeak, unitMemoryStorePath, unitEstimateMb, estimateBlockMemoryMb, unitMemoryStorePathV2, loadUnitMemoryV2, recordUnitPeakV2} from './unit-memory.mjs';
 import {spawn} from 'node:child_process';
 // 队列退避参数（env 可调，测试提速用）：首等 base、指数 ×1.7、封顶 max（抖动上界 ×1.2）。
 const WAIT_BACKOFF={base:Math.max(50,Number(process.env.ORCH_WAIT_BACKOFF_MS||600)||600),max:0};
@@ -75,13 +75,55 @@ export function startUnitSampler(la, key, token, rootPid, rootStarted) {
     return false;
   }
 }
-async function recordUnitPeakIfReady(la, key, token, agent, waitForSample) {
+// ===== run 级自我观测（v4 / 2026-10-26）=====
+// 只记录，不参与任何判定。ORCH_TUNE 未设时这些变量恒为初值，finalize 一个字段都不写。
+// 放在模块级是因为 finalizeRunLedger(sum, checks, workspace) 的签名拿不到 execute 的局部状态；
+// 同一进程内 execute 一次只跑一条 run，不存在并发覆盖。
+let RUN_PEAK_MB = 0;
+let RUN_MEM_SAMPLES = [];
+let RUN_LAST_ESTIMATE_MB = null;
+let RUN_MEM_IV = null;
+
+export function resetRunObservation() {
+  RUN_PEAK_MB = 0;
+  RUN_MEM_SAMPLES = [];
+  RUN_LAST_ESTIMATE_MB = null;
+  if (RUN_MEM_IV) { try { clearInterval(RUN_MEM_IV); } catch {} RUN_MEM_IV = null; }
+}
+
+export function startRunObservation() {
+  if (!process.env.ORCH_TUNE) return;
+  resetRunObservation();
+  // 审核点名的坑：不 unref 的 setInterval 会让每个 CLI 测试挂住 6 秒以上。
+  const iv = setInterval(() => {
+    try { RUN_MEM_SAMPLES.push(Math.round(os.freemem() / 1048576)); } catch {}
+  }, 6000);
+  if (iv.unref) iv.unref();
+  RUN_MEM_IV = iv;
+}
+
+export function stopRunObservation() {
+  if (RUN_MEM_IV) { try { clearInterval(RUN_MEM_IV); } catch {} RUN_MEM_IV = null; }
+}
+
+async function recordUnitPeakIfReady(la, key, token, agent, waitForSample, tasks) {
   try {
     if (!la) return;
     const file = unitPeakFile(la, key, token);
     for (let i = 0; waitForSample && i < 10 && !fs.existsSync(file); i += 1) await pause(1000);
     if (!fs.existsSync(file)) { if (waitForSample) console.error('[mem] no peak sample for ' + key + ' (sampler did not finish; markers: ' + file + '.start / .error)'); return; }
     const peak = Number(JSON.parse(fs.readFileSync(file, 'utf8'))?.peakMB);
+    // v4 观测：必须在 rmSync **之前**读到峰值 —— 读过即销，晚一步就永久丢失（这是 v3 审核
+    // 专门点出的缺口）。tasks 来自该块的题数，mode 来自载体；两者都进 v2 表用于将来分层统计。
+    if (process.env.ORCH_TUNE && Number.isFinite(peak) && peak > 0) {
+      try {
+        if (RUN_PEAK_MB < peak) RUN_PEAK_MB = peak;
+        const v2File = unitMemoryStorePathV2(process.env);
+        const v2Store = loadUnitMemoryV2(v2File);
+        recordUnitPeakV2(v2Store, agent, peak, tasks, process.env.ORCH_SPAWN_MODE || 'headless');
+        saveUnitMemory(v2File, v2Store);
+      } catch { /* 观测失败绝不影响 run */ }
+    }
     fs.rmSync(file, {force: true});                        // 读过即销：天然去重，旧样本不会重复入账
     if (!Number.isFinite(peak) || peak <= 0) return;
     const storeFile = unitMemoryStorePath(process.env);
@@ -319,7 +361,25 @@ export function verifyRun(workspace,runId,acceptanceFile,stateDir) {
       if(keyDiff?.unknown.length)throw new Error('Acceptance keys do not match any task id: '+keyDiff.unknown.join(', ')+'（task ids: '+sum.tasks.map(t=>t.id).join(', ')+'）');
       if(keyDiff?.missing.length)console.warn('[orchestrator] acceptance has no checks for task(s): '+keyDiff.missing.join(', ')+'；这些任务将停在 awaiting-verification');
     }
-    collectVerification(sum,checks,workspace);sum.success=summaryComplete(sum,true);atomicJson(file,sum);return sum.success;
+    collectVerification(sum,checks,workspace);
+    // v4 自我观测（2026-10-26）：只在 ORCH_TUNE=1 时写，默认关时一个新键都不加（验收 #1）。
+    // 这两个字段只记录事实，不参与任何判定：memFit 回答「估得准不准」（这个从没人问过），
+    // memPressure 回答「运行中内存到底掉到多少」（原来只有起止两行）。
+    if (process.env.ORCH_TUNE) {
+      try {
+        if (Number.isFinite(RUN_LAST_ESTIMATE_MB) && RUN_PEAK_MB > 0) {
+          sum.memFit = {
+            estimatedMb: Math.round(RUN_LAST_ESTIMATE_MB),
+            observedPeakMb: Math.round(RUN_PEAK_MB),
+            errorPct: Math.round(((RUN_PEAK_MB - RUN_LAST_ESTIMATE_MB) / RUN_LAST_ESTIMATE_MB) * 100),
+          };
+        }
+        if (RUN_MEM_SAMPLES.length) {
+          sum.memPressure = {samples: RUN_MEM_SAMPLES.length, minFreeMb: Math.min(...RUN_MEM_SAMPLES)};
+        }
+      } catch { /* 观测失败绝不影响 run 结论 */ }
+    }
+    sum.success=summaryComplete(sum,true);atomicJson(file,sum);return sum.success;
   }  finally{releaseRun(sum.coordinator||coordinatorDir(workspace),'run:'+path.resolve(dir).toLowerCase(),claim);}
 }
 
@@ -331,6 +391,9 @@ export async function runWindows(request,hooks,options={}) {
   let windowCap=Math.max(1,Math.min(capacity,Number(options.windowCap)||capacity));
   const runId=options.runId||crypto.randomUUID(),dir=runDirectory(workspace,runId,options.stateDir),summaryFile=path.join(dir,'summary.json');
   const deadline=Date.now()+(options.timeoutMs||21600000),coordinator=options.coordinator||coordinatorDir(workspace);
+  // v4 自我观测：ORCH_TUNE 未设时是空操作；采样器已 unref，不会拖住进程退出。
+  startRunObservation();
+  RUN_LAST_ESTIMATE_MB = Number.isFinite(Number(options.estimatedBlockMb)) ? Number(options.estimatedBlockMb) : null;
   const runKey='run:'+dir.toLowerCase(),claim=await coordinate(()=>claimRun(coordinator,runKey),deadline);
   let sum;
   try {
@@ -654,7 +717,7 @@ export async function runWindows(request,hooks,options={}) {
               return;   // 内层 finally 仍会写 endedAt / 按盘上证据重算 / 落盘
             }
             try{await coordinate(()=>release(coordinator,e.leaseId||leaseId),Date.now()+30000);}catch(error){e.leaseReleaseError=String(error?.message??error);}
-            try{await recordUnitPeakIfReady(la, r.key, active?.token, options.agent || sum.agent || 'caller', peakSampled);}catch(error){e.peakRecordError=String(error?.message??error);}
+            try{await recordUnitPeakIfReady(la, r.key, active?.token, options.agent || sum.agent || 'caller', peakSampled, Array.isArray(r.b&&r.b.tasks)?r.b.tasks.length:null);}catch(error){e.peakRecordError=String(error?.message??error);}
             try{hooks.unregister(e.leaseId||leaseId);}catch(error){e.unregisterError=String(error?.message??error);}
             try{if(la)hooks.cleanup(la);}catch(error){e.cleanupError=String(error?.message??error);}
             // 2026-09-19：单元收尾后扫残窗（含"launcher 已死、WT 面板赖着"的僵尸窗）——只扫本单位自己那一扇（stem 过滤），
