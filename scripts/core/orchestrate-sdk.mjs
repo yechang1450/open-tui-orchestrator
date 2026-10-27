@@ -2230,10 +2230,22 @@ function inferTargetKeys(text) {
   const keys = new Set();
   const s = String(text || "");
   const isFileLike = (p) => /[A-Za-z0-9_\-.]+\.[A-Za-z0-9]{1,5}$/.test(p);
+  // 2026-10-27（S22）：只读引用不该算写冲突。
+  // 旧行为：prompt 里出现同一绝对路径就给两块加同一个 file: key ⇒ 它们被判成会互撞、
+  // 静默合并成一块。后果是「越爱写全路径的 Agent 越容易被并」——哪怕那条路径只是
+  // 「参考 /docs/x.md」。实测三条各写不同目录、只是共同参考同一份文档，也会被并成一块。
+  // 判据刻意做窄：只有路径**紧邻**只读动词（前 12 字符内、且动词贴着路径）才排除，
+  // 其余一律当写。宁可偶尔多串一块，也不误开并行 —— 误开是竞态，误串只是慢。
+  const READ_VERB = /(参考|参阅|阅读|查看|参照|依据|读取|读一下|看一下|照着|依|按)\s*[:：]?\s*$/;
+  const addKey = (p, at) => {
+    const before = s.slice(Math.max(0, at - 12), at);
+    if (READ_VERB.test(before)) return;           // 只读引用 ⇒ 不加写锁
+    keys.add("file:" + p);
+  };
   // Windows 绝对盘符路径
   for (const m of s.matchAll(/[A-Za-z]:[\\/][^\s"'`,;)]+/g)) {
     const p = m[0].replace(/[\\/]+$/, "");
-    if (isFileLike(p)) keys.add("file:" + p);
+    if (isFileLike(p)) addKey(p, m.index);
   }
   // Unix 风格绝对路径：仅接受带目录成分的多段路径（≥2 个斜杠），且排除前导字符为字母/数字/冒号的情况——
   // 否则 “project-91/probe.mjs” 这类数字结尾目录会把 “/probe.mjs” 抽成碎片 key：多个任务写同名文件即互相撞 key，
@@ -2242,7 +2254,7 @@ function inferTargetKeys(text) {
     const p = m[0].replace(/[\\/]+$/, "");
     if (!isFileLike(p)) continue;
     if ((p.match(/\//g) || []).length < 2) continue; // 单段 “/file.ext” 视为碎片，不生成冲突 key
-    keys.add("file:" + p);
+    addKey(p, m.index);
   }
   return [...keys];
 }

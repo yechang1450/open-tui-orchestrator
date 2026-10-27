@@ -5,7 +5,7 @@ import {spawnSync} from 'node:child_process';
 import os from 'node:os';
 import {containedBy,findSymlinkComponent,realpathWithMissing} from './path-security.mjs';
 
-export const CORE_VERSION = '0.9.28-1';
+export const CORE_VERSION = '0.9.29-1';
 // 机器可读入口（stdout 只出数据，见 README「机器可读入口 stdout 保持纯数据」）：
 // 这些入口的进度/诊断一律走 stderr，免得调用方 JSON.parse(stdout) 被一行提示打断。
 // 共用一个判据（引擎与网络策略层都按它决定输出流），避免两处各写一份正则各自漂移。
