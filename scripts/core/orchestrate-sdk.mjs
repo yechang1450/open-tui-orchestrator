@@ -452,7 +452,13 @@ function buildBlocksFromTasks(tasks, hints = {}) {
     for (const b of blocks) {
       const text = (b.tasks && b.tasks[0] && b.tasks[0].prompt) || "";
       if (tailKeywords.some((k) => text.includes(k))) {
-        b.dependsOn = Array.from(new Set([...(b.dependsOn || []), ...projTitles]));
+        // 2026-10-27（S17）：projTitles 里可能包含 b 自己 —— 任何一个 proj-* 块，只要它的
+        // prompt 命中尾词（整理/清理/收尾/清爽/保持干净），就会依赖「所有 proj-* 块」，
+        // 而那个集合包含自己 ⇒ levelWaves 抛 FATAL: Self dependency: proj-80。
+        // 实测：同项目三条任务，其中一条写「顺手整理一下文档」⇒ 整个计划直接 FATAL，
+        // 一条常态动词就废掉整次调用。修法：把自己从依赖集合里剔除（自己不需要等自己）。
+        const others = projTitles.filter((t) => t !== b.title);
+        b.dependsOn = Array.from(new Set([...(b.dependsOn || []), ...others]));
       }
     }
   }
@@ -465,21 +471,36 @@ function byProjKeyCount(map) { let n = 0; for (const k in map) n += (map[k] || [
 // 依赖（depends_on）不参与聚类——拆开后由块间 dependsOn 边保住先后顺序。
 function splitProjectGroup(arr, hintKeys) {
   if (!Array.isArray(arr) || arr.length < 2) return [arr];
-  if (arr.some((it) => !Array.isArray(it.conflict_hints) || it.conflict_hints.length === 0)) return [arr];
-  const parent = arr.map((_, i) => i);
+  // 2026-10-27（S13）：以前是「只要有一条没写 conflict_hints 就整组放弃并行」。
+  // 实测后果：3 条任务里 1 条漏写 hints，另外 2 条明明写清楚且资源互不重叠，
+  // 也被一起拖成串行 —— 一条的疏忽让整组失去并行。
+  // 现在把「没写 hints」的单独拎出来：它们自己说不清会碰什么，所以必须串行（单独一簇），
+  // 但不能拖累那些写清楚了、且彼此可证不重叠的任务。
+  const withHints = [];
+  const noHints = [];
+  for (const it of arr) {
+    const h = Array.isArray(it.conflict_hints) ? it.conflict_hints : [];
+    if (h.length > 0) withHints.push(it); else noHints.push(it);
+  }
+  // 写清楚的不到两条 ⇒ 本来就拆不出多块，保持原样（含 noHints，整体串行）
+  if (withHints.length < 2) return [arr];
+  const parent = withHints.map((_, i) => i);
   const find = (i) => { while (parent[i] !== i) { parent[i] = parent[parent[i]]; i = parent[i]; } return i; };
-  const keys = arr.map((it) => hintKeys(it));
-  for (let i = 0; i < arr.length; i++)
-    for (let j = i + 1; j < arr.length; j++)
+  const keys = withHints.map((it) => hintKeys(it));
+  for (let i = 0; i < withHints.length; i++)
+    for (let j = i + 1; j < withHints.length; j++)
       if (keysOverlap(keys[i], keys[j])) { const ri = find(i); if (ri !== find(j)) parent[ri] = find(j); }
   const clusters = new Map();
-  for (let i = 0; i < arr.length; i++) {
+  for (let i = 0; i < withHints.length; i++) {
     const r = find(i);
     if (!clusters.has(r)) clusters.set(r, []);
-    clusters.get(r).push(arr[i]);
+    clusters.get(r).push(withHints[i]);
   }
   const out = [...clusters.values()];
-  return out.length > 1 ? out : [arr];
+  // 没能拆开（全纠缠成一簇）⇒ 保持原样，别凭空造出并行
+  if (out.length <= 1) return [arr];
+  // 拆开了：写清楚的各自成簇并行；没写 hints 的单独一簇（串行，不拖累别人）
+  return noHints.length ? [...out, noHints] : out;
 }
 /**
  * 【兜底】当 LLM 拆块失败/超时且重试耗尽时，把整条请求保留为【一个 linked 块】（严格串行、无并发冲突）。
