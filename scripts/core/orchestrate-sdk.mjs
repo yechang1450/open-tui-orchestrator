@@ -412,9 +412,27 @@ function buildBlocksFromTasks(tasks, hints = {}) {
     blockItems.push([it]);
   }
   if (unkItems.length) {
-    const title = "linked-ambiguous";
-    blocks.push({ type: "linked", title, dependsOn: [], conflictKeys: [], tasks: unkItems.map((it, idx) => ({ id: "t" + (blocks.length + 1) + "-" + (idx + 1), title: it.summary.slice(0, 40), prompt: it.summary })) });
-    blockItems.push(unkItems);
+    // 2026-10-26：无项目号 ≠ 必须串行。
+    // 旧代码把 unkItems 无条件并成一个 linked 块（零判断），结果是：三条任务各写不同目录、
+    // 各自声明互不依赖，只要没写「项目 N」就 100% 变成 1 块，再经单块短路走 inline ——
+    // Agent 以为并行跑了三件事，实际一件都没派发（rc=0）。
+    // unkItems 通常带着冲突提示（目录/文件/关键词），够判断时可证明不重叠，那就能像同项目
+    // 一样按资源聚类成多个独立块。splitProjectGroup 在「任一条没写 hint」时返回单簇，
+    // 保持原有安全语义：说不清就串行，绝不让真会互相踩的任务并行。
+    const unkClusters = splitProjectGroup(unkItems, hintKeys);
+    if (unkClusters.length > 1) {
+      for (const cluster of unkClusters) {
+        const title = "task-" + (blocks.length + 1);
+        const prompt = cluster.map((a) => a.summary).join("；")
+          + "。本块任务已按资源（目录/文件）聚类，与其它块不重叠，只改动本块涉及的文件/资源。";
+        blocks.push({ type: "independent", title, dependsOn: [], conflictKeys: [...new Set(cluster.flatMap(hintKeys))], tasks: [{ id: "t" + (blocks.length + 1), title, prompt }] });
+        blockItems.push(cluster);
+      }
+    } else {
+      const title = "linked-ambiguous";
+      blocks.push({ type: "linked", title, dependsOn: [], conflictKeys: [], tasks: unkItems.map((it, idx) => ({ id: "t" + (blocks.length + 1) + "-" + (idx + 1), title: it.summary.slice(0, 40), prompt: it.summary })) });
+      blockItems.push(unkItems);
+    }
   }
   // 依赖映射：item.depends_on (task id) -> 所在块 title
   for (let i = 0; i < blocks.length; i++) {
@@ -521,7 +539,17 @@ function fitPlanViaMemory(plan) {
 // 它只是让模型别为凑窗口预算而漏任务的**软上限**——真正的压缩由 fitPlanViaMemory 在计划成型后决定；
 // 因此这里永远返回 ≥1 的正整数（0 会让提示词退化成「最多 0 块」这种自相矛盾的指令）。
 export function plannerBlockCeiling() {
-  return Math.max(1, auxAdmissionLimit(0));
+  // 2026-10-26：拆块上限不该由「当前剩余内存」决定 —— 这是个自我实现的预言。
+  // 旧实现走 auxAdmissionLimit（按 free memory 反推准入数），空闲 2GB 时返回 1，
+  // 于是提示词告诉拆块模型「Maximum execution blocks: 1」⇒ 模型真的只拆 1 块
+  // ⇒ windowExecutionPolicy 判 single-block ⇒ inline ⇒ 整个请求一件都没派发（rc=0）。
+  //   因为没内存所以不拆；因为不拆所以不跑。
+  // 拆块反映的是任务的并行结构，不是内存；内存不足由 fitBlocks 事后两两合并，
+  // 那条路径有完整的 memFit 记录和 fit-merged 判词，Agent 能看到真相。
+  // 上限仍尊重 --max-windows（显式钳制），并提供 ORCH_PLANNER_BLOCK_CEILING 覆盖。
+  const cap = Number(process.env.ORCH_PLANNER_BLOCK_CEILING || 0) || 8;
+  const maxWin = Math.max(0, Number(process.env.ORCH_MAX_WINDOWS || 0) || 0);
+  return Math.max(1, maxWin > 0 ? Math.min(cap, maxWin) : cap);
 }
 // 完整规划提示词（定性提示词 + 块数上限）= 送给拆块模型的那一段。
 // 抽成纯函数是为了让「提示词里混进 undefined」这种**自身代码缺陷**在回归里可红：
@@ -1269,9 +1297,29 @@ export function buildWindowWaves(recs, maxByMem) {
 // 窗口触发策略：只有规划中真的存在同一波次的两个或更多可执行块，才打开 TUI 窗。
 // 单块和纯依赖链交回发起对话就地执行，避免为简单/串行任务弹出无意义的窗口。
 // 返回的 windowCount 是同一时刻需要的最大窗口数，不是任务总数；任务总量仍由原始账本保证。
-function windowExecutionPolicy(plan) {
+function windowExecutionPolicy(plan, memFit) {
   const blocks = Array.isArray(plan) ? plan : [];
-  if (blocks.length <= 1) return { mode: 'inline', reason: 'single-block', windowCount: 0 };
+  if (blocks.length <= 1) {
+    // 2026-10-26：单块有两种来源，必须说清是哪一种。
+    // ① 计划本来就只有一块（single-block）；
+    // ② 本来多块，被内存拟合两两合并到只剩一块（fit-merged-N）；
+    // ③ 本来多块，被冲突键并组到只剩一块（merged-N）。
+    // 旧代码一律写 single-block —— 排障时看不出是内存不够干的，Attribute 到错误的方向。
+    const merges = Array.isArray(memFit?.merges) ? memFit.merges : [];
+    const real = merges.filter((m) => Array.isArray(m?.merged) && m.merged.length > 0);
+    if (real.length) {
+      const last = real[real.length - 1];
+      const why = String(last.why || 'memory');
+      return {
+        mode: 'inline',
+        reason: `fit-merged: ${real.length} merge step(s) reduced the plan to one block (last: ${why}); ` +
+                `estMb=${memFit?.estMb} freeMb=${Math.round(Number(memFit?.freeMb))} floorMb=${memFit?.floorMb}. ` +
+                `Free memory was too low to run the blocks in parallel — this is NOT a single-block request.`,
+        windowCount: 0,
+      };
+    }
+    return { mode: 'inline', reason: 'single-block', windowCount: 0 };
+  }
   const recs = blocks.map((b, i) => ({
     key: 'B' + (i + 1),
     title: b?.title || 'block-' + (i + 1),
@@ -2577,7 +2625,7 @@ export async function main() {
     let preflightPlan;
     if(!resume){
       preflightPlan=PLAN_FILE?fitPlanViaMemory(ledgerEffectivePlan(request,planFromFile(request,loadPlanFile(PLAN_FILE),Number.MAX_SAFE_INTEGER),Number.MAX_SAFE_INTEGER)).plan:await decomposeSafely(request);
-      const policy=windowExecutionPolicy(preflightPlan);
+      const policy=windowExecutionPolicy(preflightPlan,LAST_MEM_FIT);
       if(policy.mode==='inline'&&!FORCE_EXECUTE){
         console.log(JSON.stringify({mode:'inline',reason:policy.reason,capacity:preflightPlan.length,memFit:LAST_MEM_FIT,env:inlineEnvJson({capacity:preflightPlan.length}),request,tasks:requestTasks(request),blocks:preflightPlan.map(b=>({title:b.title,type:b.type,dependsOn:b.dependsOn||[],tasks:b.tasks||[]})),next:'在发起对话直接执行原始请求；不要再次调用 --run-windows'}));
         return;
