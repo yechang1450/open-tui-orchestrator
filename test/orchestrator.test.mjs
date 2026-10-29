@@ -1379,7 +1379,7 @@ test('isOrchestratorSelfMod: 通用化识别自引用(编排/调度/TUI窗/源�
 
 test('isOrchestratorSelfMod: 紧邻窗口判定——审计语料不误拦、OTUI 自改不漏拦（2026-10-18 实测报告 §4.1）', () => {
   // 误拦回归（报告语料：否定句 + 路径片段 + 远距离词不得命中）
-  assert.equal(isOrchestratorSelfMod('检查 D:/workspace/build/80 目录的残留文件，禁止修改任何文件，禁止调用编排器，只做只读审计'), false, '审计语料（中文）不误拦');
+  assert.equal(isOrchestratorSelfMod('检查 C:/Users/yecha/workspace/build/80 目录的残留文件，禁止修改任何文件，禁止调用编排器，只做只读审计'), false, '审计语料（中文）不误拦');
   assert.equal(isOrchestratorSelfMod("audit build/80 leftovers, do not modify anything, don't call the orchestrator"), false, '审计语料（英文）不误拦');
   assert.equal(isOrchestratorSelfMod('审计 OTUI 仓库的残留文件'), false, 'OTUI+审计不误拦');
   assert.equal(isOrchestratorSelfMod('不要改 OTUI 的代码'), false, '否定语境不误拦');
